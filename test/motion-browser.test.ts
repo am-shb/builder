@@ -1,63 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import http from "node:http";
-import { withChrome } from "./helpers/chrome.ts";
-import type { Page } from "./helpers/chrome.ts";
-import { loadConfig } from "../src/config.ts";
-import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
-import { createApp, tokenMatches } from "../src/app.ts";
-import { createRuntime } from "../src/session/runtime.ts";
-import { createStageChannel } from "../src/stage/channel.ts";
+import { withStage } from "./helpers/stage.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-type Stage = { page: Page; script(steps: unknown[]): Promise<void> };
-
-// Starts the real app, opens the stage page in headless Chrome, and returns a script runner.
-async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) => Promise<void>) {
-  await withChrome(t, async (page) => {
-    const config = loadConfig({
-      RECALL_REGION: "us-west-2", RECALL_API_KEY: "test-key",
-      RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("unit-test-secret").toString("base64"),
-      PUBLIC_API_BASE_URL: "https://agent.example.com/",
-    });
-    const store = openStore(":memory:");
-    const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-1" }, { status: 201 })) as any, sleep: async () => {} });
-    const server = http.createServer();
-    let runtime!: ReturnType<typeof createRuntime>;
-    const channel = createStageChannel(
-      server,
-      (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
-      () => {},
-      (id) => runtime(id).snapshot(),
-    );
-    runtime = createRuntime({ store, channel, log: () => {} });
-    const app = createApp({ config, recall, store, runtime, log: () => {} });
-    server.on("request", app.handler);
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    try {
-      const base = `http://127.0.0.1:${(server.address() as any).port}`;
-      const created = await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ meeting_url: "https://meet.google.com/abc-defg-hij" }) });
-      const { session } = (await created.json()) as any;
-      const stageUrl = new URL(((await (await fetch(`${base}/api/sessions/${session.id}`)).json()) as any).session.stage_url);
-      await page.goto(`${base}${stageUrl.pathname}${stageUrl.search}`);
-      await page.waitFor(`document.querySelector('[data-node-id="home"]')`);
-      await page.eval(`window.__motionLog = []`);
-      const script = async (steps: unknown[]) => {
-        const r = await fetch(`${base}/api/sessions/${session.id}/script`, { method: "POST", body: JSON.stringify({ steps }) });
-        assert.equal(r.status, 200);
-        const body = (await r.json()) as any;
-        for (const res of body.results ?? []) assert.equal(res.ok, true, `script step ${res.index}: ${res.error}`);
-      };
-      await fn({ page, script });
-      assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
-    } finally {
-      server.closeAllConnections();
-      server.close();
-    }
-  });
-}
 
 const text = (id: string, t: string, status = "agreed") => ({ id, type: "Text", props: { text: t }, status, children: [] });
 const add = (parentId: string, node: unknown, index?: number) => (index === undefined ? { op: "add", parentId, node } : { op: "add", parentId, index, node });
@@ -233,12 +178,16 @@ test("frame budget: a burst of 10 focus moments (capped queue) holds the 15fps c
     const steps = Array.from({ length: 10 }, (_, i) => ({ wait: 30, batch: { label: `Added: item ${i + 1}`, by: i % 2 ? "Bo" : "Ada", ops: [
       add("home", text(`item-${i}`, `Item number ${i + 1}`, i % 3 ? "agreed" : "draft")),
     ] } }));
-    await script(steps);
+    // The character animates throughout: building (blocks hop) with a pending countdown ring.
+    const pending = { id: "d1", text: "Dark theme", status: "pending", proposedBy: "Ada", agreedBy: [], pendingSince: Date.now(), affects: [], rejectedOptions: [] };
+    await script([{ mood: "building", doc: { phase: "converge", app: {}, decisions: [pending], openQuestions: [], conflicts: [], nextUp: [] } }, ...steps]);
     await sleep(15_000);
-    const r = await page.eval<{ ticks: number[]; focus: number; played: string[] }>(`(() => {
+    const r = await page.eval<{ ticks: number[]; focus: number; played: string[]; mood: string; hopping: number }>(`(() => {
       const played = window.__motionLog.filter((e) => e.fn === "playFocus").map((e) => e.id);
-      return { ticks: window.__ticks.slice(), focus: played.length, played };
+      const hopping = [...document.querySelectorAll(".bot-block")].filter((b) => b.getAnimations().length > 0).length;
+      return { ticks: window.__ticks.slice(), focus: played.length, played, mood: document.querySelector(".builder").dataset.mood, hopping };
     })()`);
+    assert.deepEqual({ mood: r.mood, hopping: r.hopping }, { mood: "building", hopping: 3 }, "the character animates during the burst");
     const gaps = r.ticks.slice(1).map((v, i) => v - r.ticks[i]).sort((a, b) => a - b);
     const p95 = gaps[Math.floor(gaps.length * 0.95)];
     const max = gaps[gaps.length - 1];
