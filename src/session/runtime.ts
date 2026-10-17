@@ -141,7 +141,10 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
     resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; error?: string } {
       const conflict = doc.conflicts.find((c) => c.id === conflictId);
       const variant = conflict?.variants.find((v) => v.label === winner);
-      if (!conflict || !variant) return { ok: false, error: `no conflict ${conflictId} with variant ${winner}` };
+      if (!conflict || !variant) {
+        log("runtime.resolve_unknown", { session_id: sessionId, conflict_id: conflictId, winner });
+        return { ok: false, error: `no conflict ${conflictId} with variant ${winner}` };
+      }
 
       // An already-resolved conflict is not re-applied.
       let applied: Extract<ReturnType<typeof applyPatchBatch>, { ok: true }> | null = null;

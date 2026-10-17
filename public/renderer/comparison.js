@@ -196,15 +196,21 @@ export function showComparison(container, view) {
 }
 
 /**
- * The room picked `winnerLabel`: its preview expands into the prototype area (FLIP, 500 ms) to
- * the size the prototype shows at, then dissolves (250 ms) into the real prototype underneath,
- * which already has the winner merged. The other options fold away. Resolves once the view is gone.
+ * The room picked `winnerLabel` for conflict `conflictId`: its preview expands into the prototype
+ * area (FLIP, 500 ms) to the size the prototype shows at, then dissolves (250 ms) into the real
+ * prototype underneath, which already has the winner merged. The other options fold away.
+ * Returns a promise that resolves once the view is gone, or null (and touches nothing) when the
+ * comparison shown is not for `conflictId`, e.g. a late resolve for an earlier conflict.
  */
-export async function resolveComparison(container, winnerLabel) {
+export function resolveComparison(container, conflictId, winnerLabel) {
   const st = shown.get(container);
-  if (!st) return;
+  if (!st || st.view.conflictId !== conflictId) return null;
   const winner = st.options.find((o) => o.label === winnerLabel);
-  if (!winner) return showComparison(container, null);
+  if (!winner) return showComparison(container, null); // the winner was not among the options shown
+  return expandWinner(container, st, winner);
+}
+
+async function expandWinner(container, st, winner) {
   shown.delete(container);
   settle(st);
 
@@ -221,7 +227,7 @@ export async function resolveComparison(container, winnerLabel) {
     fadeOut(st.top, FADE_MS), fadeOut(winner.card, FADE_MS), fadeOut(winner.head, FADE_MS), fadeOut(winner.marks, FADE_MS),
     fadeOut(st.bg, EXPAND_MS), // the panel and dock come back on the right; the blank shows on the left
   ];
-  logMotion({ fn: "resolveComparison", conflictId: st.view.conflictId, winner: winnerLabel, folded: losers.length });
+  logMotion({ fn: "resolveComparison", conflictId: st.view.conflictId, winner: winner.label, folded: losers.length });
   await finished(expand);
   if (!st.el.isConnected) return; // a newer comparison replaced this one mid-flight
   await Promise.all([finished(fadeOut(winner.preview, DISSOLVE_MS)), finished(fadeOut(st.blank, DISSOLVE_MS)), ...others.map(finished)]);

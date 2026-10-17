@@ -114,6 +114,37 @@ test("resolveComparison applies winner batch to main proto and records decision"
   assert.ok(findNode(snap.proto, "home.done"));
 });
 
+test("resolveComparison with an unknown conflict returns ok:false and sends nothing", () => {
+  const store = openStore(":memory:");
+  const s = store.createIntent("77777777-7777-7777-7777-777777777777", "https://meet.google.com/x");
+  const sent: StageEvent[] = [];
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const rt = createRuntime({
+    store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 },
+    log: (msg, fields) => logs.push({ msg, fields }),
+  })(s.id);
+  assert.equal(rt.applyBatch(BASE).ok, true);
+  const two = conflict(THREE.variants.slice(0, 2));
+  rt.setDoc(docWith(two));
+  rt.showComparison(buildComparisonView(baseProto(), two));
+  const before = JSON.stringify(store.getConsensus(s.id));
+  const snapBefore = JSON.stringify(rt.snapshot());
+  sent.length = 0;
+
+  for (const [id, winner] of [["nope", "A"], ["c1", "C"]] as const) {
+    const r = rt.resolveComparison(id, winner);
+    assert.equal(r.ok, false, `${id}/${winner}`);
+    assert.equal(typeof r.error, "string");
+  }
+  assert.deepEqual(sent, [], "no events");
+  assert.equal(JSON.stringify(store.getConsensus(s.id)), before, "nothing persisted");
+  assert.equal(JSON.stringify(rt.snapshot()), snapBefore, "the comparison stays open, the doc unchanged");
+  assert.deepEqual(logs, [
+    { msg: "runtime.resolve_unknown", fields: { session_id: s.id, conflict_id: "nope", winner: "A" } },
+    { msg: "runtime.resolve_unknown", fields: { session_id: s.id, conflict_id: "c1", winner: "C" } },
+  ]);
+});
+
 // Geometry and content of the comparison view as the stage shows it.
 const READ_VIEW = `(() => {
   const r = (el) => { const b = el.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; };
@@ -233,7 +264,6 @@ test("resolving expands the winner into the prototype area, folds the others and
     const ticks = await page.eval<number[]>(`window.__ticks.slice()`);
     const gaps = ticks.slice(1).map((v, i) => v - ticks[i]).sort((a, b) => a - b);
     const p95 = gaps[Math.floor(gaps.length * 0.95)];
-    console.log(`comparison frame budget: ${gaps.length} ticks, p95 ${p95.toFixed(1)}ms, max ${gaps[gaps.length - 1].toFixed(1)}ms`);
     assert.ok(p95 <= 90, `tick interval p95 ${p95}ms`);
   });
 });
@@ -254,5 +284,38 @@ test("a reconnect shows the open comparison; a cleared one folds away and the la
     const r = await page.eval<ViewRead>(READ_VIEW);
     assert.deepEqual([r.panelOpacity, r.dockOpacity, r.placement], ["1", "1", "dock"]);
     assert.equal(await page.eval(`document.querySelectorAll('#proto [data-node-id^="home."]').length`), 3, "the prototype is unchanged");
+  });
+});
+
+test("resolve for a different conflictId leaves the shown comparison and layout untouched", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const view = buildComparisonView(baseProto(), THREE);
+    await script([{ batch: BASE, doc: docWith(THREE) }, { wait: 400, comparison: view }]);
+    await page.waitFor(`document.querySelectorAll("#comparison .c-option").length === 3`);
+    await sleep(600);
+    await page.eval(`window.__motionLog.length = 0`);
+    // A stale resolve for another conflict, straight to the stage.
+    await page.eval(`window.stageEvent({ type: "resolve", conflictId: "other", winner: "B" })`);
+    await sleep(900);
+    const r = await page.eval<ViewRead>(READ_VIEW);
+    assert.deepEqual(r.options.map((o) => o.label), ["A", "B", "C"], "the comparison is still shown");
+    assert.deepEqual([r.panelOpacity, r.dockOpacity, r.placement], ["0", "0", "corner"], "the layout stays in comparison mode");
+    assert.equal(await page.eval(`document.getAnimations().filter((a) => a.effect?.target?.closest?.("#comparison, #panel, #dock")).length`), 0, "nothing animates");
+    assert.deepEqual(await page.eval(`window.__motionLog.map((e) => e.fn)`), []);
+  });
+});
+
+test("resolve with no comparison shown is a no-op", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: BASE, doc: docWith(THREE) }]);
+    await sleep(1500);
+    await page.eval(`window.__motionLog.length = 0`);
+    await page.eval(`window.stageEvent({ type: "resolve", conflictId: "c1", winner: "B" })`);
+    await sleep(600);
+    const r = await page.eval<ViewRead>(READ_VIEW);
+    assert.equal(r.view, null);
+    assert.deepEqual([r.panelOpacity, r.dockOpacity, r.placement], ["1", "1", "dock"]);
+    assert.equal(await page.eval(`document.body.classList.contains("comparing")`), false);
+    assert.deepEqual(await page.eval(`window.__motionLog.map((e) => e.fn)`), []);
   });
 });

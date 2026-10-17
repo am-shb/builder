@@ -499,9 +499,12 @@ function onEvent(ev) {
     case "comparison":
       presentComparison(ev.view);
       break;
-    case "resolve":
-      uncover(resolveComparison(comparisonEl, ev.winner));
+    case "resolve": {
+      // Only for the comparison on screen: a late resolve for another conflict changes nothing.
+      const done = resolveComparison(comparisonEl, ev.conflictId, ev.winner);
+      if (done) uncover(done);
       break;
+    }
     default:
       break; // speech: a later task
   }
