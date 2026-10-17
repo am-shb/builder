@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280, height=720">
+<title>Meet2Build Stage</title>
+<style>
+  /* Rendered by the Recall bot at 1280x720 and screenshared into the meeting.
+     The default bot has 250 millicores and no GPU, and Meet only receives
+     15 fps. So: no animated blur/glow, no gradients, every animated element
+     on its own compositor layer (will-change) so motion never repaints, and
+     large high-contrast text that survives video compression. */
+  :root { --bg:#0f1115; --panel:#171a21; --ink:#f4f6fa; --muted:#b4bccb; --accent:#8fb0ff; --live:#3ddc84;
+          --b1:#ff8a80; --b2:#ffd166; --b3:#5ee6a8; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin:0; width:1280px; height:720px; overflow:hidden; background:var(--bg); color:var(--ink); font:18px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { height:48px; display:flex; align-items:center; gap:10px; padding:0 20px; font-weight:700; font-size:20px; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--live); }
+  header .muted { color:var(--muted); font-weight:400; }
+  #canvas { position:absolute; top:48px; left:20px; right:20px; bottom:132px; border-radius:12px; background:#fff; overflow:hidden; }
+  #canvas iframe { width:100%; height:100%; border:0; background:#fff; }
+
+  /* ---------- waiting state: a little builder bot ---------- */
+  #placeholder { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px;
+                 background:var(--panel); text-align:center; }
+  .buddy, .eye, .bulb, .block, .ring, .mouth, .dots span { will-change:transform, opacity; }
+  .buddy { position:relative; width:150px; height:170px; animation:bob 2.4s ease-in-out infinite; }
+  .antenna { position:absolute; left:73px; top:0; width:4px; height:26px; background:#9fb4ff; border-radius:2px; }
+  .bulb { position:absolute; left:63px; top:-12px; width:24px; height:24px; border-radius:50%; background:var(--b2);
+          animation:glow 1.6s ease-in-out infinite; }
+  .head { position:absolute; top:24px; left:0; width:150px; height:118px; border-radius:38px;
+          background:#7f9dff; border-bottom:8px solid #6283f0; }
+  .face { position:absolute; inset:18px 20px 22px; border-radius:26px; background:#141826; }
+  .eye { position:absolute; top:24px; width:22px; height:30px; border-radius:12px; background:#dce8ff;
+         animation:blink 4.2s infinite; transform-origin:50% 50%; }
+  .eye.l { left:26px; } .eye.r { right:26px; }
+  .cheek { position:absolute; top:58px; width:16px; height:8px; border-radius:50%; background:#ff8fa3; opacity:.55; }
+  .cheek.l { left:14px; } .cheek.r { right:14px; }
+  .mouth { position:absolute; left:50%; top:60px; width:26px; height:12px; margin-left:-13px; border:3px solid #cfe0ff;
+           border-top:0; border-radius:0 0 16px 16px; }
+  .ring { position:absolute; left:50%; top:83px; width:150px; height:150px; margin:-75px 0 0 -75px; border-radius:50%;
+          border:3px solid var(--accent); opacity:0; }
+  .hearing .ring { animation:ring 1.8s ease-out infinite; }
+  .hearing .ring.two { animation-delay:.9s; }
+  .hearing .mouth { animation:talk .5s ease-in-out infinite alternate; }
+  .blocks { display:flex; gap:14px; height:46px; align-items:flex-end; }
+  .block { width:34px; height:34px; border-radius:9px; animation:hop 1.5s ease-in-out infinite; }
+  .block:nth-child(1) { background:var(--b1); }
+  .block:nth-child(2) { background:var(--b2); animation-delay:.18s; }
+  .block:nth-child(3) { background:var(--b3); animation-delay:.36s; }
+  .title { font-size:40px; font-weight:800; letter-spacing:.2px; }
+  .title .dots span { display:inline-block; animation:fade 1.4s infinite; }
+  .title .dots span:nth-child(2) { animation-delay:.2s; }
+  .title .dots span:nth-child(3) { animation-delay:.4s; }
+  .sub { color:var(--muted); margin-top:-12px; font-size:22px; }
+
+  @keyframes bob   { 0%,100% { transform:translateY(0) rotate(-2deg); } 50% { transform:translateY(-10px) rotate(2deg); } }
+  @keyframes glow  { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+  @keyframes blink { 0%,44%,48%,100% { transform:scaleY(1); } 46% { transform:scaleY(.1); } }
+  @keyframes hop   { 0%,100% { transform:translateY(0) rotate(0); } 35% { transform:translateY(-16px) rotate(-8deg); } 60% { transform:translateY(0) rotate(0); } }
+  @keyframes fade  { 0%,100% { opacity:.2; } 50% { opacity:1; } }
+  @keyframes ring  { 0% { opacity:.7; transform:scale(.85); } 100% { opacity:0; transform:scale(1.6); } }
+  @keyframes talk  { from { transform:scaleY(.6); } to { transform:scaleY(1.3); } }
+
+  footer { position:absolute; left:20px; right:20px; bottom:16px; height:100px; padding:8px 18px; font-size:24px; line-height:1.3; border-radius:12px; background:var(--panel); overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; }
+  .cap { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
+  .cap b { color:var(--accent); margin-right:8px; }
+  .cap.partial { color:var(--muted); }
+</style>
+</head>
+<body>
+<header><span class="dot"></span>Meet2Build Agent <span class="muted">· listening · shared prototype</span></header>
+<div id="canvas">
+  <iframe id="frame" sandbox="allow-scripts allow-forms" title="Prototype"></iframe>
+  <div id="placeholder">
+    <div class="buddy" id="buddy">
+      <div class="ring"></div><div class="ring two"></div>
+      <div class="antenna"></div><div class="bulb"></div>
+      <div class="head"><div class="face">
+        <div class="eye l"></div><div class="eye r"></div>
+        <div class="cheek l"></div><div class="cheek r"></div>
+        <div class="mouth"></div>
+      </div></div>
+    </div>
+    <div class="blocks"><div class="block"></div><div class="block"></div><div class="block"></div></div>
+    <div class="title">Listening<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>
+    <div class="sub">Describe what you want to build. The prototype will appear here.</div>
+  </div>
+</div>
+<footer id="captions"></footer>
+<script>
+// Polls state instead of using EventSource: tunnels/proxies (e.g. Cloudflare
+// quick tunnels) buffer text/event-stream, which froze the shared screen.
+const statePath = `${location.pathname}/state${location.search}`;
+let lastHtml;
+
+function renderStage(html) {
+  if (html === lastHtml) return;
+  lastHtml = html;
+  document.getElementById("placeholder").hidden = !!html;
+  document.getElementById("frame").srcdoc = html || "";
+}
+
+let lastCaptionKey;
+function renderCaptions(captions, partial) {
+  const key = JSON.stringify([captions, partial]);
+  if (key === lastCaptionKey) return;
+  lastCaptionKey = key;
+  const nodes = captions.map((c) => cap(c.speaker, c.text, false));
+  if (partial && partial.text) nodes.push(cap(partial.speaker, partial.text, true));
+  document.getElementById("captions").replaceChildren(...nodes.slice(-3));
+  document.getElementById("buddy").classList.toggle("hearing", !!(partial && partial.text));
+}
+function cap(speaker, text, partial) {
+  const d = document.createElement("div");
+  d.className = "cap" + (partial ? " partial" : "");
+  const b = document.createElement("b");
+  b.textContent = speaker || "…";
+  d.append(b, document.createTextNode(text || ""));
+  return d;
+}
+
+// Meet only receives 15 fps from the bot, so step every CSS animation on a
+// 15 fps clock instead of letting Chrome composite at 60: ~4x fewer frames on
+// the bot's small CPU, with no visible difference to participants.
+const animStart = performance.now();
+setInterval(() => {
+  const t = performance.now() - animStart;
+  for (const a of document.getAnimations()) {
+    if (a.playState !== "paused") a.pause();
+    a.currentTime = t;
+  }
+}, 1000 / 15);
+
+async function tick() {
+  try {
+    const r = await fetch(statePath, { cache: "no-store" });
+    if (r.ok) {
+      const s = await r.json();
+      renderStage(s.html);
+      renderCaptions(s.captions || [], s.partial);
+    }
+  } catch {}
+  setTimeout(tick, 1000);
+}
+tick();
+</script>
+</body>
+</html>

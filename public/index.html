@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meet2Build Live Agent</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e3e3de; --accent:#1a73e8; --ok:#188038; --bad:#c5221f; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --panel:#1f1f1d; --ink:#ececea; --muted:#9a9a94; --line:#33332f; --accent:#8ab4f8; --ok:#81c995; --bad:#f28b82; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:220px; padding:9px 11px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--ink); font:inherit; }
+  button { padding:9px 14px; border:0; border-radius:7px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .badge { font-size:12px; font-weight:600; padding:3px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); }
+  .badge.live { color:var(--ok); border-color:var(--ok); }
+  .badge.bad { color:var(--bad); border-color:var(--bad); }
+  .error { color:var(--bad); margin-top:8px; white-space:pre-wrap; }
+  #transcript { height:420px; overflow-y:auto; border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
+  .line { padding:4px 0; }
+  .line b { margin-right:6px; }
+  .line.meta { color:var(--muted); font-size:13px; }
+  .line.partial { color:var(--muted); font-style:italic; }
+  .line.bot b { color:var(--accent); }
+  #sessions a { color:var(--accent); cursor:pointer; text-decoration:none; display:block; padding:2px 0; font-size:13px; overflow-wrap:anywhere; }
+  .muted { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Meet2Build Live Agent</h1>
+  <p class="sub">Feasibility test: send a Recall.ai bot into a Google Meet and watch everyone's speech arrive live.</p>
+
+  <section class="panel">
+    <form id="launch">
+      <input type="text" id="meetingUrl" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off" required>
+      <button type="submit" id="launchBtn">Send bot</button>
+    </form>
+    <div id="launchError" class="error" hidden></div>
+    <p class="muted">The bot joins as a visible participant named “Meet2Build Agent” and posts a pinned notice that it is transcribing. Someone in the call may need to admit it.</p>
+  </section>
+
+  <section class="panel" id="sessionPanel" hidden>
+    <div class="row">
+      <div><strong>Session</strong> <span class="muted" id="sessionUrl"></span></div>
+      <span class="badge" id="status">—</span>
+    </div>
+    <div id="statusDetail" class="muted"></div>
+    <div id="transcript"></div>
+    <div class="line partial" id="partial" hidden></div>
+    <form id="chat" style="margin-top:12px">
+      <input type="text" id="chatMsg" maxlength="500" placeholder="Send a chat message into the meeting as the agent" autocomplete="off">
+      <button type="submit">Send</button>
+      <button type="button" class="secondary" id="leaveBtn">Remove bot</button>
+    </form>
+    <div id="chatError" class="error" hidden></div>
+  </section>
+
+  <section class="panel" id="stagePanel" hidden>
+    <div class="row">
+      <strong>Shared screen</strong>
+      <span>
+        <button type="button" id="shareBtn">Start screenshare</button>
+        <button type="button" class="secondary" id="unshareBtn">Stop</button>
+      </span>
+    </div>
+    <p class="muted">The bot screenshares <a id="stageLink" target="_blank" rel="noopener">this stage page</a> into the meeting. Whatever HTML you push here appears there; later, the LLM agent writes to the same endpoint.</p>
+    <textarea id="stageHtml" rows="7" style="width:100%;font:13px/1.4 ui-monospace,monospace;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink)"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="secondary" id="sampleBtn">Load sample prototype</button>
+      <button type="button" id="pushBtn">Push to shared screen</button>
+    </div>
+    <div id="stageError" class="error" hidden></div>
+  </section>
+
+  <section class="panel">
+    <strong>Recent sessions</strong>
+    <div id="sessions" class="muted">None yet.</div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null, source = null;
+
+function setStatus(status, sub) {
+  const el = $("status");
+  el.textContent = status || "—";
+  el.className = "badge" + (/recording|in_call/.test(status || "") ? " live" : /fatal|failed/.test(status || "") ? " bad" : "");
+  $("statusDetail").textContent = sub ? `sub_code: ${sub}` : "";
+}
+
+function addLine(e) {
+  const div = document.createElement("div");
+  if (e.kind === "utterance" || e.kind === "bot_chat" || e.kind === "chat") {
+    div.className = "line" + (e.kind === "bot_chat" ? " bot" : "");
+    const b = document.createElement("b");
+    b.textContent = (e.speaker || "Unknown") + (e.kind === "utterance" ? ":" : " (chat):");
+    div.append(b, document.createTextNode(e.text || ""));
+  } else {
+    div.className = "line meta";
+    div.textContent = `${e.speaker || "Someone"} ${e.kind === "join" ? "joined" : "left"}`;
+  }
+  const t = $("transcript");
+  const stick = t.scrollTop + t.clientHeight >= t.scrollHeight - 30;
+  t.append(div);
+  if (stick) t.scrollTop = t.scrollHeight;
+}
+
+async function openSession(id) {
+  if (source) source.close();
+  const res = await fetch(`/api/sessions/${id}`);
+  const { session } = await res.json();
+  current = session;
+  $("sessionPanel").hidden = false;
+  $("sessionUrl").textContent = session.meeting_url;
+  $("transcript").replaceChildren();
+  $("partial").hidden = true;
+  session.events.forEach(addLine);
+  setStatus(session.state === "create_failed" ? "create_failed" : session.bot_status, session.bot_sub_code || session.error);
+  $("stagePanel").hidden = session.state !== "created";
+  $("stageLink").href = session.stage_url;
+  $("stageHtml").value = session.stage_html || "";
+  if (session.state !== "created") return;
+  source = new EventSource(`/api/sessions/${id}/stream`);
+  source.addEventListener("status", (m) => { const d = JSON.parse(m.data); setStatus(d.status, d.sub_code); });
+  source.addEventListener("event", (m) => { $("partial").hidden = true; addLine(JSON.parse(m.data)); });
+  source.addEventListener("partial", (m) => {
+    const d = JSON.parse(m.data);
+    $("partial").hidden = !d.text;
+    $("partial").textContent = `${d.speaker || "…"}: ${d.text || ""}`;
+  });
+}
+
+async function loadSessions() {
+  const { sessions } = await (await fetch("/api/sessions")).json();
+  const box = $("sessions");
+  if (!sessions.length) return;
+  box.replaceChildren(...sessions.map((s) => {
+    const a = document.createElement("a");
+    a.textContent = `${new Date(s.created_at).toLocaleString()} · ${s.bot_status || s.state} · ${s.meeting_url}`;
+    a.onclick = () => openSession(s.id);
+    return a;
+  }));
+}
+
+$("launch").onsubmit = async (ev) => {
+  ev.preventDefault();
+  $("launchError").hidden = true;
+  $("launchBtn").disabled = true;
+  try {
+    const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meeting_url: $("meetingUrl").value }) });
+    const body = await res.json();
+    if (!res.ok) { $("launchError").textContent = body.error; $("launchError").hidden = false; }
+    if (body.session) await openSession(body.session.id);
+    loadSessions();
+  } finally { $("launchBtn").disabled = false; }
+};
+
+$("chat").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const message = $("chatMsg").value.trim();
+  if (!message || !current) return;
+  $("chatError").hidden = true;
+  const res = await fetch(`/api/sessions/${current.id}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+  if (res.ok) { addLine({ kind: "bot_chat", speaker: "Meet2Build Agent", text: message }); $("chatMsg").value = ""; }
+  else { $("chatError").textContent = (await res.json()).error; $("chatError").hidden = false; }
+};
+
+async function stageCall(path, init) {
+  $("stageError").hidden = true;
+  const res = await fetch(`/api/sessions/${current.id}${path}`, init);
+  if (!res.ok) { $("stageError").textContent = (await res.json()).error; $("stageError").hidden = false; }
+  return res.ok;
+}
+$("shareBtn").onclick = () => current && stageCall("/screenshare", { method: "POST" });
+$("unshareBtn").onclick = () => current && stageCall("/screenshare", { method: "DELETE" });
+$("pushBtn").onclick = () => current && stageCall("/stage", {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ html: $("stageHtml").value }),
+});
+$("sampleBtn").onclick = () => {
+  $("stageHtml").value = `<!doctype html><html><body style="margin:0;font:20px system-ui;background:#f5f7fb;display:flex;align-items:center;justify-content:center;height:100vh">
+<div style="background:#fff;padding:32px 40px;border-radius:16px;box-shadow:0 8px 30px #0001;width:520px">
+  <h2 style="margin:0 0 12px">Team To-Do</h2>
+  <form onsubmit="event.preventDefault();const i=this.t;if(!i.value)return;const li=document.createElement('li');li.textContent=i.value;l.append(li);i.value=''">
+    <input name="t" placeholder="Add a task" style="font:inherit;padding:8px;width:70%"> <button style="font:inherit;padding:8px 14px">Add</button>
+  </form>
+  <ul id="l"><li>Prototype built live on the call</li></ul>
+  <p id="c" style="color:#888;font-size:14px"></p>
+</div>
+<script>let n=0;setInterval(()=>c.textContent='Live for '+(++n)+'s',1000)<\/script></body></html>`;
+};
+
+$("leaveBtn").onclick = async () => {
+  if (!current) return;
+  await fetch(`/api/sessions/${current.id}/leave`, { method: "POST" });
+};
+
+loadSessions();
+</script>
+</body>
+</html>
