@@ -4,11 +4,18 @@
   "private": true,
   "description": "Feasibility test: a Recall.ai bot joins a Google Meet and streams a live, speaker-labelled transcript to this backend.",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/server.ts",
     "smoke": "node src/server.ts --smoke",
     "test": "node --test test/",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
   }
 }

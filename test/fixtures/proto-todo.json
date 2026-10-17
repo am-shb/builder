@@ -1,0 +1,14 @@
+{
+  "currentScreen": "home",
+  "root": {
+    "id": "app", "type": "App", "props": { "title": "Team To-Do" }, "status": "agreed", "children": [
+      { "id": "home", "type": "Screen", "props": { "title": "Tasks" }, "status": "agreed", "children": [
+        { "id": "home.heading", "type": "Heading", "props": { "text": "Team To-Do" }, "status": "agreed", "children": [] },
+        { "id": "home.input", "type": "Input", "props": { "placeholder": "Add a task" }, "status": "agreed", "children": [] },
+        { "id": "home.add", "type": "Button", "props": { "label": "Add" }, "status": "draft", "decisionId": "d1",
+          "on": { "click": [{ "kind": "append", "list": "home.list", "fromInput": "home.input" }] }, "children": [] },
+        { "id": "home.list", "type": "List", "props": {}, "status": "draft", "children": [] }
+      ] }
+    ]
+  }
+}
