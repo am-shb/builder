@@ -187,3 +187,50 @@ test("port drops invalid tool input, unknown tools, and ignores calls after refu
   assert.ok(logs.length >= 4);
   assert.ok(!logs.join("\n").includes("nope"), "tool input must not be logged");
 });
+
+test("truncated tool stream still records the usage seen and drops the partial call", async () => {
+  const events = [
+    toolUseStream({ name: "emit", json: ['{"n":1}'] })[0],
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t0", name: "emit", input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"n":1}' } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t1", name: "emit", input: {} } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"n":' } },
+    // stream ends here: no content_block_stop, message_delta or message_stop
+  ];
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: (async () => sse(events)) as typeof fetch, log: () => {} });
+  const r = await port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
+  assert.deepEqual(r.toolCalls, [{ name: "emit", input: { n: 1 } }]);
+  assert.equal(r.dropped, 1);
+  assert.equal(r.stopReason, null);
+  assert.equal(r.usage.inputTokens, 10);
+  assert.equal(r.usage.cacheReadTokens, 200);
+  assert.equal(r.usage.cacheWriteTokens, 30);
+  assert.ok(r.usage.outputTokens >= 1);
+  // The usage is recorded, not zeroed.
+  const store = openStore(":memory:");
+  await withCostRecording(port, { store, sessionId: "t" }).runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
+  assert.ok(store.sessionCost("t") > 0);
+  store.close();
+});
+
+test("non-stream errors still propagate", async () => {
+  const fail = (async () => new Response(JSON.stringify({ error: { message: "no" } }), { status: 401, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: fail, log: () => {} });
+  await assert.rejects(port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" }), (e: any) => e.status === 401);
+});
+
+test("result reports stopReason and dropped count for invalid calls", async () => {
+  const mk = (events: unknown[]) => createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: (async () => sse(events)) as typeof fetch, log: () => {} });
+  const run = (p: ReturnType<typeof mk>) => p.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
+  const ok = await run(mk(toolUseStream({ name: "emit", json: ['{"n":1}'] })));
+  assert.deepEqual([ok.stopReason, ok.dropped, ok.toolCalls.length], ["tool_use", 0, 1]);
+  const bad = await run(mk(toolUseStream({ name: "emit", json: ['{"n":"x"}'] })));
+  assert.deepEqual([bad.stopReason, bad.dropped, bad.toolCalls.length], ["tool_use", 1, 0]);
+  const unknown = await run(mk(toolUseStream({ name: "nope", json: ['{"n":1}'] })));
+  assert.equal(unknown.dropped, 1);
+  const refused = await run(mk(toolUseStream({ name: "emit", json: ['{"n":1}'], stop: "refusal" })));
+  assert.deepEqual([refused.stopReason, refused.toolCalls.length], ["refusal", 0]);
+  const fake = await createFakePort([[{ name: "a", input: {} }]]).runTools({ loop: "build", ...REQ, tools: [], effort: "medium" });
+  assert.deepEqual([fake.stopReason, fake.dropped], ["tool_use", 0]);
+});

@@ -43,7 +43,9 @@ export type RunToolsRequest = {
   effort: "low" | "medium";
   onToolInputDelta?: (toolName: string, partialJson: string) => void;
 };
-export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number };
+// stopReason is the model's stop_reason (null if the stream was cut off); dropped counts
+// tool calls discarded as unknown, incomplete, unparseable or schema-invalid.
+export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number; stopReason: string | null; dropped: number };
 export type ModelPort = { runTools(req: RunToolsRequest): Promise<RunToolsResult> };
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
@@ -65,7 +67,7 @@ export function createOpenRouterPort(
 
   return {
     async runTools(req) {
-      const started = Date.now();
+      const started0 = Date.now();
       const model = MODELS[req.loop];
       const defs = req.tools as PortTool[];
       const schemas = new Map(defs.map((t) => [t.name, t.schema] as const));
@@ -88,74 +90,89 @@ export function createOpenRouterPort(
         ...(req.loop === "build" ? { fallbacks: BUILD_FALLBACKS.map((m) => ({ model: m })) } : {}),
       };
 
-      const blockNames = new Map<number, string>();
-      let reportedCost: number | undefined;
-      let message: Anthropic.Message;
+      // Everything below is accumulated from raw stream events (not the SDK's final
+      // message) so usage and completed tool calls survive a truncated stream.
+      type Block = { name: string; json: string; closed: boolean };
+      const blocks = new Map<number, Block>();
+      const usage: Usage = zeroUsage();
+      let stopReason: string | null = null;
+      let messageId: string | null = null;
+      let started = false;
+      const take = (n: unknown, into: (v: number) => void) => { if (typeof n === "number") into(n); };
       try {
         const stream = client.messages.stream(body as unknown as Anthropic.MessageStreamParams);
         stream.on("streamEvent", (event) => {
-          const usage = event.type === "message_start" ? event.message.usage : event.type === "message_delta" ? event.usage : undefined;
-          const cost = (usage as { cost?: unknown } | undefined)?.cost;
-          if (typeof cost === "number") reportedCost = cost;
+          started = true;
+          if (event.type === "message_start") messageId = event.message.id;
+          const u = (event.type === "message_start" ? event.message.usage : event.type === "message_delta" ? event.usage : undefined) as
+            | Record<string, unknown> | undefined;
+          if (u) {
+            take(u.input_tokens, (v) => { usage.inputTokens = v; });
+            take(u.output_tokens, (v) => { usage.outputTokens = v; });
+            take(u.cache_read_input_tokens, (v) => { usage.cacheReadTokens = v; });
+            take(u.cache_creation_input_tokens, (v) => { usage.cacheWriteTokens = v; });
+            take(u.cost, (v) => { usage.costUsd = v; });
+          }
+          if (event.type === "message_delta") stopReason = event.delta.stop_reason ?? stopReason;
           if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
-            blockNames.set(event.index, event.content_block.name);
+            blocks.set(event.index, { name: event.content_block.name, json: "", closed: false });
           } else if (event.type === "content_block_delta" && event.delta.type === "input_json_delta") {
-            const name = blockNames.get(event.index);
-            if (name && req.onToolInputDelta) req.onToolInputDelta(name, event.delta.partial_json);
+            const b = blocks.get(event.index);
+            if (b) {
+              b.json += event.delta.partial_json;
+              req.onToolInputDelta?.(b.name, event.delta.partial_json);
+            }
+          } else if (event.type === "content_block_stop") {
+            const b = blocks.get(event.index);
+            if (b) b.closed = true;
           }
         });
-        message = await stream.finalMessage();
+        await stream.done();
       } catch (err) {
-        // Typed API/connection errors propagate; only a malformed tool-input stream is absorbed.
-        if (err instanceof Anthropic.AnthropicError && !(err instanceof Anthropic.APIError) && /JSON/i.test(err.message)) {
-          log("llm_bad_stream_json", { loop: req.loop, model });
-          return { toolCalls: [], usage: zeroUsage(), ms: Date.now() - started };
-        }
-        throw err;
+        // Typed API/connection errors, and anything before the response began, propagate.
+        // A non-API SDK error after events started means the stream ended or broke
+        // mid-way: keep the usage seen (the call was billed) and the completed tool calls.
+        if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
+        log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
       }
 
-      const u = message.usage;
-      const usage: Usage = {
-        inputTokens: u.input_tokens ?? 0,
-        outputTokens: u.output_tokens ?? 0,
-        cacheReadTokens: u.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-        ...(reportedCost === undefined ? {} : { costUsd: reportedCost }),
-      };
-
       const toolCalls: ToolCall[] = [];
-      const stop = message.stop_reason;
-      if (stop === "refusal" || stop === "max_tokens") {
+      let dropped = 0;
+      if (stopReason === "refusal" || stopReason === "max_tokens") {
         // A refusal or truncation can cut a tool input short: never use this turn's tools.
-        log("llm_tools_discarded", { loop: req.loop, model, stop_reason: stop });
+        log("llm_tools_discarded", { loop: req.loop, model, stop_reason: stopReason });
       } else {
-        for (const block of message.content) {
-          if (block.type !== "tool_use") continue;
-          if (!schemas.has(block.name)) {
-            log("llm_tool_dropped", { loop: req.loop, tool: block.name, reason: "unknown_tool" });
+        for (const block of [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b)) {
+          const drop = (reason: string, extra: Record<string, unknown> = {}) => {
+            dropped++;
+            log("llm_tool_dropped", { loop: req.loop, tool: block.name, reason, ...extra });
+          };
+          if (!schemas.has(block.name)) { drop("unknown_tool"); continue; }
+          if (!block.closed) { drop("incomplete_input"); continue; }
+          let input: unknown;
+          try {
+            input = JSON.parse(block.json.trim() === "" ? "{}" : block.json);
+          } catch {
+            drop("invalid_json");
             continue;
           }
           const schema = schemas.get(block.name);
           if (schema) {
-            const parsed = schema.safeParse(block.input);
-            if (!parsed.success) {
-              log("llm_tool_dropped", { loop: req.loop, tool: block.name, reason: "invalid_input", issues: parsed.error.issues.length });
-              continue;
-            }
-            toolCalls.push({ name: block.name, input: parsed.data });
-          } else {
-            toolCalls.push({ name: block.name, input: block.input });
+            const parsed = schema.safeParse(input);
+            if (!parsed.success) { drop("invalid_input", { issues: parsed.error.issues.length }); continue; }
+            input = parsed.data;
           }
+          toolCalls.push({ name: block.name, input });
         }
       }
 
-      const ms = Date.now() - started;
+      const ms = Date.now() - started0;
       log("llm_call", {
-        id: message.id, loop: req.loop, model, stop_reason: stop, tool_calls: toolCalls.length, ms,
+        id: messageId, loop: req.loop, model, stop_reason: stopReason, tool_calls: toolCalls.length, dropped, ms,
         input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
         cache_read_tokens: usage.cacheReadTokens, cache_write_tokens: usage.cacheWriteTokens, cost_usd: usage.costUsd ?? null,
       });
-      return { toolCalls, usage, ms };
+      return { toolCalls, usage, ms, stopReason, dropped };
     },
   };
 }
@@ -168,7 +185,8 @@ export function createFakePort(script: ToolCall[][], usage: Usage = { inputToken
   let call = 0;
   return {
     async runTools() {
-      return { toolCalls: script[call++] ?? [], usage: { ...usage }, ms: 1 };
+      const toolCalls = script[call++] ?? [];
+      return { toolCalls, usage: { ...usage }, ms: 1, stopReason: toolCalls.length ? "tool_use" : "end_turn", dropped: 0 };
     },
   };
 }
