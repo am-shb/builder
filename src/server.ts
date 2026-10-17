@@ -16,6 +16,7 @@ async function main() {
 
   if (existsSync(".env")) process.loadEnvFile(".env");
   const config = loadConfig(process.env);
+  if (!config.agentEnabled) console.warn("OPENROUTER_API_KEY is not set: running listen-only (no agent replies or prototype building).");
   const store = openStore(config.dbPath);
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();

@@ -10,6 +10,11 @@ export type Config = {
   dbPath: string;
   // Larger bot for smoother Output Media (costs more per hour); null = plain web bot.
   botVariant: "web_4_core" | "web_gpu" | null;
+  // OpenRouter key for all model access (LLM + TTS). Absent = listen-only.
+  openrouterApiKey: string | null;
+  agentEnabled: boolean;
+  // ElevenLabs voice id from the elevenlabs/eleven-v4-turbo model page.
+  ttsVoice: string | null;
 };
 
 const REGIONS = new Set(["us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1"]);
@@ -48,6 +53,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   }
   const botVariant = rawVariant === "web" ? null : rawVariant;
 
+  const openrouterApiKey = env.OPENROUTER_API_KEY?.trim() || null;
+
   return {
     region,
     apiKey: env.RECALL_API_KEY!.trim(),
@@ -56,5 +63,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     port: Number(env.PORT ?? 3000),
     dbPath: env.DB_PATH ?? "data/app.db",
     botVariant,
+    openrouterApiKey,
+    agentEnabled: !!openrouterApiKey,
+    ttsVoice: env.TTS_VOICE?.trim() || null,
   };
 }

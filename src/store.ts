@@ -32,6 +32,20 @@ export type StoredEvent = {
   created_at: string;
 };
 
+export type ModelCall = {
+  id: number;
+  session_id: string;
+  loop: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usd: number;
+  ms: number;
+  created_at: string;
+};
+
 const TERMINAL = new Set(["done", "fatal", "call_ended"]);
 export const isTerminal = (status: string | null) => !!status && TERMINAL.has(status);
 
@@ -68,6 +82,20 @@ export function openStore(path: string) {
       proto_json TEXT,
       updated_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS model_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      loop TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER NOT NULL,
+      cache_write_tokens INTEGER NOT NULL,
+      usd REAL NOT NULL,
+      ms INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS model_calls_session ON model_calls(session_id);
   `);
   // Additive migration for databases created before the stage columns existed.
   const cols = new Set((db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name));
@@ -156,6 +184,17 @@ export function openStore(path: string) {
       db.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET doc_json = excluded.doc_json, proto_json = excluded.proto_json, updated_at = excluded.updated_at`)
         .run(sessionId, JSON.stringify(doc), JSON.stringify(proto), now());
+    },
+    addModelCall(c: { sessionId: string; loop: string; model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; usd: number; ms: number }): void {
+      db.prepare(`INSERT INTO model_calls (session_id, loop, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, usd, ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(c.sessionId, c.loop, c.model, c.inputTokens, c.outputTokens, c.cacheReadTokens, c.cacheWriteTokens, c.usd, Math.round(c.ms), now());
+    },
+    listModelCalls(sessionId: string): ModelCall[] {
+      return db.prepare(`SELECT * FROM model_calls WHERE session_id = ? ORDER BY id`).all(sessionId) as ModelCall[];
+    },
+    sessionCost(sessionId: string): number {
+      const row = db.prepare(`SELECT COALESCE(SUM(usd), 0) AS total FROM model_calls WHERE session_id = ?`).get(sessionId) as { total: number };
+      return row.total;
     },
     close() {
       db.close();

@@ -172,7 +172,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     res.end(JSON.stringify(body));
   }
   function sessionView(s: Session) {
-    return { ...s, stage_url: stageUrl(s), handoff_url: `${config.publicBaseUrl}${handoffPath(s)}`, events: store.listEvents(s.id) };
+    return { ...s, stage_url: stageUrl(s), handoff_url: `${config.publicBaseUrl}${handoffPath(s)}`, cost_usd: store.sessionCost(s.id), events: store.listEvents(s.id) };
   }
   function openStream(req: http.IncomingMessage, res: http.ServerResponse, s: Session) {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
