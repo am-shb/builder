@@ -19,6 +19,7 @@ export const Proposal = z.strictObject({
 
 export const Topic = z.strictObject({
   title: z.string(),
+  task: z.string().optional(),
   screenHint: z.string().optional(),
   proposals: z.array(Proposal),
   questionsRaised: z.array(z.string()),

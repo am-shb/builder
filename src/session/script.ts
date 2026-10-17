@@ -28,6 +28,7 @@ const Step = z.strictObject({
   doc: ConsensusDocSchema.optional(),
   mood: MoodName.optional(),
   comparison: ComparisonViewSchema.nullable().optional(),
+  tasks: z.array(z.strictObject({ id: z.string(), text: z.string(), state: z.enum(["now", "queued", "done"]) })).optional(),
   resolve: z.strictObject({ conflictId: z.string(), winner: Label }).optional(),
   caption: z.strictObject({ speaker: z.string(), text: z.string(), partial: z.boolean(), isAgent: z.boolean() }).optional(),
 });
@@ -65,6 +66,7 @@ export async function runScript(rt: SessionRuntime, script: Script, clock: () =>
       rt.updateMoodInputs({ ...NEUTRAL_MOOD_INPUTS, ...inputsForMood(step.mood, clock()) });
     }
     if (step.comparison !== undefined) rt.showComparison(step.comparison);
+    if (step.tasks) rt.setTasks(step.tasks);
     if (step.resolve) r = rt.resolveComparison(step.resolve.conflictId, step.resolve.winner);
     if (step.caption) rt.caption(step.caption);
     results.push({ index, ...r });

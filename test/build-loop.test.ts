@@ -5,7 +5,7 @@ import { openStore } from "../src/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
-import { createBuildLoop } from "../src/agent/build-loop.ts";
+import { createBuildLoop, taskText, TASK_DONE_MS } from "../src/agent/build-loop.ts";
 import { toolJsonSchema } from "../src/agent/tool-schema.ts";
 import { enforceGrounding, HandoffSchema } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
@@ -667,4 +667,92 @@ test("build.run logs wait_ms, first_patch_ms and last_patch_ms", async () => {
   const empty = t.logs.find((l) => l.msg === "build.run")!.fields!;
   assert.equal(empty.first_patch_ms, null);
   assert.equal(empty.last_patch_ms, null);
+});
+
+type TasksEvent = Extract<StageEvent, { type: "tasks" }>;
+const taskEvents = (sent: StageEvent[]) => sent.filter((e): e is TasksEvent => e.type === "tasks");
+const lastTasks = (sent: StageEvent[]) => taskEvents(sent).at(-1)?.tasks ?? [];
+const withTask = (ids: number[], task: string, title = "Adding tasks") =>
+  handoff(ids, { topics: [{ ...handoff(ids, {}, title).topics[0], task }] });
+
+test("hand-off topics show as queued, then now during the run, then done and gone after 3s", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, withTask([s.say("Amir", "quick add")], "Adding the buttons"));
+  await flush();
+  const states = taskEvents(s.sent).map((e) => e.tasks.map((t) => t.state).join(","));
+  assert.deepEqual(states, ["queued", "now"]);
+  assert.deepEqual(lastTasks(s.sent), [{ id: "t1", text: "Adding the buttons", state: "now" }]);
+  assert.deepEqual((s.rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).tasks, lastTasks(s.sent));
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await held.release(0, [QUICK_ADD[0]]);
+  assert.deepEqual(lastTasks(s.sent), [{ id: "t1", text: "Adding the buttons", state: "done" }]);
+  await s.timers.advance(TASK_DONE_MS - 1);
+  assert.equal(lastTasks(s.sent).length, 1, "still showing");
+  await s.timers.advance(1);
+  assert.deepEqual(lastTasks(s.sent), []);
+  const log = s.logs.find((l) => l.msg === "build.tasks")!.fields!;
+  assert.deepEqual(Object.keys(log).sort(), ["done", "now", "queued", "session_id"]);
+});
+
+test("task text falls back to the topic title and is cut to 40 characters", () => {
+  const base = handoff([1]).topics[0];
+  assert.equal(taskText({ ...base, task: "  Moving search to the top " }), "Moving search to the top");
+  assert.equal(taskText({ ...base, task: "  ", title: "Adding tasks" }), "Adding tasks");
+  const cut = taskText({ ...base, title: "x".repeat(60) });
+  assert.equal(cut.length, 40);
+  assert.equal(cut, `${"x".repeat(39)}…`);
+  assert.equal(taskText({ ...base, title: "y".repeat(40) }), "y".repeat(40));
+});
+
+test("a hand-off during a run stays queued until the follow-up run", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, withTask([s.say("Amir", "quick add")], "First"));
+  await flush();
+  s.loop.handoff(s.sessionId, withTask([s.say("Sara", "dark mode")], "Second"));
+  await flush();
+  assert.deepEqual(lastTasks(s.sent).map((t) => [t.text, t.state]), [["First", "now"], ["Second", "queued"]]);
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await held.release(0, [QUICK_ADD[0]]);
+  assert.deepEqual(lastTasks(s.sent).map((t) => [t.text, t.state]), [["Second", "queued"], ["First", "done"]]);
+  await s.timers.advance(3_000);
+  assert.equal(held.calls.length, 2);
+  assert.deepEqual(lastTasks(s.sent).map((t) => [t.text, t.state]), [["Second", "now"]]);
+  await held.release(1);
+  assert.deepEqual(lastTasks(s.sent), []);
+});
+
+test("a run that applies nothing removes its tasks at once, without done", async () => {
+  const s = setup([[]]);
+  s.loop.handoff(s.sessionId, withTask([s.say("Amir", "hi")], "Nothing"));
+  await flush();
+  assert.deepEqual(lastTasks(s.sent), []);
+  assert.equal(taskEvents(s.sent).some((e) => e.tasks.some((t) => t.state === "done")), false);
+});
+
+test("a refusal after a streamed batch still marks the tasks done", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, withTask([s.say("Amir", "quick add")], "Adding"));
+  await flush();
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await held.release(0, [], "refusal");
+  assert.deepEqual(lastTasks(s.sent).map((t) => t.state), ["done"]);
+});
+
+test("a throwing run leaves no task stuck on now", async () => {
+  const failing: ModelPort = { runTools: () => Promise.reject(new Error("boom")) };
+  const a = setup(failing);
+  a.loop.handoff(a.sessionId, withTask([a.say("Amir", "x")], "Adding"));
+  await flush();
+  assert.deepEqual(lastTasks(a.sent), []);
+
+  const b = setup([[]]);
+  b.faults.runtime = true;
+  b.loop.handoff(b.sessionId, withTask([b.say("Amir", "x")], "Adding"));
+  await flush();
+  assert.equal(taskEvents(b.sent).some((e) => e.tasks.some((t) => t.state === "now")), false);
+  assert.equal(b.loop.idle(b.sessionId), true);
+  assert.ok(b.logs.some((l) => l.msg === "build.tasks_failed"));
 });

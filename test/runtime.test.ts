@@ -367,3 +367,15 @@ test("snapshotFor throwing terminates only that socket and the server keeps serv
   good.ws.close();
   await good.closed;
 });
+
+test("setTasks pushes a tasks event and the snapshot carries the list", () => {
+  const store = openStore(":memory:");
+  const s = store.createIntent("33333333-3333-3333-3333-333333333333", "https://meet.google.com/x");
+  const sent: StageEvent[] = [];
+  const rt = createRuntime({ store, channel: { send: (_id, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
+  assert.deepEqual((rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).tasks, []);
+  const tasks = [{ id: "t1", text: "Adding the buttons", state: "now" as const }];
+  rt.setTasks(tasks);
+  assert.deepEqual(sent, [{ type: "tasks", tasks }]);
+  assert.deepEqual((rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).tasks, tasks);
+});

@@ -5,7 +5,7 @@ import type { Prototype, PatchBatch, Interaction } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
 import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
-import type { Caption, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
+import type { BuildTask, Caption, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "./mood.ts";
 import type { Mood, MoodInputs } from "./mood.ts";
 import { initialUiState, reduceInteraction } from "../../public/renderer/interact.js";
@@ -83,6 +83,7 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
   // What the room sees. Starts at the prototype's screen, then follows the stage's own reports
   // and the commands run here.
   let uiState: UiState = initialUiState(proto);
+  let tasks: BuildTask[] = [];
   let lastMood: Mood = deriveMood(moodInputs, clock());
 
   // Re-derive against the clock, push only on change, and wake up at the next
@@ -111,8 +112,13 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
       return {
         type: "snapshot", proto, uiScreen: uiState.screen, doc,
         captions: partial ? [...finals, partial] : [...finals],
-        mood: deriveMood(moodInputs, clock()), comparison,
+        mood: deriveMood(moodInputs, clock()), comparison, tasks,
       };
+    },
+
+    setTasks(next: BuildTask[]) {
+      tasks = next;
+      send({ type: "tasks", tasks });
     },
 
     applyBatch(batch: PatchBatch): { ok: boolean; error?: string } {

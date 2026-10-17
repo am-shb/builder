@@ -8,7 +8,7 @@ import { withCostRecording } from "./cost.ts";
 import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
-import type { ConsensusUpdate, Handoff } from "./handoff.ts";
+import type { ConsensusUpdate, Handoff, Topic } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, Prototype } from "../ui/schema.ts";
 import { findNode, fromToolBatch } from "../ui/tree.ts";
@@ -16,12 +16,14 @@ import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
 import { buildComparisonView } from "../session/runtime.ts";
 import type { Log, SessionRuntime } from "../session/runtime.ts";
-import type { StageEvent } from "../stage/channel.ts";
+import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 
 export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
 export const PLEASED_MS = 2_000;
+export const TASK_DONE_MS = 3_000;
+const TASK_MAX = 40;
 const LABEL_MAX = 60;
 
 const SYSTEM = readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8");
@@ -64,6 +66,12 @@ const TOOLS: PortTool[] = [
   },
 ];
 
+// What a topic shows in the to-do list: its own short task line, else its title.
+export function taskText(t: Topic): string {
+  const text = (t.task?.trim() || t.title).trim();
+  return text.length <= TASK_MAX ? text : `${text.slice(0, TASK_MAX - 1)}…`;
+}
+
 type SnapshotEvent = Extract<StageEvent, { type: "snapshot" }>;
 const view = (rt: SessionRuntime) => rt.snapshot() as SnapshotEvent;
 
@@ -71,6 +79,9 @@ type SessionState = {
   port: ModelPort;
   inFlight: boolean;
   pending: Handoff | null;
+  pendingTaskIds: string[];
+  tasks: BuildTask[];
+  taskSeq: number;
   pendingSince: number | null;
   bypassFloor: boolean;
   lastRunAt: number | null;
@@ -145,7 +156,7 @@ export function createBuildLoop(deps: {
     if (!st) {
       st = {
         port: withCostRecording(deps.port, { store, sessionId }),
-        inFlight: false, pending: null, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
+        inFlight: false, pending: null, pendingTaskIds: [], tasks: [], taskSeq: 0, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
       };
       sessions.set(sessionId, st);
     }
@@ -259,6 +270,37 @@ export function createBuildLoop(deps: {
     }
   }
 
+  // Pushes the session's list to the stage, ordered now, queued, done. A failed push is logged and
+  // never wedges the loop. Logs counts only, never task text.
+  function pushTasks(sessionId: string, st: SessionState) {
+    const rank = { now: 0, queued: 1, done: 2 };
+    const list = [...st.tasks].sort((a, b) => rank[a.state] - rank[b.state]);
+    try {
+      runtime(sessionId).setTasks(list);
+      log("build.tasks", {
+        session_id: sessionId, now: list.filter((t) => t.state === "now").length,
+        queued: list.filter((t) => t.state === "queued").length, done: list.filter((t) => t.state === "done").length,
+      });
+    } catch (err) {
+      log("build.tasks_failed", { session_id: sessionId, error: errorName(err) });
+    }
+  }
+
+  // Marks a run's tasks done and removes them after TASK_DONE_MS, or removes them at once.
+  function finishTasks(sessionId: string, st: SessionState, ids: string[], applied: boolean) {
+    const mine = new Set(ids);
+    if (applied) {
+      st.tasks = st.tasks.map((t) => (mine.has(t.id) ? { ...t, state: "done" } : t));
+      timers.setTimeout(() => {
+        st.tasks = st.tasks.filter((t) => !mine.has(t.id));
+        pushTasks(sessionId, st);
+      }, TASK_DONE_MS);
+    } else {
+      st.tasks = st.tasks.filter((t) => !mine.has(t.id));
+    }
+    pushTasks(sessionId, st);
+  }
+
   // apply_patches calls were applied while streaming; their counts arrive in `streamed`.
   function applyResult(
     sessionId: string, rt: SessionRuntime, result: RunToolsResult, speakers: Set<string>,
@@ -308,6 +350,8 @@ export function createBuildLoop(deps: {
 
   async function run(sessionId: string, st: SessionState) {
     const h = st.pending!;
+    const taskIds = st.pendingTaskIds;
+    st.pendingTaskIds = [];
     const startedAt = clock();
     const waitMs = st.pendingSince === null ? 0 : startedAt - st.pendingSince;
     st.pending = null;
@@ -315,6 +359,11 @@ export function createBuildLoop(deps: {
     st.bypassFloor = false;
     st.inFlight = true;
     st.lastRunAt = startedAt;
+    const running = new Set(taskIds);
+    st.tasks = st.tasks.map((t) => (running.has(t.id) ? { ...t, state: "now" } : t));
+    pushTasks(sessionId, st);
+    const streamed = { applied: 0, rejected: 0 };
+    let opsApplied = 0;
     let rt: SessionRuntime | null = null;
     let region = false;
     let stage = "setup";
@@ -350,7 +399,6 @@ export function createBuildLoop(deps: {
 
       // Each patch batch is applied as soon as its block closes, so it shows while Opus keeps writing.
       // Never throws: a throw would reject runTools and lose the cost row for a billed call.
-      const streamed = { applied: 0, rejected: 0 };
       let firstPatchMs: number | null = null;
       let lastPatchMs: number | null = null;
       const onToolCall = (call: ToolCall) => {
@@ -395,7 +443,11 @@ export function createBuildLoop(deps: {
       // A refusal or no usable call leaves the doc as it is; batches already streamed stay on screen.
       if (result.stopReason === "refusal") log("build.run", { ...base, patches_applied: streamed.applied, patches_rejected: streamed.rejected });
       else if (result.toolCalls.length === 0) log("build.run", base);
-      else log("build.run", { ...base, ...applyResult(sessionId, live, result, speakers, streamed) });
+      else {
+        const counts = applyResult(sessionId, live, result, speakers, streamed);
+        opsApplied = counts.ops;
+        log("build.run", { ...base, ...counts });
+      }
     } catch (err) {
       log("build.run_failed", {
         session_id: sessionId, stage, error: errorName(err),
@@ -409,6 +461,7 @@ export function createBuildLoop(deps: {
       } catch (err) {
         log("build.cleanup_failed", { session_id: sessionId, error: errorName(err) });
       }
+      finishTasks(sessionId, st, taskIds, streamed.applied > 0 || opsApplied > 0);
       ensureTick(sessionId, st);
       schedule(sessionId, st);
     }
@@ -437,6 +490,13 @@ export function createBuildLoop(deps: {
       const h: Handoff = { ...parsed.data, topics };
       if (!st.pending) st.pendingSince = clock();
       st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
+      const ids = topics.map((t) => {
+        const id = `t${++st.taskSeq}`;
+        st.tasks.push({ id, text: taskText(t), state: "queued" });
+        return id;
+      });
+      st.pendingTaskIds.push(...ids);
+      pushTasks(sessionId, st);
       if (resolved) st.bypassFloor = true;
       schedule(sessionId, st);
       ensureTick(sessionId, st);

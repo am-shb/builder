@@ -16,11 +16,14 @@ export type ComparisonView = {
   variants: { label: string; summary: string; backers: string[]; proto: Prototype; focusIds: string[] }[];
 };
 
+export type BuildTask = { id: string; text: string; state: "now" | "queued" | "done" };
+
 export type StageEvent =
-  | { type: "snapshot"; proto: Prototype; uiScreen: string; doc: ConsensusDoc; captions: Caption[]; mood: Mood; comparison: ComparisonView | null }
+  | { type: "snapshot"; proto: Prototype; uiScreen: string; doc: ConsensusDoc; captions: Caption[]; mood: Mood; comparison: ComparisonView | null; tasks: BuildTask[] }
   | { type: "patch"; proto: Prototype; changes: Change[] }
   | { type: "doc"; doc: ConsensusDoc }
   | { type: "mood"; mood: Mood }
+  | { type: "tasks"; tasks: BuildTask[] }
   | { type: "caption"; caption: Caption }
   | { type: "pending_region"; parentId: string | null }
   | { type: "command"; nodeId: string; interaction: Interaction }
