@@ -4,8 +4,8 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { openStore } from "../src/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
-import { createFakePort, MODELS } from "../src/agent/llm.ts";
-import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
+import { createFakePort, createOpenRouterPort, MODELS } from "../src/agent/llm.ts";
+import type { ModelPort, PortTool, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
 import { HandoffSchema } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
 import { createChatSpeech, createConversationLoop, ADDRESSED_MS, WINDOW } from "../src/agent/conversation-loop.ts";
@@ -282,6 +282,64 @@ test("update_build forwards a schema-valid handoff with grounding ids to the bui
   s.say("Sara", "And tags later.");
   await flush();
   assert.equal(s.handoffs.length, 1, "a schema-invalid hand-off is not forwarded");
+});
+
+// A one-tool-call Anthropic stream, as OpenRouter sends it.
+function toolStream(name: string, input: unknown): typeof fetch {
+  const events = [
+    { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "x", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t", name, input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } },
+    { type: "message_stop" },
+  ];
+  const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+}
+
+// The slip seen live and in scripts/probe-handoff.ts (the settle-and-ask round, 3 of 3 runs): strict
+// decoding is not enforced through OpenRouter, Haiku put requestedView inside a topic, and the port
+// dropped the whole hand-off, resolvedChoice included.
+test("update_build survives the observed slips (requestedView inside a topic, an unknown key) and stays strict elsewhere", async () => {
+  const s = setup([[]]);
+  const id = s.say("Maya", "Fine, option B. Can we see settings next?");
+  await flush();
+  const tool = (s.requests[0].tools as PortTool[]).find((t) => t.name === "update_build")!;
+  const run = async (input: unknown) => {
+    const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+    const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: toolStream("update_build", input), log: (msg, fields) => logs.push({ msg, fields }) });
+    const r = await port.runTools({ loop: "conversation", system: "s", messages: [], tools: [tool], effort: "low" });
+    return { r, logs, h: r.toolCalls[0]?.input as Handoff | undefined };
+  };
+  const settled = { title: "Progress view", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } };
+  const settings = { title: "Settings", screenHint: "settings", proposals: [], questionsRaised: [] };
+  const observed = { topics: [settled, { ...settings, requestedView: "settings" }], mood: "converging", groundingIds: [id] };
+
+  const a = await run(observed);
+  assert.equal(a.r.dropped, 0, "the observed hand-off is no longer dropped");
+  assert.deepEqual(a.h, { topics: [settled, settings], mood: "converging", groundingIds: [id], requestedView: "settings" },
+    "a topic's requestedView moves up to the hand-off, where the build loop reads it");
+
+  const b = await run({ ...observed, requestedView: "home" });
+  assert.equal(b.h?.requestedView, "home", "an explicit hand-off requestedView wins");
+  assert.equal("requestedView" in b.h!.topics[1], false);
+
+  const c = await run({ ...observed, topics: [settled], extraNote: "x" });
+  assert.equal(c.r.dropped, 0, "an unknown key is stripped, not fatal");
+  assert.equal("extraNote" in c.h!, false);
+  const repaired = c.logs.find((l) => l.msg === "llm_tool_repaired");
+  assert.deepEqual(repaired?.fields?.repairs, [{ path: "", code: "unrecognized_keys" }]);
+  assert.ok(!JSON.stringify(c.logs).includes("extraNote"), "repairs log paths and codes only");
+
+  // Ids, enums and types stay strict.
+  for (const bad of [
+    { ...observed, mood: "bogus" },
+    { ...observed, topics: [{ ...settled, resolvedChoice: { conflictId: "c1", winner: "D" } }] },
+    { ...observed, groundingIds: [1.5] },
+    { ...observed, groundingIds: undefined },
+    { ...observed, topics: [{ ...settings, proposals: undefined }] },
+  ]) assert.equal((await run(bad)).r.dropped, 1, JSON.stringify(bad).slice(0, 80));
 });
 
 test("context window is capped at 40 utterances", async () => {

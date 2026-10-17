@@ -34,6 +34,25 @@ export const HandoffSchema = z.strictObject({
 });
 export type Handoff = z.infer<typeof HandoffSchema>;
 
+// The update_build tool's local validator. A live probe (scripts/probe-handoff.ts) saw Haiku put
+// requestedView on a topic when the room asked to see a screen. It belongs to the hand-off: the
+// first topic's copy moves up unless the hand-off has its own, and the topics lose theirs.
+// The wire schema stays HandoffSchema.
+export const HandoffToolInput = z.preprocess(hoistRequestedView, HandoffSchema);
+
+function hoistRequestedView(v: unknown): unknown {
+  const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+  if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && "requestedView" in t)) return v;
+  let view = v.requestedView;
+  const topics = v.topics.map((t) => {
+    if (!isRecord(t) || !("requestedView" in t)) return t;
+    const { requestedView, ...rest } = t;
+    if (view === undefined && typeof requestedView === "string") view = requestedView;
+    return rest;
+  });
+  return { ...v, topics, ...(view === undefined ? {} : { requestedView: view }) };
+}
+
 const ToolVariant = z.strictObject({
   label: VariantLabel,
   summary: z.string(),

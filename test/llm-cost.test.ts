@@ -256,3 +256,40 @@ test("llm_tool_dropped logs each zod issue's dotted path and code, never values 
   const text = JSON.stringify(logs);
   for (const leak of ["leak-me", "secret-kind", "extra", "9137", "expected"]) assert.ok(!text.includes(leak), `log must not contain ${leak}`);
 });
+
+test("port strips unknown keys at any depth for every tool, and keeps everything else strict", async () => {
+  const Q = z.strictObject({ items: z.array(z.strictObject({ tag: z.string(), raisedBy: z.string().nullable(), note: z.string().optional() })) });
+  const tool = { name: "q", description: "q", strict: true, input_schema: {}, schema: Q };
+  const run = async (input: unknown) => {
+    const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+    const port = createOpenRouterPort({ openrouterApiKey: "k" }, {
+      fetch: (async () => sse(toolUseStream({ name: "q", json: [JSON.stringify(input)] }))) as typeof fetch,
+      log: (msg, fields) => logs.push({ msg, fields }),
+    });
+    const r = await port.runTools({ loop: "build", ...REQ, tools: [tool], effort: "medium" });
+    return { r, logs };
+  };
+
+  const ok = await run({ items: [{ tag: "a", raisedBy: null }, { tag: "b", raisedBy: "Sara", stray: 1 }], top: true });
+  assert.equal(ok.r.dropped, 0);
+  assert.deepEqual(ok.r.toolCalls[0].input, { items: [{ tag: "a", raisedBy: null }, { tag: "b", raisedBy: "Sara" }] });
+  const repaired = ok.logs.find((l) => l.msg === "llm_tool_repaired")!;
+  assert.deepEqual(repaired.fields, { loop: "build", tool: "q", repairs: [{ path: "items.1", code: "unrecognized_keys" }, { path: "", code: "unrecognized_keys" }] });
+  assert.ok(!JSON.stringify(ok.logs).includes("stray"), "never the key names or values");
+
+  const clean = await run({ items: [{ tag: "a", raisedBy: null }] });
+  assert.equal(clean.logs.some((l) => l.msg === "llm_tool_repaired"), false, "a valid call needs no repair");
+
+  // Not repaired: a wrong type next to an unknown key, a missing required nullable, an explicit null
+  // for an optional field (none seen from the models), and an unknown key inside a non-object.
+  for (const bad of [
+    { items: [{ tag: 1, raisedBy: null, stray: 1 }] },
+    { items: [{ tag: "a" }] },
+    { items: [{ tag: "a", raisedBy: null, note: null }] },
+    { items: "nope" },
+  ]) {
+    const r = await run(bad);
+    assert.equal(r.r.dropped, 1, JSON.stringify(bad));
+    assert.ok(r.logs.some((l) => l.msg === "llm_tool_dropped" && l.fields?.reason === "invalid_input"));
+  }
+});

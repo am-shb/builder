@@ -158,12 +158,13 @@ export function createOpenRouterPort(
           }
           const schema = schemas.get(block.name);
           if (schema) {
-            const parsed = schema.safeParse(input);
-            if (!parsed.success) {
-              drop("invalid_input", { issues: parsed.error.issues.length, issue_details: issueDetails(parsed.error.issues) });
+            const checked = validateToolInput(schema, input);
+            if (!checked.ok) {
+              drop("invalid_input", { issues: checked.issues.length, issue_details: issueDetails(checked.issues) });
               continue;
             }
-            input = parsed.data;
+            if (checked.repairs.length) log("llm_tool_repaired", { loop: req.loop, tool: block.name, repairs: checked.repairs });
+            input = checked.data;
           }
           toolCalls.push({ name: block.name, input });
         }
@@ -186,7 +187,32 @@ export function issueDetails(issues: readonly { path: readonly PropertyKey[]; co
   return issues.map((i) => ({ path: i.path.map(String).join("."), code: i.code }));
 }
 
-const zeroUsage = (): Usage =>({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+type Issue = z.core.$ZodIssue;
+type Checked = { ok: true; data: unknown; repairs: { path: string; code: string }[] } | { ok: false; issues: Issue[] };
+
+/**
+ * Validates a model's tool input against the tool's zod schema. `strict: true` is not enforced end
+ * to end through OpenRouter: a live probe (scripts/probe-handoff.ts) saw Haiku add a key the schema
+ * does not declare, at the wrong level. Undeclared keys are the one slip repaired, for every tool:
+ * they are stripped and the input validated again. Everything else stays strict (types, enums, ids,
+ * required fields, nulls), and an input that still fails is reported with its original issues.
+ */
+export function validateToolInput(schema: z.ZodType, input: unknown): Checked {
+  const first = schema.safeParse(input);
+  if (first.success) return { ok: true, data: first.data, repairs: [] };
+  const strays = first.error.issues.filter((i) => i.code === "unrecognized_keys");
+  if (!strays.length) return { ok: false, issues: first.error.issues };
+  const copy = structuredClone(input);
+  for (const issue of strays) {
+    let at: unknown = copy;
+    for (const k of issue.path) at = at && typeof at === "object" ? (at as Record<PropertyKey, unknown>)[k] : undefined;
+    if (at && typeof at === "object" && !Array.isArray(at)) for (const k of issue.keys) delete (at as Record<string, unknown>)[k];
+  }
+  const second = schema.safeParse(copy);
+  return second.success ? { ok: true, data: second.data, repairs: issueDetails(strays) } : { ok: false, issues: first.error.issues };
+}
+
+const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
 // Scripted port for tests: call N returns script[N] (empty once exhausted) with
 // small nonzero usage so cost accounting has something to record.

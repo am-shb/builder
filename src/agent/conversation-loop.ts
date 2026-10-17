@@ -9,7 +9,7 @@ import { z } from "zod";
 import { withCostRecording } from "./cost.ts";
 import { toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult } from "./llm.ts";
-import { HandoffSchema } from "./handoff.ts";
+import { HandoffSchema, HandoffToolInput } from "./handoff.ts";
 import type { Handoff } from "./handoff.ts";
 import { ADDRESS_RE, createStuckDetector } from "./stuck.ts";
 import type { StuckDetector, StuckEvent } from "./stuck.ts";
@@ -97,7 +97,7 @@ const TOOLS: PortTool[] = [
       "summary draws on.",
     strict: true,
     input_schema: toolJsonSchema(HandoffSchema),
-    schema: HandoffSchema,
+    schema: HandoffToolInput,
   },
 ];
 
