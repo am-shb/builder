@@ -22,6 +22,8 @@ If a hand-off changes nothing (small talk, a repeat of what is already recorded)
 
 The system applies all `apply_patches` batches first, then the `update_consensus` ops, so a decision's `affects` can name nodes you add in the same turn.
 
+Each `apply_patches` batch appears on screen as soon as you finish writing it. So call `apply_patches` before `update_consensus`, put the most visible change first, and keep batches small.
+
 ## Facilitation phases
 
 Keep `phase` current with `set_phase`. Move forward when the conversation earns it, and step back when it needs to.

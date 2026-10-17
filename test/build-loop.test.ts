@@ -143,11 +143,11 @@ test("handoff → patches applied, decision added as draft→pending, doc and pr
   assert.equal(s.loop.idle(s.sessionId), false, "a run is in flight");
   await flush();
 
-  // Request shape: build loop, medium effort, two strict tools, grounding lines in the user turn.
+  // Request shape: build loop, low effort, two strict tools, grounding lines in the user turn.
   assert.equal(s.requests.length, 1);
   const req = s.requests[0];
   assert.equal(req.loop, "build");
-  assert.equal(req.effort, "medium");
+  assert.equal(req.effort, "low");
   assert.ok(req.system.length > 500);
   const tools = req.tools as { name: string; strict?: boolean; input_schema: unknown }[];
   assert.deepEqual(tools.map((t) => t.name), ["apply_patches", "update_consensus"]);
@@ -258,7 +258,7 @@ test("handoffs during a run are merged into exactly one follow-up run", async ()
   assert.equal(s.loop.idle(s.sessionId), true);
 });
 
-test("10s floor between runs; resolvedChoice bypasses it", async () => {
+test("3s floor between runs; resolvedChoice bypasses it", async () => {
   const s = setup([[DONE_CONFLICT], [], [], []]);
   s.loop.handoff(s.sessionId, handoff([s.say("Amir", "toggle"), s.say("Sara", "tab")]));
   await flush();
@@ -270,10 +270,10 @@ test("10s floor between runs; resolvedChoice bypasses it", async () => {
   await flush();
   assert.equal(s.requests.length, 1, "within the floor");
   assert.equal(s.loop.idle(s.sessionId), false, "a run is scheduled");
-  await s.timers.advance(8_000);
+  await s.timers.advance(1_500);
   assert.equal(s.requests.length, 1);
-  await s.timers.advance(1_000);
-  assert.equal(s.requests.length, 2, "runs once 10 s have passed since the last run started");
+  await s.timers.advance(500);
+  assert.equal(s.requests.length, 2, "runs once 3 s have passed since the last run started");
 
   await s.timers.advance(500);
   const before = s.timeline.length;
@@ -596,4 +596,75 @@ test("tool schemas sent to the model are strict-compatible", async () => {
     };
     walk(schema);
   }
+});
+
+// A port whose calls stay pending, so a test can stream tool calls into a run still in flight.
+function heldPort() {
+  const calls: { req: RunToolsRequest; resolve: (r: RunToolsResult) => void }[] = [];
+  const port: ModelPort = { runTools: (req) => new Promise((resolve) => calls.push({ req, resolve })) };
+  const release = async (i: number, toolCalls: ToolCall[] = [], stopReason: RunToolsResult["stopReason"] = "tool_use") => {
+    calls[i].resolve({
+      toolCalls, ms: 5, dropped: 0, stopReason,
+      usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    await flush();
+  };
+  return { port, calls, release };
+}
+
+test("a streamed batch reaches the stage before the model call finishes", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+  await flush();
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await flush();
+  assert.equal(s.patches().length, 1, "applied while the call is pending");
+  assert.ok(findNode(s.proto(), "home.quick-add"));
+  await held.release(0, [QUICK_ADD[0]]);
+  assert.equal(s.patches().length, 1, "not applied a second time");
+});
+
+test("a refusal after a streamed batch keeps the batch and applies it once", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+  await flush();
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await flush();
+  await held.release(0, [], "refusal");
+  assert.equal(s.patches().length, 1);
+  assert.ok(findNode(s.proto(), "home.quick-add"));
+});
+
+test("build calls use effort low", async () => {
+  const s = setup([[]]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "hi")]));
+  await flush();
+  assert.equal(s.requests[0].effort, "low");
+});
+
+test("build.run logs wait_ms, first_patch_ms and last_patch_ms", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+  await flush();
+  await s.timers.advance(200);
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await s.timers.advance(300);
+  held.calls[0].req.onToolCall?.(patches("Added: label", [addNode("home", "home.label", "Text", [["text", "Tasks"]])]));
+  await flush();
+  await held.release(0, [QUICK_ADD[0]]);
+  const run = s.logs.find((l) => l.msg === "build.run")!.fields!;
+  assert.equal(typeof run.wait_ms, "number");
+  assert.equal(run.first_patch_ms, 200);
+  assert.equal(run.last_patch_ms, 500);
+  assert.equal(run.patches_applied, 2);
+
+  const t = setup([[]]);
+  t.loop.handoff(t.sessionId, handoff([t.say("Amir", "hi")]));
+  await flush();
+  const empty = t.logs.find((l) => l.msg === "build.run")!.fields!;
+  assert.equal(empty.first_patch_ms, null);
+  assert.equal(empty.last_patch_ms, null);
 });

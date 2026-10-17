@@ -1,12 +1,12 @@
 // Build loop: turns conversation hand-offs into consensus-document updates and
 // prototype patches with Opus. One run in flight per session; hand-offs that arrive
-// meanwhile merge into the next run, at most one run per 10 s unless a conflict was
-// just resolved. Also promotes pending decisions after 30 s without objection.
+// meanwhile merge into the next run, at most one run per 3 s unless a conflict was
+// just resolved. Each patch batch is applied as soon as the model finishes writing it. Also promotes pending decisions after 30 s without objection.
 // Logs ids, counts and durations only: never transcript text, prompts or model output.
 import { readFileSync } from "node:fs";
 import { withCostRecording } from "./cost.ts";
 import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
-import type { ModelPort, PortTool, RunToolsResult } from "./llm.ts";
+import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
@@ -19,7 +19,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 
-export const RUN_FLOOR_MS = 10_000;
+export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
 export const PLEASED_MS = 2_000;
 const LABEL_MAX = 60;
@@ -71,6 +71,7 @@ type SessionState = {
   port: ModelPort;
   inFlight: boolean;
   pending: Handoff | null;
+  pendingSince: number | null;
   bypassFloor: boolean;
   lastRunAt: number | null;
   timer: unknown;
@@ -144,7 +145,7 @@ export function createBuildLoop(deps: {
     if (!st) {
       st = {
         port: withCostRecording(deps.port, { store, sessionId }),
-        inFlight: false, pending: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
+        inFlight: false, pending: null, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
       };
       sessions.set(sessionId, st);
     }
@@ -258,25 +259,13 @@ export function createBuildLoop(deps: {
     }
   }
 
-  function applyResult(sessionId: string, rt: SessionRuntime, result: RunToolsResult, speakers: Set<string>) {
-    const counts = { patches_applied: 0, patches_rejected: 0, consensus_invalid: 0, ops: 0, grounding_dropped: 0, promoted: 0, reopened: 0, conflicts: 0 };
+  // apply_patches calls were applied while streaming; their counts arrive in `streamed`.
+  function applyResult(
+    sessionId: string, rt: SessionRuntime, result: RunToolsResult, speakers: Set<string>,
+    streamed: { applied: number; rejected: number },
+  ) {
+    const counts = { patches_applied: streamed.applied, patches_rejected: streamed.rejected, consensus_invalid: 0, ops: 0, grounding_dropped: 0, promoted: 0, reopened: 0, conflicts: 0 };
     const ops: ConsensusUpdate[] = [];
-    // Patches first, so decisions and conflicts can reference the nodes they add.
-    for (const call of result.toolCalls) {
-      if (call.name !== "apply_patches") continue;
-      const parsed = ToolPatchBatch.safeParse(call.input);
-      if (!parsed.success) {
-        counts.patches_rejected++;
-        log("build.batch_rejected", { session_id: sessionId, reason: "invalid_input" });
-        continue;
-      }
-      const r = rt.applyBatch(sanitizeModelBatch(fromToolBatch(parsed.data), view(rt).doc));
-      if (r.ok) counts.patches_applied++;
-      else {
-        counts.patches_rejected++;
-        log("build.batch_rejected", { session_id: sessionId, reason: "does_not_apply", ops: parsed.data.ops.length });
-      }
-    }
     for (const call of result.toolCalls) {
       if (call.name !== "update_consensus") continue;
       const parsed = UpdateConsensusInput.safeParse(call.input);
@@ -319,10 +308,13 @@ export function createBuildLoop(deps: {
 
   async function run(sessionId: string, st: SessionState) {
     const h = st.pending!;
+    const startedAt = clock();
+    const waitMs = st.pendingSince === null ? 0 : startedAt - st.pendingSince;
     st.pending = null;
+    st.pendingSince = null;
     st.bypassFloor = false;
     st.inFlight = true;
-    st.lastRunAt = clock();
+    st.lastRunAt = startedAt;
     let rt: SessionRuntime | null = null;
     let region = false;
     let stage = "setup";
@@ -356,19 +348,54 @@ export function createBuildLoop(deps: {
         parentRe.lastIndex = Math.max(0, buf.length - 100);
       };
 
+      // Each patch batch is applied as soon as its block closes, so it shows while Opus keeps writing.
+      // Never throws: a throw would reject runTools and lose the cost row for a billed call.
+      const streamed = { applied: 0, rejected: 0 };
+      let firstPatchMs: number | null = null;
+      let lastPatchMs: number | null = null;
+      const onToolCall = (call: ToolCall) => {
+        if (call.name !== "apply_patches") return;
+        try {
+          const parsed = ToolPatchBatch.safeParse(call.input);
+          if (!parsed.success) {
+            streamed.rejected++;
+            log("build.batch_rejected", { session_id: sessionId, reason: "invalid_input" });
+            return;
+          }
+          const r = live.applyBatch(sanitizeModelBatch(fromToolBatch(parsed.data), view(live).doc));
+          if (!r.ok) {
+            streamed.rejected++;
+            log("build.batch_rejected", { session_id: sessionId, reason: "does_not_apply", ops: parsed.data.ops.length });
+            return;
+          }
+          streamed.applied++;
+          lastPatchMs = clock() - startedAt;
+          firstPatchMs ??= lastPatchMs;
+          // The placeholder has been filled; a later add may show a new one.
+          if (region) {
+            live.pendingRegion(null);
+            region = false;
+          }
+        } catch (err) {
+          log("build.stream_apply_failed", { session_id: sessionId, error: errorName(err) });
+        }
+      };
+
       stage = "model";
       const result = await st.port.runTools({
-        loop: "build", system: SYSTEM, tools: TOOLS, effort: "medium", onToolInputDelta,
+        loop: "build", system: SYSTEM, tools: TOOLS, effort: "low", onToolInputDelta, onToolCall,
         messages: [{ role: "user", content: userTurn(h, grounding, doc, proto) }],
       });
       stage = "apply";
       const base = {
         session_id: sessionId, stop_reason: result.stopReason, tool_calls: result.toolCalls.length,
         dropped: result.dropped, ms: Math.round(result.ms), topics: h.topics.length, grounding: grounding.length,
+        wait_ms: waitMs, first_patch_ms: firstPatchMs, last_patch_ms: lastPatchMs,
       };
-      // A refusal or no usable call leaves the screen and the doc as they are.
-      if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", base);
-      else log("build.run", { ...base, ...applyResult(sessionId, live, result, speakers) });
+      // A refusal or no usable call leaves the doc as it is; batches already streamed stay on screen.
+      if (result.stopReason === "refusal") log("build.run", { ...base, patches_applied: streamed.applied, patches_rejected: streamed.rejected });
+      else if (result.toolCalls.length === 0) log("build.run", base);
+      else log("build.run", { ...base, ...applyResult(sessionId, live, result, speakers, streamed) });
     } catch (err) {
       log("build.run_failed", {
         session_id: sessionId, stage, error: errorName(err),
@@ -408,6 +435,7 @@ export function createBuildLoop(deps: {
         return rest;
       });
       const h: Handoff = { ...parsed.data, topics };
+      if (!st.pending) st.pendingSince = clock();
       st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
       if (resolved) st.bypassFloor = true;
       schedule(sessionId, st);
