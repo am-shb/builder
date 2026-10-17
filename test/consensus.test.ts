@@ -80,6 +80,56 @@ test("resolveConflict creates agreed decision with rejected options", () => {
   assert.ok(out.doc.decisions.some((d) => d.id === out.decision.id));
 });
 
+test("support on a draft moves it to pending and starts the timer", () => {
+  const out = recordSupport(docWith(decision()), "d1", "Bob", 2_000);
+  assert.equal(out.decisions[0].status, "pending");
+  assert.equal(out.decisions[0].pendingSince, 2_000);
+  assert.deepEqual(out.decisions[0].agreedBy, []);
+  assert.equal(recordSupport(docWith(decision()), "d1", "Unknown", 2_000).decisions[0].status, "draft");
+});
+
+test("support on a pending item from another participant agrees it", () => {
+  const doc = markPending(docWith(decision()), "d1", 0);
+  const out = recordSupport(doc, "d1", "Bob", 4_000);
+  assert.equal(out.decisions[0].status, "agreed");
+  assert.deepEqual(out.decisions[0].agreedBy, ["Bob"]);
+  assert.equal(out.decisions[0].decidedAt, 4_000);
+});
+
+test("support on an agreed item is a no-op", () => {
+  const doc = recordSupport(markPending(docWith(decision()), "d1", 0), "d1", "Bob", 1_000);
+  assert.deepEqual(recordSupport(doc, "d1", "Cy", 9_000), doc);
+});
+
+test("objection on an agreed decision returns it to draft and clears agreement", () => {
+  const agreed = recordSupport(markPending(docWith(decision()), "d1", 0), "d1", "Bob", 1_000);
+  const d = recordObjection(agreed, "d1", "Cy", 2_000).decisions[0];
+  assert.equal(d.status, "draft");
+  assert.equal(d.pendingSince, undefined);
+  assert.equal(d.decidedAt, undefined);
+  assert.deepEqual(d.agreedBy, []);
+});
+
+test("resolveConflict twice does not duplicate the decision", () => {
+  const batch = { ops: [], label: "variant" };
+  const doc: ConsensusDoc = {
+    ...emptyDoc(),
+    conflicts: [{
+      id: "c1", topic: "Nav", status: "open", openedAt: 0,
+      variants: [
+        { label: "A", summary: "Sidebar", backers: ["Ann"], batch },
+        { label: "B", summary: "Tabs", backers: ["Bob"], batch },
+      ],
+    }],
+  };
+  const once = resolveConflict(doc, "c1", "A", 1_000);
+  const twice = resolveConflict(once.doc, "c1", "B", 2_000);
+  assert.equal(twice.doc.decisions.length, 1);
+  assert.deepEqual(twice.doc, once.doc);
+  assert.equal(twice.decision.id, "d-c1");
+  assert.throws(() => resolveConflict(doc, "nope", "A", 0));
+});
+
 test("store round-trips consensus doc and prototype", () => {
   const store = openStore(":memory:");
   assert.equal(store.getConsensus("s1"), undefined);

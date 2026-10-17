@@ -84,14 +84,18 @@ export function markPending(doc: ConsensusDoc, id: string, now: number): Consens
 
 export function recordSupport(doc: ConsensusDoc, id: string, speaker: string | null, now: number): ConsensusDoc {
   if (!speaker || speaker === "Unknown") return doc;
-  return mapDecision(doc, id, (d) => (d.status === "agreed" || speaker === d.proposedBy ? d : agree(d, now, speaker)));
+  return mapDecision(doc, id, (d) => {
+    if (d.status === "agreed" || speaker === d.proposedBy) return d;
+    return d.status === "draft" ? { ...d, status: "pending", pendingSince: now } : agree(d, now, speaker);
+  });
 }
 
+// An objection at any point sends the item back to draft.
 export function recordObjection(doc: ConsensusDoc, id: string, _speaker: string | null, _now: number): ConsensusDoc {
   return mapDecision(doc, id, (d) => {
-    if (d.status !== "pending") return d;
-    const { pendingSince: _pendingSince, ...rest } = d;
-    return { ...rest, status: "draft" };
+    if (d.status === "draft") return d;
+    const { pendingSince: _pendingSince, decidedAt: _decidedAt, ...rest } = d;
+    return { ...rest, status: "draft", agreedBy: [] };
   });
 }
 
@@ -116,8 +120,13 @@ export function resolveConflict(
   const conflict = doc.conflicts.find((c) => c.id === conflictId);
   const won = conflict?.variants.find((v) => v.label === winner);
   if (!conflict || !won) throw new Error(`cannot resolve conflict ${conflictId} with variant ${winner}`);
+  const id = `d-${conflictId}`;
+  if (conflict.status === "resolved") {
+    const existing = doc.decisions.find((d) => d.id === id);
+    if (existing) return { doc, decision: existing };
+  }
   const decision: Decision = {
-    id: `d-${conflictId}`,
+    id,
     text: won.summary,
     status: "agreed",
     proposedBy: won.backers[0] ?? "Unknown",
