@@ -4,10 +4,10 @@
 // just resolved. Also promotes pending decisions after 30 s without objection.
 // Logs ids, counts and durations only: never transcript text, prompts or model output.
 import { readFileSync } from "node:fs";
-import { z } from "zod";
 import { withCostRecording } from "./cost.ts";
+import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult } from "./llm.ts";
-import { applyConsensusOps, enforceGrounding, HandoffSchema, UpdateConsensusInput } from "./handoff.ts";
+import { applyConsensusOps, enforceGrounding, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, Prototype } from "../ui/schema.ts";
@@ -39,32 +39,6 @@ const realTimers: Timers = {
   setInterval: (fn, ms) => setInterval(fn, ms).unref(),
   clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
 };
-
-// Strict tool schemas reject numeric, length and item-count constraints, and want anyOf rather
-// than oneOf. Those constraints stay enforced locally: every tool input is re-validated with zod.
-const STRICT_UNSUPPORTED = new Set([
-  "$schema", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
-  "minLength", "maxLength", "minItems", "maxItems",
-]);
-
-export function strictCompatible(schema: unknown): Record<string, unknown> {
-  const clean = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(clean);
-    if (!v || typeof v !== "object") return v;
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) {
-      if (STRICT_UNSUPPORTED.has(k)) continue;
-      out[k === "oneOf" ? "anyOf" : k] = clean(val);
-    }
-    return out;
-  };
-  return clean(schema) as Record<string, unknown>;
-}
-
-/** The JSON schema to send for a zod tool input under `strict: true`. */
-export function toolJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  return strictCompatible(z.toJSONSchema(schema, { target: "draft-7" }));
-}
 
 const TOOLS: PortTool[] = [
   {
@@ -135,10 +109,12 @@ function touchedIds(batch: PatchBatch): string[] {
   return [...new Set(ids)];
 }
 
-const label = (text: string) => {
-  const full = `Agreed: ${text}`;
+const batchLabel = (prefix: "Agreed" | "Reopened", text: string) => {
+  const full = `${prefix}: ${text}`;
   return full.length <= LABEL_MAX ? full : `${full.slice(0, LABEL_MAX - 1)}…`;
 };
+
+const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 export function createBuildLoop(deps: {
   port: ModelPort;
@@ -147,11 +123,21 @@ export function createBuildLoop(deps: {
   clock: () => number;
   log?: Log;
   timers?: Timers;
+  botName?: string;
 }) {
   const { runtime, store, clock } = deps;
   const log: Log = deps.log ?? (() => {});
   const timers = deps.timers ?? realTimers;
+  const botName = deps.botName ?? "Builder";
   const sessions = new Map<string, SessionState>();
+
+  // The session's own utterances among the given ids, and the people (not Builder) who spoke them.
+  function groundingFor(sessionId: string, groundingIds: number[]) {
+    const ids = new Set(groundingIds);
+    const lines = store.listEvents(sessionId).filter((e) => e.kind === "utterance" && ids.has(e.id));
+    const speakers = new Set(lines.map((e) => e.speaker).filter((s): s is string => !!s && s !== botName));
+    return { lines, speakers };
+  }
 
   const state = (sessionId: string): SessionState => {
     let st = sessions.get(sessionId);
@@ -165,13 +151,17 @@ export function createBuildLoop(deps: {
     return st;
   };
 
-  // Flips a now-agreed decision's nodes in one batch, skipping ids that no longer exist.
-  function flipNodes(sessionId: string, rt: SessionRuntime, d: Decision) {
+  // Sets a decision's existing nodes to one status in one batch, skipping ids that no longer
+  // exist. The only code path that marks nodes agreed: model batches are sanitised to draft.
+  function flipNodes(sessionId: string, rt: SessionRuntime, d: Decision, status: "agreed" | "draft") {
     const proto = view(rt).proto;
     const ids = [...new Set(d.affects)].filter((id) => findNode(proto, id));
     if (!ids.length) return;
-    const r = rt.applyBatch({ label: label(d.text), ops: ids.map((id) => ({ op: "update", id, status: "agreed", decisionId: d.id })) });
-    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, ops: ids.length });
+    const r = rt.applyBatch({
+      label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text),
+      ops: ids.map((id) => ({ op: "update", id, status, decisionId: d.id })),
+    });
+    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ids.length });
   }
 
   function promote(sessionId: string, rt: SessionRuntime, ids: string[], via: "support" | "timeout" | "conflict") {
@@ -180,14 +170,20 @@ export function createBuildLoop(deps: {
     for (const id of ids) {
       const d = doc.decisions.find((x) => x.id === id);
       if (!d) continue;
-      flipNodes(sessionId, rt, d);
+      flipNodes(sessionId, rt, d, "agreed");
       log("build.promoted", { session_id: sessionId, decision_id: id, via });
     }
     rt.updateMoodInputs({ pleasedUntil: clock() + PLEASED_MS });
   }
 
   function ensureTick(sessionId: string, st: SessionState) {
-    const anyPending = view(runtime(sessionId)).doc.decisions.some((d) => d.status === "pending");
+    let anyPending: boolean;
+    try {
+      anyPending = view(runtime(sessionId)).doc.decisions.some((d) => d.status === "pending");
+    } catch (err) {
+      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
+      return;
+    }
     if (anyPending && st.tick === null) {
       st.tick = timers.setInterval(() => tick(sessionId, st), TICK_MS);
     } else if (!anyPending && st.tick !== null) {
@@ -197,34 +193,52 @@ export function createBuildLoop(deps: {
   }
 
   function tick(sessionId: string, st: SessionState) {
-    const rt = runtime(sessionId);
-    const { doc, promoted } = tickAgreement(view(rt).doc, clock());
-    if (promoted.length) {
-      rt.setDoc(doc);
-      promote(sessionId, rt, promoted, "timeout");
+    try {
+      const rt = runtime(sessionId);
+      const { doc, promoted } = tickAgreement(view(rt).doc, clock());
+      if (promoted.length) {
+        rt.setDoc(doc);
+        promote(sessionId, rt, promoted, "timeout");
+      }
+    } catch (err) {
+      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
     }
     ensureTick(sessionId, st);
   }
 
-  // Applies the room's pick right away, then marks the winning variant's nodes agreed.
-  function resolveChoice(sessionId: string, choice: { conflictId: string; winner: "A" | "B" | "C" }) {
-    const rt = runtime(sessionId);
-    const before = view(rt).doc;
-    const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
-    const r = rt.resolveComparison(choice.conflictId, choice.winner);
-    if (!r.ok) {
-      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
-      return;
+  // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
+  // when a person (not Builder) in this session's grounding lines is behind the hand-off.
+  // Returns whether the pick was acted on.
+  function resolveChoice(sessionId: string, groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): boolean {
+    try {
+      if (groundingFor(sessionId, groundingIds).speakers.size === 0) {
+        log("build.resolve_ungrounded", { session_id: sessionId, conflict_id: choice.conflictId, grounding: groundingIds.length });
+        return false;
+      }
+      const rt = runtime(sessionId);
+      const before = view(rt).doc;
+      const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
+      const r = rt.resolveComparison(choice.conflictId, choice.winner);
+      if (!r.ok) {
+        log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
+        return false;
+      }
+      if (conflict?.status !== "open") return true;
+      const variant = conflict.variants.find((v) => v.label === choice.winner);
+      const after = view(rt).doc;
+      const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
+      if (!variant || !decision) return true;
+      // A winner batch that did not apply changed nothing, so it marks nothing agreed.
+      const proto = view(rt).proto;
+      const touched = r.applied ? touchedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
+      const affects = [...new Set([...decision.affects, ...touched])];
+      rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
+      promote(sessionId, rt, [decision.id], "conflict");
+      return true;
+    } catch (err) {
+      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorName(err) });
+      return false;
     }
-    if (conflict?.status !== "open") return;
-    const variant = conflict.variants.find((v) => v.label === choice.winner);
-    const after = view(rt).doc;
-    const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
-    if (!variant || !decision) return;
-    const proto = view(rt).proto;
-    const affects = [...new Set([...decision.affects, ...touchedIds(variant.batch).filter((id) => findNode(proto, id))])];
-    rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
-    promote(sessionId, rt, [decision.id], "conflict");
   }
 
   function schedule(sessionId: string, st: SessionState) {
@@ -235,7 +249,7 @@ export function createBuildLoop(deps: {
         timers.clearTimeout(st.timer);
         st.timer = null;
       }
-      void run(sessionId, st);
+      run(sessionId, st).catch((err) => log("build.run_failed", { session_id: sessionId, error: errorName(err) }));
     } else if (st.timer === null) {
       st.timer = timers.setTimeout(() => {
         st.timer = null;
@@ -245,7 +259,7 @@ export function createBuildLoop(deps: {
   }
 
   function applyResult(sessionId: string, rt: SessionRuntime, result: RunToolsResult, speakers: Set<string>) {
-    const counts = { patches_applied: 0, patches_rejected: 0, consensus_invalid: 0, ops: 0, grounding_dropped: 0, promoted: 0, conflicts: 0 };
+    const counts = { patches_applied: 0, patches_rejected: 0, consensus_invalid: 0, ops: 0, grounding_dropped: 0, promoted: 0, reopened: 0, conflicts: 0 };
     const ops: ConsensusUpdate[] = [];
     // Patches first, so decisions and conflicts can reference the nodes they add.
     for (const call of result.toolCalls) {
@@ -256,7 +270,7 @@ export function createBuildLoop(deps: {
         log("build.batch_rejected", { session_id: sessionId, reason: "invalid_input" });
         continue;
       }
-      const r = rt.applyBatch(fromToolBatch(parsed.data));
+      const r = rt.applyBatch(sanitizeModelBatch(fromToolBatch(parsed.data), view(rt).doc));
       if (r.ok) counts.patches_applied++;
       else {
         counts.patches_rejected++;
@@ -278,11 +292,17 @@ export function createBuildLoop(deps: {
       const before = view(rt).doc;
       const { doc, addedConflicts } = applyConsensusOps(before, grounded.ops, clock());
       rt.setDoc(doc);
-      const promoted = doc.decisions
-        .filter((d) => d.status === "agreed" && before.decisions.find((b) => b.id === d.id)?.status !== "agreed")
-        .map((d) => d.id);
+      const wasAgreed = (id: string) => before.decisions.find((b) => b.id === id)?.status === "agreed";
+      const promoted = doc.decisions.filter((d) => d.status === "agreed" && !wasAgreed(d.id)).map((d) => d.id);
       counts.promoted = promoted.length;
       promote(sessionId, rt, promoted, "support");
+      // An objection to an agreed decision sends its nodes back to draft.
+      const reopened = doc.decisions.filter((d) => d.status !== "agreed" && wasAgreed(d.id));
+      counts.reopened = reopened.length;
+      for (const d of reopened) {
+        flipNodes(sessionId, rt, d, "draft");
+        log("build.reopened", { session_id: sessionId, decision_id: d.id });
+      }
       for (const id of addedConflicts) {
         const conflict = doc.conflicts.find((c) => c.id === id)!;
         const comparison = buildComparisonView(view(rt).proto, conflict);
@@ -303,66 +323,65 @@ export function createBuildLoop(deps: {
     st.bypassFloor = false;
     st.inFlight = true;
     st.lastRunAt = clock();
-    const rt = runtime(sessionId);
-    rt.updateMoodInputs({ buildInFlight: true, buildStreaming: false });
-
-    const ids = new Set(h.groundingIds);
-    const grounding = store.listEvents(sessionId).filter((e) => e.kind === "utterance" && ids.has(e.id));
-    const speakers = new Set(grounding.map((e) => e.speaker).filter((s): s is string => !!s));
-    const { doc, proto } = view(rt);
-
-    // Streaming: "building" from the first input delta, and a placeholder where the
-    // first added node is going, from the first complete add parentId.
-    let streaming = false;
+    let rt: SessionRuntime | null = null;
     let region = false;
-    let buf = "";
-    const parentRe = /"parentId"\s*:\s*"([a-z0-9][a-z0-9.-]{0,63})"/g;
-    const onToolInputDelta = (tool: string, partial: string) => {
-      if (!streaming) {
-        streaming = true;
-        rt.updateMoodInputs({ buildStreaming: true });
-      }
-      if (region || tool !== "apply_patches") return;
-      buf += partial;
-      // parentRe.lastIndex only moves past complete matches, so each byte is scanned about once.
-      for (let m = parentRe.exec(buf); m; m = parentRe.exec(buf)) {
-        if (/"op"\s*:\s*"add"/.test(buf.slice(buf.lastIndexOf("{", m.index), m.index))) {
-          region = true;
-          rt.pendingRegion(m[1]);
-          return;
-        }
-      }
-      parentRe.lastIndex = Math.max(0, buf.length - 100);
-    };
-
+    let stage = "setup";
     try {
-      let result: RunToolsResult | null = null;
-      try {
-        result = await st.port.runTools({
-          loop: "build", system: SYSTEM, tools: TOOLS, effort: "medium", onToolInputDelta,
-          messages: [{ role: "user", content: userTurn(h, grounding, doc, proto) }],
-        });
-      } catch (err) {
-        log("build.run_failed", {
-          session_id: sessionId, error: err instanceof Error ? err.name : "unknown",
-          status: (err as { status?: unknown } | null)?.status ?? null,
-        });
-      }
-      if (result) {
-        const base = {
-          session_id: sessionId, stop_reason: result.stopReason, tool_calls: result.toolCalls.length,
-          dropped: result.dropped, ms: Math.round(result.ms), topics: h.topics.length, grounding: grounding.length,
-        };
-        // A refusal or no usable call leaves the screen and the doc as they are.
-        if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", base);
-        else log("build.run", { ...base, ...applyResult(sessionId, rt, result, speakers) });
-      }
+      const live = runtime(sessionId);
+      rt = live;
+      live.updateMoodInputs({ buildInFlight: true, buildStreaming: false });
+      const { lines: grounding, speakers } = groundingFor(sessionId, h.groundingIds);
+      const { doc, proto } = view(live);
+
+      // Streaming: "building" from the first input delta, and a placeholder where the
+      // first added node is going, from the first complete add parentId.
+      let streaming = false;
+      let buf = "";
+      const parentRe = /"parentId"\s*:\s*"([a-z0-9][a-z0-9.-]{0,63})"/g;
+      const onToolInputDelta = (tool: string, partial: string) => {
+        if (!streaming) {
+          streaming = true;
+          live.updateMoodInputs({ buildStreaming: true });
+        }
+        if (region || tool !== "apply_patches") return;
+        buf += partial;
+        // parentRe.lastIndex only moves past complete matches, so each byte is scanned about once.
+        for (let m = parentRe.exec(buf); m; m = parentRe.exec(buf)) {
+          if (/"op"\s*:\s*"add"/.test(buf.slice(buf.lastIndexOf("{", m.index), m.index))) {
+            region = true;
+            live.pendingRegion(m[1]);
+            return;
+          }
+        }
+        parentRe.lastIndex = Math.max(0, buf.length - 100);
+      };
+
+      stage = "model";
+      const result = await st.port.runTools({
+        loop: "build", system: SYSTEM, tools: TOOLS, effort: "medium", onToolInputDelta,
+        messages: [{ role: "user", content: userTurn(h, grounding, doc, proto) }],
+      });
+      stage = "apply";
+      const base = {
+        session_id: sessionId, stop_reason: result.stopReason, tool_calls: result.toolCalls.length,
+        dropped: result.dropped, ms: Math.round(result.ms), topics: h.topics.length, grounding: grounding.length,
+      };
+      // A refusal or no usable call leaves the screen and the doc as they are.
+      if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", base);
+      else log("build.run", { ...base, ...applyResult(sessionId, live, result, speakers) });
     } catch (err) {
-      log("build.apply_failed", { session_id: sessionId, error: err instanceof Error ? err.name : "unknown" });
+      log("build.run_failed", {
+        session_id: sessionId, stage, error: errorName(err),
+        status: (err as { status?: unknown } | null)?.status ?? null,
+      });
     } finally {
-      if (region) rt.pendingRegion(null);
-      rt.updateMoodInputs({ buildInFlight: false, buildStreaming: false });
       st.inFlight = false;
+      try {
+        if (rt && region) rt.pendingRegion(null);
+        rt?.updateMoodInputs({ buildInFlight: false, buildStreaming: false });
+      } catch (err) {
+        log("build.cleanup_failed", { session_id: sessionId, error: errorName(err) });
+      }
       ensureTick(sessionId, st);
       schedule(sessionId, st);
     }
@@ -375,15 +394,20 @@ export function createBuildLoop(deps: {
         log("build.handoff_invalid", { session_id: sessionId, issues: parsed.error.issues.length });
         return;
       }
-      const h = parsed.data;
       const st = state(sessionId);
-      log("build.handoff", { session_id: sessionId, topics: h.topics.length, grounding: h.groundingIds.length });
+      log("build.handoff", { session_id: sessionId, topics: parsed.data.topics.length, grounding: parsed.data.groundingIds.length });
+      // A pick that was not acted on is removed, so the model never sees it as done.
       let resolved = false;
-      for (const t of h.topics) {
-        if (!t.resolvedChoice) continue;
-        resolveChoice(sessionId, t.resolvedChoice);
-        resolved = true;
-      }
+      const topics = parsed.data.topics.map((t) => {
+        if (!t.resolvedChoice) return t;
+        if (resolveChoice(sessionId, parsed.data.groundingIds, t.resolvedChoice)) {
+          resolved = true;
+          return t;
+        }
+        const { resolvedChoice: _dropped, ...rest } = t;
+        return rest;
+      });
+      const h: Handoff = { ...parsed.data, topics };
       st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
       if (resolved) st.bypassFloor = true;
       schedule(sessionId, st);

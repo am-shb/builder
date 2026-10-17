@@ -95,7 +95,7 @@ test("resolveComparison applies winner batch to main proto and records decision"
   assert.equal((rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison?.variants.length, 3);
 
   sent.length = 0;
-  assert.deepEqual(rt.resolveComparison("c1", "B"), { ok: true });
+  assert.deepEqual(rt.resolveComparison("c1", "B"), { ok: true, applied: true });
   assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc"]);
   assert.deepEqual(sent[0], { type: "resolve", conflictId: "c1", winner: "B" });
 

@@ -5,7 +5,8 @@ import { openStore } from "../src/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
-import { createBuildLoop, toolJsonSchema } from "../src/agent/build-loop.ts";
+import { createBuildLoop } from "../src/agent/build-loop.ts";
+import { toolJsonSchema } from "../src/agent/tool-schema.ts";
 import { enforceGrounding, HandoffSchema } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
 import { findNode } from "../src/ui/tree.ts";
@@ -61,11 +62,17 @@ function setup(portOrScript: ModelPort | ToolCall[][]) {
     runTools(req) { requests.push(req); timeline.push("call"); return inner.runTools(req); },
   };
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const loop = createBuildLoop({ port, runtime, store, clock: timers.now, log: (msg, fields) => logs.push({ msg, fields }), timers });
+  // Set faults.runtime to make every runtime lookup from the build loop throw.
+  const faults = { runtime: false };
+  const loopRuntime = (id: string) => {
+    if (faults.runtime) throw new Error("runtime unavailable");
+    return runtime(id);
+  };
+  const loop = createBuildLoop({ port, runtime: loopRuntime, store, clock: timers.now, log: (msg, fields) => logs.push({ msg, fields }), timers });
   const rt = runtime(sessionId);
   const snap = () => rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
   return {
-    store, sessionId, timers, sent, timeline, requests, logs, loop, rt,
+    store, sessionId, timers, sent, timeline, requests, logs, loop, rt, faults,
     doc: (): ConsensusDoc => snap().doc,
     proto: (): Prototype => snap().proto,
     mood: () => snap().mood,
@@ -406,11 +413,159 @@ test("resolving a conflict flips the winning variant's nodes to agreed", async (
 
   // Resolving again is a no-op: no second flip.
   const flipsBefore = s.patches().length;
-  s.loop.handoff(s.sessionId, handoff([], {
+  s.loop.handoff(s.sessionId, handoff([s.say("Sara", "yes, B")], {
     topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
   }));
   await flush();
   assert.equal(s.patches().length, flipsBefore);
+});
+
+const RESOLVE_B = (groundingIds: number[]) => handoff(groundingIds, {
+  topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
+});
+
+test("ungrounded resolvedChoice is ignored", async () => {
+  const s = setup([[DONE_CONFLICT], [], [], [], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "toggle"), s.say("Sara", "tab")]));
+  await flush();
+  const other = randomUUID();
+  s.store.createIntent(other, "https://meet.google.com/zzz-zzzz-zzz");
+  const foreign = s.store.addEvent({ sessionId: other, recallMsgId: null, kind: "utterance", speaker: "Amir", text: "B" })!.id;
+  const bot = s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Builder", text: "So: B?" })!.id;
+
+  for (const ids of [[], [9999], [foreign], [bot]]) {
+    s.loop.handoff(s.sessionId, RESOLVE_B(ids));
+    await flush();
+    assert.equal(s.doc().conflicts[0].status, "open", `not resolved with grounding ${JSON.stringify(ids)}`);
+  }
+  assert.equal(s.requests.length, 1, "no floor bypass: the merged hand-off waits for the floor");
+  assert.equal(s.logs.filter((l) => l.msg === "build.resolve_ungrounded").length, 4);
+  assert.equal(findNode(s.proto(), "home.tabs"), undefined);
+});
+
+test("model batch cannot mark nodes agreed", async () => {
+  const s = setup([[
+    patches("Added: quick-add", [
+      { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Input", props: [], status: "agreed", decisionId: "d-quick-add" } },
+      { op: "add", parentId: "home", node: { id: "home.title", type: "Heading", props: [{ key: "text", value: "Tasks" }], status: "agreed" } },
+    ]),
+    patches("Settled: title", [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
+    consensus([
+      { op: "add_decision", id: "d-quick-add", text: "Quick-add", proposedBy: "Amir", affects: ["home.quick-add"] },
+      { op: "add_conflict", id: "c-x", topic: "Where done tasks go", variants: [
+        conflictVariant("A", "Toggle", ["Amir"], [
+          { op: "add", parentId: "home", node: { id: "home.show-done", type: "Toggle", props: [], status: "agreed" } },
+        ]),
+        conflictVariant("B", "Agree the heading", ["Sara"], [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
+      ] },
+    ]),
+  ]]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add"), s.say("Sara", "tabs")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "draft", "add is forced to draft");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.decisionId, "d-quick-add", "a draft keeps its decision id");
+  const title = findNode(s.proto(), "home.title")!;
+  assert.equal(title.status, "draft", "update to agreed is dropped");
+  assert.equal(title.decisionId, undefined, "decisionId of a non-agreed decision is dropped with it");
+  assert.equal(s.doc().decisions[0].status, "draft");
+
+  const variants = s.doc().conflicts[0].variants;
+  const addOp = variants[0].batch.ops[0] as { op: "add"; node: { status: string } };
+  assert.equal(addOp.node.status, "draft", "stored variant adds are draft");
+  assert.equal(variants[1].batch.ops.some((o) => o.op === "update" && o.status === "agreed"), false, "stored variant updates cannot agree");
+  const view = s.sent.find((e): e is Extract<StageEvent, { type: "comparison" }> => e.type === "comparison");
+  for (const v of view?.view?.variants ?? []) {
+    assert.equal(JSON.stringify(v.proto).includes('"agreed"'), false, "no agreed node in any preview");
+  }
+});
+
+test("objection to an agreed decision returns its nodes to draft", async () => {
+  const s = setup([
+    [...QUICK_ADD, consensus([
+      { op: "add_decision", id: "d-quick-add", text: "Quick-add at top", proposedBy: "Amir", affects: ["home.quick-add", "home.quick-add-btn"] },
+      { op: "mark_pending", decisionId: "d-quick-add" },
+      { op: "support", decisionId: "d-quick-add", speaker: "Sara" },
+    ])],
+    [patches("Removed: add button", [{ op: "remove", id: "home.quick-add-btn" }]), consensus([{ op: "object", decisionId: "d-quick-add", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top"), s.say("Sara", "yes")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "agreed");
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "actually no, I hate that")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "draft");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "draft");
+  const reopen = s.patches().filter((p) => p.changes[0]?.label.startsWith("Reopened: "));
+  assert.equal(reopen.length, 1, "one batch");
+  assert.equal(reopen[0].changes[0].label, "Reopened: Quick-add at top");
+  assert.deepEqual(reopen[0].changes.map((c) => c.id), ["home.quick-add"], "missing ids skipped");
+});
+
+test("rejected winning batch does not flip pre-existing nodes", async () => {
+  // B updates the existing heading, then adds under a missing parent, so its whole batch is rejected.
+  const s = setup([[
+    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    consensus([{
+      op: "add_conflict", id: "c-done", topic: "Heading",
+      variants: [
+        conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
+        conflictVariant("B", "Rename and tab", ["Sara"], [
+          { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
+          addNode("missing", "missing.tabs", "Tabs"),
+        ]),
+      ],
+    }]),
+  ], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "rename"), s.say("Sara", "today")]));
+  await flush();
+  s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Sara", "B please")]));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c-done")!;
+  assert.equal(d.status, "agreed");
+  assert.deepEqual(d.affects, [], "a winner batch that did not apply touches nothing");
+  assert.equal(s.patches().some((p) => p.changes[0]?.label.startsWith("Agreed: ")), false, "nothing flipped");
+});
+
+test("a throwing runtime during a run does not wedge the loop", async () => {
+  const rejections: unknown[] = [];
+  const onRejection = (r: unknown) => rejections.push(r);
+  process.on("unhandledRejection", onRejection);
+  try {
+    const s = setup([[...QUICK_ADD, consensus([
+      { op: "add_decision", id: "d-quick-add", text: "Quick-add at top", proposedBy: "Amir", affects: ["home.quick-add"] },
+      { op: "mark_pending", decisionId: "d-quick-add" },
+    ])]]);
+    s.faults.runtime = true;
+    s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+    await flush();
+    assert.equal(s.loop.idle(s.sessionId), true, "inFlight cleared");
+    assert.ok(s.logs.some((l) => l.msg === "build.run_failed" && l.fields?.error === "Error"));
+
+    s.faults.runtime = false;
+    s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+    await s.timers.advance(10_000);
+    assert.equal(s.requests.length, 1, "the next hand-off still runs");
+    assert.ok(findNode(s.proto(), "home.quick-add"));
+
+    // A throwing tick is logged and the next tick still promotes.
+    s.faults.runtime = true;
+    await s.timers.advance(3_000);
+    s.faults.runtime = false;
+    await s.timers.advance(30_000);
+    assert.equal(s.doc().decisions[0].status, "agreed");
+    assert.ok(s.logs.some((l) => l.msg === "build.tick_failed"));
+
+    // A throwing resolve inside handoff() is logged, not thrown.
+    s.faults.runtime = true;
+    assert.doesNotThrow(() => s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Sara", "B")])));
+    s.faults.runtime = false;
+    await flush();
+    assert.equal(JSON.stringify(s.logs).includes("runtime unavailable"), false, "errors logged by name only");
+    assert.deepEqual(rejections, []);
+  } finally {
+    process.off("unhandledRejection", onRejection);
+  }
 });
 
 test("invalid hand-offs are dropped without a model call", async () => {

@@ -3,6 +3,7 @@
 // unsupported attributions out, and the pure application of those ops to the doc.
 import { z } from "zod";
 import { ToolPatchBatch } from "../ui/schema.ts";
+import type { PatchBatch, PatchOp, UiNode } from "../ui/schema.ts";
 import { fromToolBatch } from "../ui/tree.ts";
 import { markPending, Phase, recordObjection, recordSupport } from "../consensus/doc.ts";
 import type { ConsensusDoc, Conflict } from "../consensus/doc.ts";
@@ -88,6 +89,30 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
   return { ops: kept, dropped };
 }
 
+const asDraft = (n: UiNode): UiNode => ({ ...n, status: "draft", children: n.children.map(asDraft) });
+
+/**
+ * Only the build loop's promotion flip may mark nodes agreed. In a model-made batch, added nodes
+ * are forced to draft, and an update to "agreed" loses that status (and its decisionId, unless the
+ * decision really is agreed). An update left with nothing to change is dropped.
+ */
+export function sanitizeModelBatch(batch: PatchBatch, doc: ConsensusDoc): PatchBatch {
+  const agreed = new Set(doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
+  const ops: PatchOp[] = [];
+  for (const op of batch.ops) {
+    if (op.op === "add") {
+      ops.push({ ...op, node: asDraft(op.node) });
+    } else if (op.op === "update" && op.status === "agreed") {
+      const { status: _status, decisionId, ...rest } = op;
+      const next = decisionId !== undefined && agreed.has(decisionId) ? { ...rest, decisionId } : rest;
+      if (next.props !== undefined || "decisionId" in next) ops.push(next);
+    } else {
+      ops.push(op);
+    }
+  }
+  return { ...batch, ops };
+}
+
 function nextQuestionId(doc: ConsensusDoc): string {
   const taken = new Set(doc.openQuestions.map((q) => q.id));
   let n = doc.openQuestions.length + 1;
@@ -128,7 +153,9 @@ export function applyConsensusOps(input: ConsensusDoc, ops: ConsensusUpdate[], n
         if (doc.conflicts.some((c) => c.id === op.id) || labels.size !== op.variants.length) break;
         const conflict: Conflict = {
           id: op.id, topic: op.topic, status: "open", openedAt: now,
-          variants: op.variants.map((v) => ({ label: v.label, summary: v.summary, backers: v.backers, batch: fromToolBatch(v.batch) })),
+          variants: op.variants.map((v) => ({
+            label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(fromToolBatch(v.batch), doc),
+          })),
         };
         doc = { ...doc, conflicts: [...doc.conflicts, conflict] };
         addedConflicts.push(op.id);

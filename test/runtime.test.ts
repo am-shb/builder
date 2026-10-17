@@ -234,7 +234,7 @@ test("resolveComparison applies the winner, resolves the doc, persists and sends
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
   rt.setDoc(conflictDoc());
   sent.length = 0;
-  assert.deepEqual(rt.resolveComparison("c1", "A"), { ok: true });
+  assert.deepEqual(rt.resolveComparison("c1", "A"), { ok: true, applied: true });
   assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc"]);
   const saved = store.getConsensus(s.id)!;
   assert.equal(saved.doc.conflicts[0].status, "resolved");
@@ -242,7 +242,7 @@ test("resolveComparison applies the winner, resolves the doc, persists and sends
   assert.ok(JSON.stringify(saved.proto).includes("home.a"));
   // Resolving again is idempotent: the batch is not applied twice.
   sent.length = 0;
-  assert.equal(rt.resolveComparison("c1", "A").ok, true);
+  assert.deepEqual(rt.resolveComparison("c1", "A"), { ok: true, applied: false }, "already resolved: not re-applied");
   assert.deepEqual(sent.map((e) => e.type), ["resolve", "doc"]);
   assert.equal(rt.resolveComparison("nope", "A").ok, false);
 });
@@ -256,7 +256,7 @@ test("resolveComparison with an unappliable winner batch still resolves the doc 
   rt.setDoc(conflictDoc());
   const before = JSON.stringify(store.getConsensus(s.id)!.proto);
   sent.length = 0;
-  assert.equal(rt.resolveComparison("c1", "B").ok, true);
+  assert.deepEqual(rt.resolveComparison("c1", "B"), { ok: true, applied: false });
   assert.deepEqual(sent.map((e) => e.type), ["resolve", "doc"]);
   const saved = store.getConsensus(s.id)!;
   assert.equal(saved.doc.conflicts[0].status, "resolved");

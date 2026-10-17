@@ -137,8 +137,9 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
     },
 
     // Applies the winning variant's batch to the main prototype and resolves the
-    // conflict in the doc. An unappliable batch still resolves the doc.
-    resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; error?: string } {
+    // conflict in the doc. An unappliable batch still resolves the doc; `applied`
+    // says whether the winner's batch landed on the prototype in this call.
+    resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; applied?: boolean; error?: string } {
       const conflict = doc.conflicts.find((c) => c.id === conflictId);
       const variant = conflict?.variants.find((v) => v.label === winner);
       if (!conflict || !variant) {
@@ -160,7 +161,7 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
       send({ type: "resolve", conflictId, winner });
       if (applied) send({ type: "patch", proto, changes: applied.changes });
       send({ type: "doc", doc });
-      return { ok: true };
+      return { ok: true, applied: applied !== null };
     },
   };
 }

@@ -41,7 +41,9 @@ Every decision is in one of three states:
 - **pending**: the proposal stands and the room seems to be going with it. Use `mark_pending`. Builder lists it on screen as pending without saying anything.
 - **agreed**: it becomes agreed when a different participant backs it (`support` with that person as `speaker`), or automatically when nobody objects for 30 seconds after it became pending. The system runs that timer and flips the decision's nodes to agreed; you never mark anything agreed yourself.
 
-An objection at any point sends the decision back to draft: use `object`. If an agreed decision is sent back, also update its nodes to `status: "draft"`. If the objection is really a competing choice, record a conflict instead (below).
+An objection at any point sends the decision back to draft: use `object`. If the decision was agreed, the system returns its nodes to draft. If the objection is really a competing choice, record a conflict instead (below).
+
+Node status follows decisions, not patches: every node you add is drawn as draft, and the system ignores any patch that sets `status: "agreed"`. Only a decision becoming agreed turns its nodes solid.
 
 Never record agreement, support, an objection or a proposal that the grounding lines do not support. The hand-off summary is a guide, not evidence: if the summary says Sara agreed but no line from Sara says so, do not emit that `support`. Use speaker names exactly as they appear in the grounding lines. The system discards any `support`, `object` or `add_decision` whose speaker is not in the grounding lines, and strips conflict backers who are not there either. A speaker supporting their own proposal does not count.
 
