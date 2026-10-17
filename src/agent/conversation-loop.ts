@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withCostRecording } from "./cost.ts";
 import { toolJsonSchema } from "./tool-schema.ts";
-import type { ModelPort, PortTool, RunToolsResult } from "./llm.ts";
+import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { HandoffSchema, HandoffToolInput } from "./handoff.ts";
 import type { Handoff } from "./handoff.ts";
 import { ADDRESS_RE, createStuckDetector } from "./stuck.ts";
@@ -103,7 +103,7 @@ const TOOLS: PortTool[] = [
 
 type Snapshot = Extract<StageEvent, { type: "snapshot" }>;
 type Line = { id: number | null; speaker: string; text: string };
-type Turn = { trigger: string; opening: boolean; stuck: StuckEvent | null };
+type Turn = { trigger: string; opening: boolean; stuck: StuckEvent | null; queuedMs: number | null };
 type CommandRecord = { at: number; cmd: UiCommand; outcome: CommandOutcome; shown: boolean; fedBack: boolean };
 
 type SessionState = {
@@ -124,6 +124,8 @@ type SessionState = {
   command: CommandRecord | null;
   commandFollowUps: number;
   handedOffThrough: number;
+  // Arrival of the earliest utterance no turn has started on yet.
+  waitingSince: number | null;
   inFlight: boolean;
   dirty: boolean;
 };
@@ -236,7 +238,7 @@ export function createConversationLoop(deps: {
         lines: [], humanIds: new Set(), present: new Set(), heard: new Set(),
         recording: already, opened: already, openingTried: already, openingPending: false,
         addressedAt: null, answeredAt: null, stuck: null, confirmed: new Set(), command: null, commandFollowUps: 0,
-        handedOffThrough: 0, inFlight: false, dirty: false,
+        handedOffThrough: 0, waitingSince: null, inFlight: false, dirty: false,
       };
       sessions.set(sessionId, st);
     }
@@ -403,20 +405,39 @@ export function createConversationLoop(deps: {
     return true;
   }
 
-  async function apply(sessionId: string, st: SessionState, turn: Turn, result: RunToolsResult) {
-    const counts = { handoffs: 0, commands: 0, spoke: null as SpeakReason | null };
-    // Hand-offs first (a settled choice resolves synchronously, which confirm_conflict depends on),
-    // then commands, then at most one line of speech.
-    for (const call of result.toolCalls) if (call.name === "update_build" && forwardHandoff(sessionId, st, call.input)) counts.handoffs++;
-    for (const call of result.toolCalls) if (call.name === "ui_command" && runCommand(sessionId, st, call.input)) counts.commands++;
+  // What a turn has done so far. Hand-offs and commands take effect as their tool calls stream in,
+  // so `handled` lets apply() skip them and `handoffMs` is when the first hand-off went out.
+  type TurnWork = { handled: Set<ToolCall>; handoffs: number; commands: number; handoffMs: number | null };
+
+  function handleCall(sessionId: string, st: SessionState, call: ToolCall, work: TurnWork, startedAt: number) {
+    if (work.handled.has(call)) return;
+    if (call.name === "update_build") {
+      work.handled.add(call);
+      if (forwardHandoff(sessionId, st, call.input)) {
+        work.handoffs++;
+        work.handoffMs ??= clock() - startedAt;
+      }
+    } else if (call.name === "ui_command") {
+      work.handled.add(call);
+      if (runCommand(sessionId, st, call.input)) work.commands++;
+    }
+  }
+
+  async function apply(sessionId: string, st: SessionState, turn: Turn, result: RunToolsResult, work: TurnWork, startedAt: number) {
+    // Hand-offs and commands normally took effect as they streamed, in arrival order, before any
+    // speech. Anything still unhandled goes now: hand-offs first (a settled choice resolves
+    // synchronously, which confirm_conflict depends on), then commands, then at most one line of speech.
+    for (const call of result.toolCalls) if (call.name === "update_build") handleCall(sessionId, st, call, work, startedAt);
+    for (const call of result.toolCalls) if (call.name === "ui_command") handleCall(sessionId, st, call, work, startedAt);
+    let spoke: SpeakReason | null = null;
     let first = true;
     for (const call of result.toolCalls) {
       if (call.name !== "speak") continue;
-      const spoke = await trySpeak(sessionId, st, turn, call.input, first);
+      const s = await trySpeak(sessionId, st, turn, call.input, first);
       first = false;
-      counts.spoke ??= spoke;
+      spoke ??= s;
     }
-    return counts;
+    return spoke;
   }
 
   async function run(sessionId: string, st: SessionState) {
@@ -428,7 +449,10 @@ export function createConversationLoop(deps: {
       trigger: st.openingPending ? "opening" : st.stuck ? `stuck: ${st.stuck.reason}` : fresh ? "command_result" : "utterance",
       opening: st.openingPending,
       stuck: st.stuck,
+      queuedMs: null,
     };
+    if (turn.trigger === "utterance" && st.waitingSince !== null) turn.queuedMs = now - st.waitingSince;
+    st.waitingSince = null;
     if (fresh) fresh.shown = true;
     try {
       try {
@@ -453,15 +477,24 @@ export function createConversationLoop(deps: {
   async function modelTurn(sessionId: string, st: SessionState, turn: Turn, now: number) {
     const snap = view(sessionId);
     const open = openReasons(st, turn, snap.doc, now);
+    const work: TurnWork = { handled: new Set(), handoffs: 0, commands: 0, handoffMs: null };
     const result = await st.port.runTools({
       loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
       messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],
+      onToolCall: (call) => {
+        try {
+          handleCall(sessionId, st, call, work, now);
+        } catch (err) {
+          log("conversation.stream_call_failed", { session_id: sessionId, tool: call.name, error: errorName(err) });
+        }
+      },
     });
-    const counts = await apply(sessionId, st, turn, result);
+    const spoke = await apply(sessionId, st, turn, result, work, now);
     log("conversation.turn", {
       session_id: sessionId, trigger: turn.trigger.split(":")[0], stop_reason: result.stopReason,
       tool_calls: result.toolCalls.length, dropped: result.dropped, ms: Math.round(result.ms),
-      lines: st.lines.length, handoffs: counts.handoffs, commands: counts.commands, spoke: counts.spoke,
+      lines: st.lines.length, handoffs: work.handoffs, commands: work.commands, spoke,
+      queued_ms: turn.queuedMs, handoff_ms: work.handoffMs,
     });
   }
 
@@ -498,6 +531,7 @@ export function createConversationLoop(deps: {
         const st = state(sessionId);
         pushLine(st, { id: u.id, speaker: u.speaker ?? "Unknown", text });
         st.humanIds.add(u.id);
+        st.waitingSince ??= clock();
         if (u.speaker) st.heard.add(u.speaker);
         st.commandFollowUps = 0;
         st.detector.onHumanUtterance(text, u.speaker);

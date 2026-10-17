@@ -563,3 +563,64 @@ test("without agent deps the app stays listen-only", async () => {
   app.tickAgent();
 });
 
+
+test("a streamed update_build reaches the build loop before the turn ends", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  const id = s.say("Amir", "Let's add a quick-add bar.");
+  await flush();
+  const call = updateBuild(handoff([id]));
+  held.calls[0].req.onToolCall!(call);
+  await flush();
+  assert.equal(s.handoffs.length, 1, "forwarded while the model call is still held");
+  await held.release(0, [call]);
+  assert.equal(s.handoffs.length, 1, "the same call is not forwarded again after the turn");
+  const turn = s.logs.find((l) => l.msg === "conversation.turn")!;
+  assert.equal(turn.fields!.handoffs, 1);
+});
+
+test("a streamed ui_command runs before the turn ends, once", async () => {
+  const held = heldPort();
+  let ran = 0;
+  const s = setup(held.port, { uiCommand: () => { ran++; return { ok: true, visible: true }; } });
+  s.say("Amir", "Builder, click save.");
+  await flush();
+  const call: ToolCall = { name: "ui_command", input: { action: "click", target: "Save" } };
+  held.calls[0].req.onToolCall!(call);
+  assert.equal(ran, 1, "ran while the model call is still held");
+  await held.release(0, [call]);
+  assert.equal(ran, 1);
+  const turn = s.logs.find((l) => l.msg === "conversation.turn")!;
+  assert.equal(turn.fields!.commands, 1);
+});
+
+test("speak still waits for the end of the turn and the gate", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.say("Sara", "Builder, tabs or sidebar?");
+  await flush();
+  const call = speak("Tabs. Want them?", "answer");
+  held.calls[0].req.onToolCall!(call);
+  await flush();
+  assert.deepEqual(s.said, [], "nothing said while the turn streams");
+  await held.release(0, [call]);
+  assert.deepEqual(s.said, ["Tabs. Want them?"]);
+});
+
+test("conversation.turn logs queued_ms and handoff_ms", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.say("Amir", "First thing.");
+  await flush();
+  const id = s.say("Sara", "And a second thing.");
+  s.advance(700);
+  await held.release(0);
+  assert.equal(held.calls.length, 2, "the queued utterance runs a follow-up turn");
+  held.calls[1].req.onToolCall!(updateBuild(handoff([id])));
+  await held.release(1);
+  const turns = s.logs.filter((l) => l.msg === "conversation.turn");
+  assert.equal(turns[0].fields!.queued_ms, 0);
+  assert.equal(turns[0].fields!.handoff_ms, null);
+  assert.ok((turns[1].fields!.queued_ms as number) >= 700);
+  assert.equal(typeof turns[1].fields!.handoff_ms, "number");
+});
