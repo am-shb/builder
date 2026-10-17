@@ -28,6 +28,10 @@ export const FEEDBACK_MS = 5_000;
 export const MAX_SPOKEN = 300;
 const CHAT_MAX = 500;
 const SCREEN_MAX_NODES = 80;
+// Follow-up turns that failed or invisible commands may trigger before a person speaks again.
+export const MAX_COMMAND_FOLLOW_UPS = 2;
+// Said when the opening turn fails or the model doesn't open (controller ruling).
+export const FALLBACK_OPENING = "Hi, I'm Builder. I'll mostly listen and sketch what you agree on. Say 'Builder' anytime you want me.";
 
 const SYSTEM = readFileSync(new URL("./prompts/conversation.md", import.meta.url), "utf8");
 
@@ -114,6 +118,7 @@ type SessionState = {
   stuck: StuckEvent | null;
   confirmed: Set<string>;
   command: CommandRecord | null;
+  commandFollowUps: number;
   handedOffThrough: number;
   inFlight: boolean;
   dirty: boolean;
@@ -226,7 +231,7 @@ export function createConversationLoop(deps: {
         detector: createStuckDetector({ clock }),
         lines: [], humanIds: new Set(), present: new Set(), heard: new Set(),
         recording: already, opened: already, openingTried: already, openingPending: false,
-        addressedAt: null, answeredAt: null, stuck: null, confirmed: new Set(), command: null,
+        addressedAt: null, answeredAt: null, stuck: null, confirmed: new Set(), command: null, commandFollowUps: 0,
         handedOffThrough: 0, inFlight: false, dirty: false,
       };
       sessions.set(sessionId, st);
@@ -333,8 +338,16 @@ export function createConversationLoop(deps: {
     }
     st.command = { at: clock(), cmd: parsed.data, outcome, shown: false, fedBack: false };
     log("conversation.command", { session_id: sessionId, action: parsed.data.action, ok: outcome.ok, ...(outcome.ok ? { visible: outcome.visible } : { reason: outcome.reason }) });
-    // A failed or invisible command is shown to the model in a follow-up turn, so it can say so.
-    if (!(outcome.ok && outcome.visible)) st.dirty = true;
+    // A failed or invisible command is shown to the model in a follow-up turn, so it can say so,
+    // but only a couple of times in a row: a model that keeps failing must not loop on its own.
+    if (!(outcome.ok && outcome.visible)) {
+      if (st.commandFollowUps < MAX_COMMAND_FOLLOW_UPS) {
+        st.commandFollowUps++;
+        st.dirty = true;
+      } else {
+        log("conversation.command_followup_capped", { session_id: sessionId });
+      }
+    }
     return true;
   }
 
@@ -364,12 +377,16 @@ export function createConversationLoop(deps: {
     if (reason === "stuck") st.stuck = null;
     if (reason === "confirm_conflict") for (const id of freshResolutions(st, doc, now)) st.confirmed.add(id);
     if (reason === "command_feedback" && st.command) st.command.fedBack = true;
+    return (await deliver(sessionId, st, text, reason, addressedAt)) ? reason : null;
+  }
 
+  // Says a line that passed the gate, then updates the window, the stuck detector and the mood.
+  async function deliver(sessionId: string, st: SessionState, text: string, reason: SpeakReason, addressedAt: number | null): Promise<boolean> {
     try {
       await speech.say(sessionId, text);
     } catch (err) {
       log("speak.failed", { session_id: sessionId, reason, error: errorName(err) });
-      return null;
+      return false;
     }
     pushLine(st, { id: null, speaker: botName, text });
     const asked = text.trim().endsWith("?");
@@ -379,7 +396,7 @@ export function createConversationLoop(deps: {
     if (reason === "answer" && st.addressedAt === addressedAt) inputs.addressedUntil = 0;
     runtime(sessionId).updateMoodInputs(inputs);
     log("speak", { session_id: sessionId, reason, chars: text.length, question: asked });
-    return reason;
+    return true;
   }
 
   async function apply(sessionId: string, st: SessionState, turn: Turn, result: RunToolsResult) {
@@ -410,92 +427,118 @@ export function createConversationLoop(deps: {
     };
     if (fresh) fresh.shown = true;
     try {
-      const snap = view(sessionId);
-      const open = openReasons(st, turn, snap.doc, now);
-      const result = await st.port.runTools({
-        loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
-        messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],
-      });
-      const counts = await apply(sessionId, st, turn, result);
-      log("conversation.turn", {
-        session_id: sessionId, trigger: turn.trigger.split(":")[0], stop_reason: result.stopReason,
-        tool_calls: result.toolCalls.length, dropped: result.dropped, ms: Math.round(result.ms),
-        lines: st.lines.length, handoffs: counts.handoffs, commands: counts.commands, spoke: counts.spoke,
-      });
-    } catch (err) {
-      log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorName(err) });
-    } finally {
-      if (turn.opening) {
-        st.openingPending = false;
-        if (!st.opened) log("conversation.opening_missed", { session_id: sessionId });
+      try {
+        await modelTurn(sessionId, st, turn, now);
+      } catch (err) {
+        log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorName(err) });
       }
+      // The room always gets an opening: the fixed line when the model failed or didn't open.
+      if (turn.opening && !st.opened) {
+        st.opened = true;
+        log("conversation.opening_fallback", { session_id: sessionId });
+        await deliver(sessionId, st, FALLBACK_OPENING, "opening", st.addressedAt);
+      }
+    } finally {
+      if (turn.opening) st.openingPending = false;
       if (turn.stuck && st.stuck === turn.stuck) st.stuck = null;
       st.inFlight = false;
       if (st.dirty) schedule(sessionId, st);
     }
   }
 
+  async function modelTurn(sessionId: string, st: SessionState, turn: Turn, now: number) {
+    const snap = view(sessionId);
+    const open = openReasons(st, turn, snap.doc, now);
+    const result = await st.port.runTools({
+      loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
+      messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],
+    });
+    const counts = await apply(sessionId, st, turn, result);
+    log("conversation.turn", {
+      session_id: sessionId, trigger: turn.trigger.split(":")[0], stop_reason: result.stopReason,
+      tool_calls: result.toolCalls.length, dropped: result.dropped, ms: Math.round(result.ms),
+      lines: st.lines.length, handoffs: counts.handoffs, commands: counts.commands, spoke: counts.spoke,
+    });
+  }
+
+  function pollSessions(now: number) {
+    for (const [sessionId, st] of sessions) {
+      if (!st.recording) continue;
+      try {
+        st.detector.onDoc(view(sessionId).doc);
+        const ev = st.detector.poll(now);
+        if (!ev) continue;
+        st.stuck = ev;
+        log("conversation.stuck", { session_id: sessionId, reason: ev.reason });
+        schedule(sessionId, st);
+      } catch (err) {
+        log("conversation.poll_failed", { session_id: sessionId, error: errorName(err) });
+      }
+    }
+  }
+
+  // Entry points are called from processRealtime and timers in app.ts: they log errors and never throw.
+  const guard = (entry: string, sessionId: string | null, fn: () => void) => {
+    try {
+      fn();
+    } catch (err) {
+      log("conversation.entry_failed", { ...(sessionId ? { session_id: sessionId } : {}), entry, error: errorName(err) });
+    }
+  };
+
   return {
     onUtterance(sessionId: string, u: { id: number; speaker: string | null; text: string | null }): void {
-      if (u.speaker === botName || !u.text) return;
-      const st = state(sessionId);
-      const speaker = u.speaker ?? "Unknown";
-      pushLine(st, { id: u.id, speaker, text: u.text });
-      st.humanIds.add(u.id);
-      if (u.speaker) st.heard.add(u.speaker);
-      st.detector.onHumanUtterance(u.text, u.speaker);
-      try {
-        if (ADDRESS_RE.test(u.text)) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
-        else runtime(sessionId).updateMoodInputs({ lastSpeechWasQuestion: false });
-      } catch (err) {
-        log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
-      }
-      maybeOpen(sessionId, st);
-      schedule(sessionId, st);
+      const text = u.text;
+      if (u.speaker === botName || !text) return;
+      guard("onUtterance", sessionId, () => {
+        const st = state(sessionId);
+        pushLine(st, { id: u.id, speaker: u.speaker ?? "Unknown", text });
+        st.humanIds.add(u.id);
+        if (u.speaker) st.heard.add(u.speaker);
+        st.commandFollowUps = 0;
+        st.detector.onHumanUtterance(text, u.speaker);
+        try {
+          if (ADDRESS_RE.test(text)) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
+          else runtime(sessionId).updateMoodInputs({ lastSpeechWasQuestion: false });
+        } catch (err) {
+          log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
+        }
+        maybeOpen(sessionId, st);
+        schedule(sessionId, st);
+      });
     },
 
     // Partials only make the character react: being addressed shows at once, before any model call.
     onPartial(sessionId: string, p: { speaker: string | null; text: string | null }): void {
       if (p.speaker === botName || !p.text || !ADDRESS_RE.test(p.text)) return;
-      try {
-        markAddressed(sessionId, state(sessionId));
-      } catch (err) {
-        log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
-      }
+      guard("onPartial", sessionId, () => markAddressed(sessionId, state(sessionId)));
     },
 
     onParticipant(sessionId: string, e: { kind: "join" | "leave"; name: string | null }): void {
-      if (!e.name || e.name === botName) return;
-      const st = state(sessionId);
-      if (e.kind === "join") st.present.add(e.name);
-      else {
-        st.present.delete(e.name);
-        st.heard.delete(e.name);
-      }
-      maybeOpen(sessionId, st);
+      const name = e.name;
+      if (!name || name === botName) return;
+      guard("onParticipant", sessionId, () => {
+        const st = state(sessionId);
+        if (e.kind === "join") st.present.add(name);
+        else {
+          st.present.delete(name);
+          st.heard.delete(name);
+        }
+        maybeOpen(sessionId, st);
+      });
     },
 
     onBotRecording(sessionId: string): void {
-      const st = state(sessionId, true);
-      st.recording = true;
-      maybeOpen(sessionId, st);
+      guard("onBotRecording", sessionId, () => {
+        const st = state(sessionId, true);
+        st.recording = true;
+        maybeOpen(sessionId, st);
+      });
     },
 
     // Called about once a second: feeds the stuck detector and runs a turn when the room is stuck.
     poll(now: number): void {
-      for (const [sessionId, st] of sessions) {
-        if (!st.recording) continue;
-        try {
-          st.detector.onDoc(view(sessionId).doc);
-          const ev = st.detector.poll(now);
-          if (!ev) continue;
-          st.stuck = ev;
-          log("conversation.stuck", { session_id: sessionId, reason: ev.reason });
-          schedule(sessionId, st);
-        } catch (err) {
-          log("conversation.poll_failed", { session_id: sessionId, error: errorName(err) });
-        }
-      }
+      guard("poll", null, () => pollSessions(now));
     },
   };
 }

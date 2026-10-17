@@ -175,6 +175,68 @@ test("opening speaks once after bot records with a human present", async () => {
   assert.equal(s.blocked().at(-1)?.fields?.reason, "opening");
 });
 
+const FALLBACK_OPENING = "Hi, I'm Builder. I'll mostly listen and sketch what you agree on. Say 'Builder' anytime you want me.";
+
+test("opening falls back to the fixed line when the model throws", async () => {
+  const s = setup({ runTools: async () => { throw new Error("boom"); } });
+  s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
+  s.loop.onBotRecording(s.sessionId);
+  await flush();
+  assert.deepEqual(s.said, [FALLBACK_OPENING]);
+  assert.ok(s.logs.some((l) => l.msg === "conversation.opening_fallback"));
+  assert.ok(!JSON.stringify(s.logs).includes("sketch"), "no content in logs");
+  assert.equal(s.mood(), "listening", "the fixed line asks nothing");
+  s.loop.onBotRecording(s.sessionId);
+  await flush();
+  assert.deepEqual(s.said, [FALLBACK_OPENING], "still once per session");
+});
+
+test("opening falls back when the model stays silent", async () => {
+  const s = setup([[speak("Hello there!", "answer")], [speak("Hi again, I'm Builder. What's the app for?", "opening")]]);
+  s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
+  s.loop.onBotRecording(s.sessionId);
+  await flush();
+  assert.deepEqual(s.said, [FALLBACK_OPENING], "no valid speak(opening): the fixed line is said");
+  s.say("Amir", "Okay, a todo app.");
+  await flush();
+  assert.deepEqual(s.said, [FALLBACK_OPENING], "opened: a later opening is blocked");
+});
+
+test("a throwing store in onUtterance does not throw into the caller", async () => {
+  const store = openStore(":memory:");
+  const broken = { ...store, getSession: () => { throw new Error("db is gone"); } } as typeof store;
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
+  const loop = createConversationLoop({
+    port: createFakePort([]), runtime, store: broken, clock: () => T0, log: (msg, fields) => logs.push({ msg, fields }),
+    buildLoop: { handoff() {} }, speech: { say: async () => "u", stop() {}, speaking: () => false },
+  });
+  const sid = randomUUID();
+  assert.doesNotThrow(() => loop.onUtterance(sid, { id: 1, speaker: "Amir", text: "Hello?" }));
+  assert.doesNotThrow(() => loop.onPartial(sid, { speaker: "Amir", text: "hey builder" }));
+  assert.doesNotThrow(() => loop.onParticipant(sid, { kind: "join", name: "Amir" }));
+  assert.doesNotThrow(() => loop.onBotRecording(sid));
+  assert.doesNotThrow(() => loop.poll(T0));
+  await flush();
+  const failed = logs.filter((l) => l.msg === "conversation.entry_failed");
+  assert.deepEqual(failed.map((l) => l.fields?.entry), ["onUtterance", "onPartial", "onParticipant"]);
+  for (const l of failed) assert.equal(l.fields?.error, "Error", "errors are logged by name only");
+  assert.ok(!JSON.stringify(logs).includes("db is gone"));
+});
+
+test("failing commands stop triggering follow-up turns after 2", async () => {
+  const s = setup(fnPort(() => [{ name: "ui_command", input: { action: "click", target: "Nope" } }]), {
+    uiCommand: () => ({ ok: false, reason: "not_found" }),
+  });
+  s.say("Amir", "Click nope.");
+  await flush();
+  assert.equal(s.requests.length, 3, "the utterance turn plus 2 follow-ups");
+  assert.ok(s.logs.some((l) => l.msg === "conversation.command_followup_capped"));
+  s.say("Amir", "Try again, click nope.");
+  await flush();
+  assert.equal(s.requests.length, 6, "a new human utterance resets the cap");
+});
+
 // A port that decides each response when the call is made (ids are known only by then).
 function fnPort(fn: (i: number, text: string) => ToolCall[]): ModelPort {
   let i = 0;
@@ -333,7 +395,7 @@ test("a failed voice command gets a follow-up turn where command_feedback may sp
 
 test("a stuck event from poll runs one turn where stuck may speak", async () => {
   const s = setup([
-    [], // the opening turn: the model stays silent
+    [], // the opening turn: the model stays silent, so the fixed opening is said
     [speak("I'd start with who uses it. Just you, or a team?", "answer")],
     [speak("Maybe start smaller: is this for one person?", "stuck")],
     [speak("Anyone?", "stuck")],
@@ -341,11 +403,12 @@ test("a stuck event from poll runs one turn where stuck may speak", async () => 
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
   s.loop.onBotRecording(s.sessionId);
   await flush();
+  assert.deepEqual(s.said, [FALLBACK_OPENING]);
   const before = s.requests.length;
   // Builder asks the room something (here while answering an address).
   s.say("Amir", "Builder, where do we start?");
   await flush();
-  assert.equal(s.said.length, 1);
+  assert.equal(s.said.length, 2);
   const calls = s.requests.length;
   assert.equal(calls, before + 1);
 
@@ -356,7 +419,7 @@ test("a stuck event from poll runs one turn where stuck may speak", async () => 
   await flush();
   assert.equal(s.requests.length, calls + 1);
   assert.match(s.userText(calls), /stuck/);
-  assert.deepEqual(s.said.slice(1), ["Maybe start smaller: is this for one person?"]);
+  assert.deepEqual(s.said.slice(2), ["Maybe start smaller: is this for one person?"]);
 
   s.loop.poll(s.advance(30_000));
   await flush();
