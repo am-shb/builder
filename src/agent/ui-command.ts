@@ -37,21 +37,28 @@ function visibleNodes(proto: Prototype, screen: string): UiNode[] {
   return out;
 }
 
-/** Exact match first, then contains, then every meaningful word of the target present. */
+const wordsOf = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const hasRun = (field: string[], run: string[]) => field.some((_, i) => run.every((w, j) => field[i + j] === w));
+
+/**
+ * Exact match first, then the target as whole words inside the field, then every meaningful word of
+ * the target as a whole word. Targets under 3 characters only match exactly; there is no substring matching.
+ */
 function matchText(nodes: UiNode[], target: string): Hit[] {
   const want = target.trim().toLowerCase();
   if (!want) return [];
   const hits = (test: (t: string) => boolean): Hit[] =>
     nodes.flatMap((node) => {
-      const text = texts(node).find((t) => test(t.toLowerCase()));
+      const text = texts(node).find(test);
       return text === undefined ? [] : [{ node, text }];
     });
-  const exact = hits((t) => t === want);
-  if (exact.length) return exact;
-  const contains = hits((t) => t.includes(want));
+  const exact = hits((t) => t.toLowerCase() === want);
+  if (exact.length || want.length < 3) return exact;
+  const run = wordsOf(want);
+  const contains = hits((t) => hasRun(wordsOf(t), run));
   if (contains.length) return contains;
-  const words = want.split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w));
-  return words.length ? hits((t) => words.every((w) => t.includes(w))) : [];
+  const words = run.filter((w) => !FILLER.has(w));
+  return words.length ? hits((t) => { const f = wordsOf(t); return words.every((w) => f.includes(w)); }) : [];
 }
 
 const describe = (h: Hit) => `${h.text} (${h.node.type})`;
@@ -62,6 +69,8 @@ function pick(hits: Hit[], accept: (n: UiNode) => Plan | null): Plan {
 }
 
 const toggles = (n: UiNode) => n.type === "Toggle" || n.type === "Checkbox";
+const CLICKABLE = new Set(["Button", "ListItem", "Tabs"]);
+const clickable = (n: UiNode) => CLICKABLE.has(n.type) || toggles(n) || !!n.on?.click?.length;
 const plan = (nodeId: string, interactions: Interaction[]): Plan => ({ ok: true, nodeId, interactions });
 
 /** Everything a click on `n` does: its own flip for a switch, then its click handlers. */
@@ -74,27 +83,32 @@ function planCommand(proto: Prototype, ui: UiState, cmd: UiCommand, comparison: 
   const nodes = visibleNodes(proto, screen);
   switch (cmd.action) {
     case "click":
-      return pick(matchText(nodes, cmd.target), (n) => {
+      return pick(matchText(nodes.filter(clickable), cmd.target), (n) => {
         const is = clickInteractions(n);
         return is.length ? plan(n.id, is) : null;
       });
     case "toggle":
-      return pick(matchText(nodes, cmd.target), (n) => (toggles(n) ? plan(n.id, [{ kind: "toggle", target: n.id }]) : null));
+      return pick(matchText(nodes.filter(toggles), cmd.target), (n) => (toggles(n) ? plan(n.id, [{ kind: "toggle", target: n.id }]) : null));
     case "type": {
       const value = cmd.value;
       if (value === undefined) return { ok: false, reason: "not_found" };
-      return pick(matchText(nodes, cmd.target), (n) =>
-        n.type === "Input" || n.type === "Select" ? plan(n.id, [{ kind: "setValue", target: n.id, value }, ...(n.on?.change ?? [])]) : null);
+      return pick(matchText(nodes.filter((n) => n.type === "Input" || n.type === "Select"), cmd.target), (n) =>
+        plan(n.id, [{ kind: "setValue", target: n.id, value }, ...(n.on?.change ?? [])]));
     }
     case "navigate": {
+      // Screens by id or title, and controls on this screen that navigate; both name a target screen.
+      const goes = (n: UiNode) => n.on?.click?.find((i) => i.kind === "navigate");
       const screens = proto.root.children.filter((c) => c.type === "Screen");
       const byId = screens.filter((s) => s.id.toLowerCase() === cmd.target.trim().toLowerCase());
-      const hits = byId.length ? byId.map((node) => ({ node, text: node.id })) : matchText(screens, cmd.target);
-      return pick(hits, (s) => {
-        // Point at the control that goes there when the screen has one; otherwise the screen itself.
-        const via = nodes.find((n) => n.on?.click?.some((i) => i.kind === "navigate" && i.screen === s.id));
-        return plan(via?.id ?? s.id, [{ kind: "navigate", screen: s.id }]);
-      });
+      const hits = byId.length ? byId.map((node) => ({ node, text: node.id })) : matchText([...screens, ...nodes.filter(goes)], cmd.target);
+      const dest = (h: Hit) => (h.node.type === "Screen" ? h.node.id : (goes(h.node) as { screen: string }).screen);
+      const ids = new Set(hits.map(dest));
+      if (ids.size > 1) return { ok: false, reason: "ambiguous", candidates: [...new Set(hits.map(describe))] };
+      if (!ids.size) return { ok: false, reason: "not_found" };
+      const [id] = ids;
+      // Point at the control that goes there when this screen has one; otherwise the screen itself.
+      const via = nodes.find((n) => goes(n) && dest({ node: n, text: "" }) === id);
+      return plan(via?.id ?? id, [{ kind: "navigate", screen: id }]);
     }
     case "back": {
       const hit = nodes.find((n) => texts(n).some((t) => t.toLowerCase() === "back") && n.on?.click?.some((i) => i.kind === "navigate"));

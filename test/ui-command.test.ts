@@ -41,12 +41,43 @@ test("click by label on current screen", () => {
   assert.deepEqual(r, { ok: true, nodeId: "home.add", interaction: { kind: "append", list: "home.list", fromInput: "home.input" } });
 });
 
-test("ambiguous 'Add' with Add button and Add list -> candidates", () => {
-  const p = twoScreens();
-  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "Add" });
+test("ambiguous 'Add' with two clickable Add controls -> candidates", () => {
+  const p = without(twoScreens(), "home.addlist");
+  p.root.children[0].children = p.root.children[0].children.filter((c) => c.id !== "home.add");
+  p.root.children[0].children.push({ id: "home.addtask", type: "Button", props: { label: "Add task" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] });
+  p.root.children[0].children.push({ id: "home.additem", type: "Button", props: { label: "Add item" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] });
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "add" });
   assert.ok(!r.ok && r.reason === "ambiguous");
-  assert.equal(r.candidates.length, 2);
-  assert.ok(r.candidates.some((c) => c.includes("Button")) && r.candidates.some((c) => c.includes("List")));
+  assert.deepEqual(r.candidates.sort(), ["Add item (Button)", "Add task (Button)"]);
+});
+
+test("heading and button with the same label: click picks the button", () => {
+  const p = twoScreens(); // includes a List titled "Add", which is not clickable
+  p.root.children[0].children.push({ id: "home.h2", type: "Heading", props: { text: "Add" }, status: "draft", children: [] });
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "Add" });
+  assert.ok(r.ok && r.nodeId === "home.add");
+});
+
+test("type ignores text nodes and finds the input", () => {
+  const p = twoScreens();
+  p.root.children[0].children.push({ id: "home.hint", type: "Text", props: { text: "Type a task here" }, status: "draft", children: [] });
+  const r = resolveCommand(p, initialUiState(p), { action: "type", target: "task", value: "x" });
+  assert.ok(r.ok && r.nodeId === "home.input");
+});
+
+test('"add" does not match "Address"; two-letter targets only match exactly', () => {
+  const p = twoScreens();
+  p.root.children[0].children = [
+    { id: "a1", type: "Button", props: { label: "Address" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] },
+    { id: "a2", type: "Button", props: { label: "Go" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] },
+    { id: "a3", type: "Button", props: { label: "Padding options" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] },
+  ];
+  const ui = initialUiState(p);
+  assert.deepEqual(resolveCommand(p, ui, { action: "click", target: "add" }), { ok: false, reason: "not_found" });
+  assert.deepEqual(resolveCommand(p, ui, { action: "click", target: "pad" }), { ok: false, reason: "not_found" });
+  assert.deepEqual(resolveCommand(p, ui, { action: "click", target: "g" }), { ok: false, reason: "not_found" });
+  assert.deepEqual(resolveCommand(p, ui, { action: "click", target: "go" }), { ok: true, nodeId: "a2", interaction: { kind: "open", target: "x" } });
+  assert.equal((resolveCommand(p, ui, { action: "click", target: "options" }) as any).nodeId, "a3");
 });
 
 test("exact match beats contains; contains and word matches resolve; unknown is not_found", () => {
@@ -118,7 +149,7 @@ test("stage messages that are not a ui_screen for a known screen are ignored", (
 
 test("ambiguous and not_found make Builder look unsure for 3 s; success does not", () => {
   const { id, run, snap, advance } = setup();
-  assert.equal(run(id, { action: "click", target: "Add" }).ok, false);
+  assert.equal(run(id, { action: "click", target: "Delete" }).ok, false);
   assert.equal(snap().mood, "unsure");
   advance(3001);
   assert.equal(snap().mood, "listening");
