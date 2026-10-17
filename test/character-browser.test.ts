@@ -135,16 +135,16 @@ test("pending decision shows in Pending and moves to Agreed on doc update with s
     await script([{ doc: doc([agreed, decision("d2", "Dark theme", "pending", { pendingSince: now - 10_000 })], [question]) }]);
     await page.waitFor(`document.querySelector('#pending [data-decision-id="d2"]')`, 2000);
 
-    const panel = await page.eval<{ header: string; agreed: string[]; pending: string[]; open: string[]; progress: number[] }>(`(() => {
+    const panel = await page.eval<{ phase: string; agreed: string[]; pending: string[]; open: string[]; progress: number[] }>(`(() => {
       const texts = (id) => [...document.querySelectorAll("#" + id + " .item .txt")].map((e) => e.textContent);
       const ring = document.querySelector('#pending [data-decision-id="d2"] .cd');
       return {
-        header: document.querySelector("header").textContent.replace(/\\s+/g, " ").trim(),
+        phase: document.getElementById("phase").textContent,
         agreed: texts("agreed"), pending: texts("pending"), open: texts("open"),
         progress: [...ring.querySelectorAll("i")].flatMap((i) => i.getAnimations()).map((a) => a.effect.getComputedTiming().progress),
       };
     })()`);
-    assert.equal(panel.header, "Builder · Converge");
+    assert.equal(panel.phase, "Converge");
     assert.deepEqual([panel.agreed, panel.pending, panel.open], [["Quick-add at top"], ["Dark theme"], ["Where do done tasks go?"]]);
     // The ring counts down the 30 s no-objection window from pendingSince: a third has elapsed.
     assert.equal(panel.progress.length, 2, "two ring halves animate");
@@ -165,19 +165,47 @@ test("pending decision shows in Pending and moves to Agreed on doc update with s
   });
 });
 
-test("caption bar labels agent lines Builder, and human speech pulses the listening rings", async (t) => {
+test("human speech pulses the listening rings; agent lines do not", async (t) => {
   await withStage(t, async ({ page, script }) => {
     const rings = `[...document.querySelectorAll(".bot-ring")].filter((r) => r.getAnimations().length > 0).length`;
     assert.equal(await page.eval(rings), 0, "rings rest while nobody speaks");
+    await script([{ caption: { speaker: "Bot", text: "Want quick-add at the top?", partial: false, isAgent: true } }]);
+    await sleep(300);
+    assert.equal(await page.eval(rings), 0, "Builder's own lines do not pulse the rings");
     await script([{ caption: { speaker: "Ada", text: "I think we need due dates", partial: false, isAgent: false } }]);
     await page.waitFor(`${rings} === 2`, 2000);
-    await script([{ caption: { speaker: "bot", text: "Want quick-add at the top?", partial: false, isAgent: true } }]);
-    await page.waitFor(`document.querySelectorAll("#captions .cap").length === 2`, 2000);
-    const caps = await page.eval<{ who: string; agent: boolean; text: string }[]>(`[...document.querySelectorAll("#captions .cap")].map((c) => ({
-      who: c.querySelector("b").textContent, agent: c.classList.contains("is-agent"), text: c.textContent }))`);
-    assert.deepEqual(caps.map((c) => [c.who, c.agent]), [["Ada", false], ["Builder", true]]);
-    assert.match(caps[1].text, /Want quick-add at the top\?/);
     await page.waitFor(`${rings} === 0`, 4000); // the rings settle once the room goes quiet
+  });
+});
+
+test("stage has no header or caption bar and the prototype spans the full height", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([
+      { batch: { label: "First", ops: [{ op: "add", parentId: "home", node: text("t1", "Hello") }] } },
+      { caption: { speaker: "Ada", text: "a transcript line nobody should see", partial: false, isAgent: false } },
+      { caption: { speaker: "Bot", text: "an agent line nobody should see", partial: false, isAgent: true } },
+      { caption: { speaker: "Bo", text: "a partial line nobody should see", partial: true, isAgent: false } },
+    ]);
+    await page.waitFor(`document.querySelector(".builder").dataset.placement === "dock"`, 2000);
+    await sleep(300);
+    const r = await page.eval<any>(`(() => {
+      const box = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+      return {
+        header: !!document.querySelector("header"), captions: !!document.querySelector("#captions, .cap"),
+        transcript: document.body.innerText.includes("nobody should see"),
+        canvas: box("#canvas"), proto: box("#proto"), app: box('[data-node-id="app"]'), panel: box("#panel"), dock: box("#dock"),
+        phaseInPanel: document.getElementById("panel").contains(document.getElementById("phase")),
+      };
+    })()`);
+    assert.deepEqual({ header: r.header, captions: r.captions, transcript: r.transcript }, { header: false, captions: false, transcript: false });
+    for (const k of ["canvas", "proto"]) {
+      assert.deepEqual([r[k].x, r[k].y, r[k].h], [0, 0, 720], `${k} is edge to edge at full height: ${JSON.stringify(r[k])}`);
+      assert.ok(r[k].w >= 0.65 * 1280 && r[k].w <= 0.75 * 1280, `${k} width ${r[k].w}`);
+    }
+    assert.deepEqual([r.app.x, r.app.y], [0, 0], "the app starts at the frame's corner");
+    assert.ok(r.panel.x >= r.canvas.w && r.panel.x + r.panel.w <= 1280 && r.panel.y >= 0, `panel in the right column: ${JSON.stringify(r.panel)}`);
+    assert.ok(r.dock.x >= r.canvas.w && r.dock.y >= r.panel.y + r.panel.h - 1 && r.dock.y + r.dock.h <= 720, `dock under the panel: ${JSON.stringify(r.dock)}`);
+    assert.equal(r.phaseInPanel, true, "the phase is a line at the panel's top");
   });
 });
 

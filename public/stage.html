@@ -13,29 +13,29 @@
      stepped by the shared 15 fps clock, and text is large and high-contrast so it survives
      video compression.
 
-     Layout (px):  header 0-52 | prototype 20,56 872x528   | panel 908,56 352x472
-                               | captions  20,596 872x108  | dock  908,540 352x164 */
+     Layout (px), no outer shell and no transcript: the prototype fills the left edge to edge,
+     and the right column holds the panel (phase line on top) over Builder's dock.
+       prototype 0,0 900x720 | panel 900,0 380x548
+                             | dock  900,548 380x172 */
   :root { --bg:#0f1115; --panel:#171a21; --ink:#f4f6fa; --muted:#b4bccb; --accent:#8fb0ff; --live:#3ddc84;
           --agreed:#34c473; --agreed-bg:#132219; --pending:#f0a43a; --pending-bg:#231c10; --track:#3a404d;
-          --ask:#c7a6ff; --speaker:#ffd166; --font:system-ui, -apple-system, "Segoe UI", sans-serif; }
+          --ask:#c7a6ff; --line:#2a2f3b; --font:system-ui, -apple-system, "Segoe UI", sans-serif; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  html, body { margin:0; width:1280px; height:720px; overflow:hidden; background:var(--bg); color:var(--ink); font:18px/1.4 var(--font); }
+  html, body { margin:0; width:1280px; height:720px; overflow:hidden; background:var(--panel); color:var(--ink); font:18px/1.4 var(--font); }
 
-  header { position:absolute; left:20px; top:0; right:20px; height:52px; display:flex; align-items:center; gap:10px; font-weight:800; font-size:22px; }
-  header .dot { width:12px; height:12px; border-radius:50%; background:var(--live); }
-  header .sep, header #phase { color:var(--muted); font-weight:600; }
-
-  #canvas { position:absolute; left:20px; top:56px; width:872px; height:528px; border-radius:12px; background:#fff; overflow:hidden; }
+  #canvas { position:absolute; left:0; top:0; width:900px; height:720px; background:#fff; overflow:hidden; }
   #proto { position:absolute; inset:0; overflow:hidden; }
   /* Nothing built yet: Builder takes centre stage over this (see .builder placement below). */
-  #placeholder { position:absolute; inset:0; background:var(--panel); }
-  #placeholder .sub { position:absolute; left:0; right:0; top:398px; text-align:center; color:var(--muted); font-size:22px; }
+  #placeholder { position:absolute; inset:0; background:var(--bg); }
+  #placeholder .sub { position:absolute; left:0; right:0; top:531px; text-align:center; color:var(--muted); font-size:22px; }
 
   /* ---------- right panel: Agreed / Pending / Open questions ---------- */
-  #panel { position:absolute; left:908px; top:56px; width:352px; height:472px; padding:12px 14px; border-radius:12px; background:var(--panel);
+  #panel { position:absolute; left:900px; top:0; width:380px; height:548px; padding:14px 16px 12px;
            display:flex; flex-direction:column; gap:10px; overflow:hidden;
            --b-draft:var(--pending); --b-agreed:var(--agreed); /* the settled morph, in panel colours */ }
+  #panel .phase { display:flex; align-items:center; gap:8px; margin-bottom:4px; font:700 17px/1 var(--font); color:var(--muted); }
+  #panel .phase .dot { width:10px; height:10px; border-radius:50%; background:var(--live); }
   #panel h2 { margin:0 0 6px; font:800 15px/1 var(--font); letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); }
   #panel h2 .more { margin-left:8px; color:var(--ink); }
   #panel ul { position:relative; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
@@ -58,16 +58,9 @@
   .cd-half.r i { left:-14px; transform-origin:100% 50%; }
   .cd-half.l i { left:14px; transform-origin:0 50%; }
 
-  /* ---------- captions ---------- */
-  #captions { position:absolute; left:20px; top:596px; width:872px; height:108px; padding:7px 18px; border-radius:12px; background:var(--panel);
-              font-size:24px; line-height:1.3; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; }
-  .cap { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
-  .cap b { color:var(--speaker); margin-right:10px; }
-  .cap.is-agent b { color:var(--accent); }
-  .cap.partial { color:var(--muted); }
-
-  #dock { position:absolute; left:908px; top:540px; width:352px; height:164px; border-radius:12px; background:var(--panel); transition:opacity 500ms ease-out; }
-  #builder[data-placement="center"] ~ #dock { opacity:0; } /* empty while Builder is centre stage */
+  /* The dock is the column's lower part, set off by a rule; the rule fades while Builder is centre stage. */
+  #dock { position:absolute; left:916px; top:548px; width:348px; height:172px; border-top:2px solid var(--line); transition:opacity 500ms ease-out; }
+  #builder[data-placement="center"] ~ #dock { opacity:0; }
 
   /* ---------- Builder (character.js builds the parts) ---------- */
   .builder { position:absolute; inset:0; z-index:50; pointer-events:none; --mood:var(--accent); }
@@ -80,10 +73,10 @@
   .bot { position:absolute; left:0; top:0; width:150px; height:220px; transform-origin:0 0; }
   .bot-label { position:absolute; left:0; top:0; width:220px; text-align:center; font:800 32px/44px var(--font); color:var(--mood); transform-origin:0 0; }
   /* Centre stage: centred on the prototype area. Dock: bottom-right, label to its left. */
-  #builder[data-placement="center"] .bot { transform:translate(366px, 131px) scale(1.2); }
-  #builder[data-placement="center"] .bot-label { transform:translate(346px, 399px); }
-  #builder[data-placement="dock"] .bot { transform:translate(1131px, 552px) scale(0.7); }
-  #builder[data-placement="dock"] .bot-label { transform:translate(916px, 600px); }
+  #builder[data-placement="center"] .bot { transform:translate(345px, 165px) scale(1.4); }
+  #builder[data-placement="center"] .bot-label { transform:translate(340px, 477px); }
+  #builder[data-placement="dock"] .bot { transform:translate(1146px, 563px) scale(0.72); }
+  #builder[data-placement="dock"] .bot-label { transform:translate(916px, 601px); }
 
   .bot div { position:absolute; }
   .bot-rig, .bot-pose, .bot-act, .bot-eye, .bot-eyeball, .bot-arc, .bot-cheek, .bot-mouth, .bot-bulb, .bot-ring,
@@ -172,17 +165,16 @@
 </style>
 </head>
 <body>
-<header><span class="dot"></span><span>Builder</span> <span class="sep">·</span> <span id="phase">Opening</span></header>
 <div id="canvas">
   <div id="proto"></div>
   <div id="placeholder"><div class="sub">Describe what you want to build. The prototype will appear here.</div></div>
 </div>
 <aside id="panel" class="m-root">
+  <div class="phase"><span class="dot"></span><span id="phase">Opening</span></div>
   <section><h2>Agreed<span class="more" id="agreed-more"></span></h2><ul id="agreed"></ul></section>
   <section><h2>Pending<span class="more" id="pending-more"></span></h2><ul id="pending"></ul></section>
   <section><h2>Open questions<span class="more" id="open-more"></span></h2><ul id="open"></ul></section>
 </aside>
-<footer id="captions"></footer>
 <div id="builder"></div>
 <div id="dock"></div>
 <script type="module">
@@ -259,7 +251,7 @@ onFrame((now) => {
 
 let commands = Promise.resolve(); // voice commands run in order, each after its pointer cue
 
-// ---------- header and right panel: phase, Agreed / Pending / Open questions ----------
+// ---------- right panel: phase, Agreed / Pending / Open questions ----------
 const PENDING_MS = 30_000; // NO_OBJECTION_MS (src/consensus/doc.ts): a pending item auto-agrees then
 const SHOW = { agreed: 4, pending: 3, open: 3 }; // newest first; fitPanel may show fewer
 // When the panel is full, items fold away in this order: oldest agreed first, then oldest open
@@ -417,23 +409,6 @@ function fitPanel(want) {
   }
 }
 
-// ---------- captions ----------
-let captions = [];
-let partial = null;
-let lastCaptionKey;
-function renderCaptions() {
-  const key = JSON.stringify([captions, partial]);
-  if (key === lastCaptionKey) return;
-  lastCaptionKey = key;
-  const lines = captions.map((c) => cap(c, false));
-  if (partial && partial.text) lines.push(cap(partial, true));
-  document.getElementById("captions").replaceChildren(...lines.slice(-3));
-}
-function cap(c, isPartial) {
-  const d = el("div", "cap" + (isPartial ? " partial" : "") + (c.isAgent ? " is-agent" : ""));
-  d.append(el("b", "", c.isAgent ? "Builder" : c.speaker || "…"), document.createTextNode(c.text || ""));
-  return d;
-}
 
 function onEvent(ev) {
   switch (ev.type) {
@@ -442,10 +417,7 @@ function onEvent(ev) {
       proto = ev.proto;
       if (first) ui = { ...initialUiState(proto), screen: ev.uiScreen ?? proto.currentScreen };
       else if (ui && ui.screen !== proto.currentScreen) ui = { ...ui, screen: proto.currentScreen };
-      captions = (ev.captions ?? []).filter((c) => !c.partial);
-      partial = (ev.captions ?? []).find((c) => c.partial) ?? null;
       draw();
-      renderCaptions();
       if (ev.doc) renderDoc(ev.doc);
       if (ev.mood) character.setMood(ev.mood);
       break;
@@ -471,10 +443,8 @@ function onEvent(ev) {
         .catch((err) => console.error("command failed", err));
       break;
     case "caption":
-      if (ev.caption.partial) partial = ev.caption;
-      else { partial = null; captions = [...captions, ev.caption].slice(-3); }
+      // No transcript on the stage (spec 10a, Layout): captions only show that the room is talking.
       if (!ev.caption.isAgent) character.hear();
-      renderCaptions();
       break;
     case "doc":
       renderDoc(ev.doc);
