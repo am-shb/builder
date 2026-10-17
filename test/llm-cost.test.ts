@@ -7,7 +7,7 @@ import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
 import { openStore } from "../src/store.ts";
 import { createApp } from "../src/app.ts";
-import { MODELS, BUILD_FALLBACKS, createFakePort, createOpenRouterPort } from "../src/agent/llm.ts";
+import { MODELS, BUILD_FALLBACKS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
 import { PRICES, costOf, withCostRecording } from "../src/agent/cost.ts";
 import { patchBatchJsonSchema } from "../src/ui/schema.ts";
 
@@ -186,6 +186,72 @@ test("port drops invalid tool input, unknown tools, and ignores calls after refu
   assert.deepEqual((await run(mk(toolUseStream({ name: "emit", json: ['{"n":1}'], stop: "max_tokens" })))).toolCalls, []);
   assert.ok(logs.length >= 4);
   assert.ok(!logs.join("\n").includes("nope"), "tool input must not be logged");
+});
+
+function twoBlockEvents(a: { name: string; json: string }, b: { name: string; json: string }) {
+  const [start] = toolUseStream({ name: a.name, json: [] });
+  const block = (index: number, o: { name: string; json: string }) => [
+    { type: "content_block_start", index, content_block: { type: "tool_use", id: `toolu_${index}`, name: o.name, input: {} } },
+    { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: o.json } },
+    { type: "content_block_stop", index },
+  ];
+  return {
+    head: [start, ...block(0, a)],
+    second: block(1, b),
+    tail: [{ type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 42 } }, { type: "message_stop" }],
+  };
+}
+const sseText = (events: unknown[]) => events.map((e) => `event: ${(e as any).type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
+test("port reports each valid tool call through onToolCall as its block closes, before the stream ends", async () => {
+  const ev = twoBlockEvents({ name: "emit", json: '{"n":1}' }, { name: "emit", json: '{"n":2}' });
+  const enc = new TextEncoder();
+  let ctl!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, {
+    fetch: (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as typeof fetch,
+    log: () => {},
+  });
+  const seen: ToolCall[] = [];
+  const pending = port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium", onToolCall: (c) => seen.push(c) });
+  ctl.enqueue(enc.encode(sseText(ev.head)));
+  await tick();
+  assert.deepEqual(seen, [{ name: "emit", input: { n: 1 } }]);
+  ctl.enqueue(enc.encode(sseText(ev.second)));
+  await tick();
+  assert.equal(seen.length, 2);
+  ctl.enqueue(enc.encode(sseText(ev.tail)));
+  ctl.close();
+  const r = await pending;
+  assert.equal(seen.length, 2);
+  assert.deepEqual(r.toolCalls, seen);
+  for (let i = 0; i < seen.length; i++) assert.equal(r.toolCalls[i], seen[i]);
+});
+
+test("onToolCall never receives invalid or unknown tool calls", async () => {
+  const ev = twoBlockEvents({ name: "emit", json: '{"n":"x"}' }, { name: "nope", json: "{}" });
+  const logs: string[] = [];
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: (async () => sse([...ev.head, ...ev.second, ...ev.tail])) as typeof fetch, log: (m) => logs.push(m) });
+  const seen: ToolCall[] = [];
+  const r = await port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium", onToolCall: (c) => seen.push(c) });
+  assert.deepEqual(seen, []);
+  assert.deepEqual(r.toolCalls, []);
+  assert.equal(r.dropped, 2);
+  assert.equal(logs.filter((m) => m === "llm_tool_dropped").length, 2);
+});
+
+test("fake port reports scripted calls through onToolCall before resolving", async () => {
+  const a = { name: "a", input: { x: 1 } };
+  const b = { name: "b", input: {} };
+  const order: ToolCall[] = [];
+  let resolved = false;
+  const p = createFakePort([[a, b]]).runTools({ loop: "build", ...REQ, tools: [], effort: "medium", onToolCall: (c) => order.push(c) }).then((r) => { resolved = true; return r; });
+  assert.deepEqual(order, [a, b]);
+  assert.equal(resolved, false);
+  const r = await p;
+  assert.equal(order[0], r.toolCalls[0]);
+  assert.equal(order[1], r.toolCalls[1]);
 });
 
 test("truncated tool stream still records the usage seen and drops the partial call", async () => {

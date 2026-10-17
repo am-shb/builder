@@ -42,6 +42,9 @@ export type RunToolsRequest = {
   tools: unknown[];
   effort: "low" | "medium";
   onToolInputDelta?: (toolName: string, partialJson: string) => void;
+  // Called once per valid tool call, in stream order, as soon as its block closes (the same object
+  // that ends up in `toolCalls`). Unknown, incomplete, unparseable or invalid blocks never reach it.
+  onToolCall?: (call: ToolCall) => void;
 };
 // stopReason is the model's stop_reason (null if the stream was cut off); dropped counts
 // tool calls discarded as unknown, incomplete, unparseable or schema-invalid.
@@ -92,12 +95,37 @@ export function createOpenRouterPort(
 
       // Everything below is accumulated from raw stream events (not the SDK's final
       // message) so usage and completed tool calls survive a truncated stream.
-      type Block = { name: string; json: string; closed: boolean };
+      type Outcome = { ok: true; call: ToolCall } | { ok: false };
+      type Block = { name: string; json: string; closed: boolean; outcome?: Outcome };
       const blocks = new Map<number, Block>();
       const usage: Usage = zeroUsage();
       let stopReason: string | null = null;
       let messageId: string | null = null;
       let started = false;
+      // Validates and logs one block, once; the outcome is kept on the block.
+      const settle = (block: Block): Outcome => {
+        if (block.outcome) return block.outcome;
+        const drop = (reason: string, extra: Record<string, unknown> = {}): Outcome => {
+          log("llm_tool_dropped", { loop: req.loop, tool: block.name, reason, ...extra });
+          return (block.outcome = { ok: false });
+        };
+        if (!schemas.has(block.name)) return drop("unknown_tool");
+        if (!block.closed) return drop("incomplete_input");
+        let input: unknown;
+        try {
+          input = JSON.parse(block.json.trim() === "" ? "{}" : block.json);
+        } catch {
+          return drop("invalid_json");
+        }
+        const schema = schemas.get(block.name);
+        if (schema) {
+          const checked = validateToolInput(schema, input);
+          if (!checked.ok) return drop("invalid_input", { issues: checked.issues.length, issue_details: issueDetails(checked.issues) });
+          if (checked.repairs.length) log("llm_tool_repaired", { loop: req.loop, tool: block.name, repairs: checked.repairs });
+          input = checked.data;
+        }
+        return (block.outcome = { ok: true, call: { name: block.name, input } });
+      };
       const take = (n: unknown, into: (v: number) => void) => { if (typeof n === "number") into(n); };
       try {
         const stream = client.messages.stream(body as unknown as Anthropic.MessageStreamParams);
@@ -124,7 +152,11 @@ export function createOpenRouterPort(
             }
           } else if (event.type === "content_block_stop") {
             const b = blocks.get(event.index);
-            if (b) b.closed = true;
+            if (b) {
+              b.closed = true;
+              const outcome = settle(b);
+              if (outcome.ok) req.onToolCall?.(outcome.call);
+            }
           }
         });
         await stream.done();
@@ -140,33 +172,13 @@ export function createOpenRouterPort(
       let dropped = 0;
       if (stopReason === "refusal" || stopReason === "max_tokens") {
         // A refusal or truncation can cut a tool input short: never use this turn's tools.
+        // Calls already sent through onToolCall have taken effect (ADR 0001); only the result is empty.
         log("llm_tools_discarded", { loop: req.loop, model, stop_reason: stopReason });
       } else {
         for (const block of [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b)) {
-          const drop = (reason: string, extra: Record<string, unknown> = {}) => {
-            dropped++;
-            log("llm_tool_dropped", { loop: req.loop, tool: block.name, reason, ...extra });
-          };
-          if (!schemas.has(block.name)) { drop("unknown_tool"); continue; }
-          if (!block.closed) { drop("incomplete_input"); continue; }
-          let input: unknown;
-          try {
-            input = JSON.parse(block.json.trim() === "" ? "{}" : block.json);
-          } catch {
-            drop("invalid_json");
-            continue;
-          }
-          const schema = schemas.get(block.name);
-          if (schema) {
-            const checked = validateToolInput(schema, input);
-            if (!checked.ok) {
-              drop("invalid_input", { issues: checked.issues.length, issue_details: issueDetails(checked.issues) });
-              continue;
-            }
-            if (checked.repairs.length) log("llm_tool_repaired", { loop: req.loop, tool: block.name, repairs: checked.repairs });
-            input = checked.data;
-          }
-          toolCalls.push({ name: block.name, input });
+          const outcome = settle(block);
+          if (outcome.ok) toolCalls.push(outcome.call);
+          else dropped++;
         }
       }
 
@@ -219,8 +231,9 @@ const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadToke
 export function createFakePort(script: ToolCall[][], usage: Usage = { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }): ModelPort {
   let call = 0;
   return {
-    async runTools() {
+    async runTools(req) {
       const toolCalls = script[call++] ?? [];
+      for (const c of toolCalls) req.onToolCall?.(c);
       return { toolCalls, usage: { ...usage }, ms: 1, stopReason: toolCalls.length ? "tool_use" : "end_turn", dropped: 0 };
     },
   };
