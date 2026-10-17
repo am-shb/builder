@@ -95,22 +95,70 @@
 import { connectStage } from "@renderer/client.js";
 import { renderTree } from "@renderer/render.js";
 import { initialUiState, reduceInteraction, bindInteractions, findNode } from "@renderer/interact.js";
+import { startClock, onFrame } from "@renderer/clock.js";
+import { screenTransitionEndsAt } from "@renderer/motion.js";
+import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 
 const protoEl = document.getElementById("proto");
 let proto = null;
 let ui = null;
+let nodes = new Map();
 
-function draw() {
+// `changes` animates the redraw: a patch's changes, or [] for a local interaction.
+function draw(changes) {
   if (!proto) return;
   if (!ui) ui = initialUiState(proto);
   if (!findNode(proto, ui.screen)) ui = { ...ui, screen: proto.currentScreen };
-  renderTree(protoEl, proto, ui);
+  nodes = renderTree(protoEl, proto, ui, changes);
   // The waiting bot shows until the first real content exists.
   const screens = proto.root.children.filter((c) => c.type === "Screen");
   document.getElementById("placeholder").hidden = screens.some((sc) => sc.children.length);
 }
 
-bindInteractions(protoEl, () => proto, () => ui, (next) => { ui = next; draw(); });
+bindInteractions(protoEl, () => proto, () => ui, (next) => { ui = next; draw([]); });
+
+// Where node `id` sits: its parent's id and the Screen holding it (null when not found).
+function locate(p, id) {
+  const walk = (n, parent, screen) => {
+    const s = n.type === "Screen" ? n.id : screen;
+    if (n.id === id) return { parent, screen: s };
+    for (const c of n.children) {
+      const r = walk(c, n.id, s);
+      if (r) return r;
+    }
+    return null;
+  };
+  return walk(p.root, null, null) ?? { parent: null, screen: null };
+}
+
+// Follow the change: to the current screen when the patch set it (the stage may have followed
+// an earlier change elsewhere), else to the screen the first change lands on.
+function followScreen(prevProto, changes) {
+  if (!prevProto || prevProto.currentScreen !== proto.currentScreen || changes.some((c) => c.kind === "screen")) {
+    return proto.currentScreen;
+  }
+  for (const c of changes) {
+    const screen = locate(c.kind === "removed" ? prevProto : proto, c.id).screen;
+    return screen ?? ui.screen;
+  }
+  return ui.screen;
+}
+
+// A removal is spotlit on the parent it left, so its label still says what went.
+function focusable(prevProto, changes) {
+  return changes.map((c) => (c.kind === "removed" && prevProto ? { ...c, id: locate(prevProto, c.id).parent ?? c.id } : c));
+}
+
+// Focus moments play one at a time, after any screen slide has landed.
+const focusQueue = createFocusQueue({ playMs: SPOTLIGHT_MS });
+const shown = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
+onFrame((now) => {
+  if (now < screenTransitionEndsAt()) return;
+  const c = focusQueue.next(now, (ch) => shown(nodes.get(ch.id)));
+  if (c) playFocus(nodes.get(c.id), c);
+});
+
+let commands = Promise.resolve(); // voice commands run in order, each after its pointer cue
 
 let captions = [];
 let partial = null;
@@ -119,9 +167,9 @@ function renderCaptions() {
   const key = JSON.stringify([captions, partial]);
   if (key === lastCaptionKey) return;
   lastCaptionKey = key;
-  const nodes = captions.map((c) => cap(c.speaker, c.text, false));
-  if (partial && partial.text) nodes.push(cap(partial.speaker, partial.text, true));
-  document.getElementById("captions").replaceChildren(...nodes.slice(-3));
+  const lines = captions.map((c) => cap(c.speaker, c.text, false));
+  if (partial && partial.text) lines.push(cap(partial.speaker, partial.text, true));
+  document.getElementById("captions").replaceChildren(...lines.slice(-3));
   document.getElementById("buddy").classList.toggle("hearing", !!(partial && partial.text));
 }
 function cap(speaker, text, isPartial) {
@@ -147,14 +195,24 @@ function onEvent(ev) {
       break;
     }
     case "patch": {
-      const moved = proto && proto.currentScreen !== ev.proto.currentScreen;
+      const prevProto = proto;
+      const changes = ev.changes ?? [];
       proto = ev.proto;
-      if (moved && ui) ui = { ...ui, screen: proto.currentScreen };
-      draw();
+      if (ui) ui = { ...ui, screen: followScreen(prevProto, changes) };
+      draw(changes);
+      for (const c of focusTargets(focusable(prevProto, changes), nodes)) focusQueue.enqueue(c);
       break;
     }
+    case "pending_region":
+      showPendingRegion(ev.parentId ? nodes.get(ev.parentId) ?? null : null);
+      break;
     case "command":
-      if (proto && ui) { ui = reduceInteraction(ui, ev.interaction, proto); draw(); }
+      commands = commands
+        .then(() => animatePointer(nodes.get(ev.nodeId)))
+        .then(() => {
+          if (proto && ui) { ui = reduceInteraction(ui, ev.interaction, proto); draw([]); }
+        })
+        .catch((err) => console.error("command failed", err));
       break;
     case "caption":
       if (ev.caption.partial) partial = ev.caption;
@@ -166,17 +224,8 @@ function onEvent(ev) {
   }
 }
 
-// Meet only receives 15 fps from the bot, so step every CSS animation on a
-// 15 fps clock instead of letting Chrome composite at 60: ~4x fewer frames on
-// the bot's small CPU, with no visible difference to participants.
-const animStart = performance.now();
-setInterval(() => {
-  const t = performance.now() - animStart;
-  for (const a of document.getAnimations()) {
-    if (a.playState !== "paused") a.pause();
-    a.currentTime = t;
-  }
-}, 1000 / 15);
+// Every animation on the stage (CSS and motion) is stepped by the shared 15 fps clock.
+startClock();
 
 window.stageEvent = onEvent; // test hook
 window.stageProto = () => proto;
