@@ -25,25 +25,26 @@ async function main() {
   const server = http.createServer();
   const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   let runtime!: ReturnType<typeof createRuntime>;
+  let voice: { stop(sessionId: string): void } | undefined; // Builder's voice, once configured
   const channel = createStageChannel(
     server,
     (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
-    (id, msg) => handleStageMessage(runtime, id, msg),
+    (id, msg) => handleStageMessage(runtime, id, msg, (sid) => {
+      log("barge_in", { session_id: sid, source: "stage" });
+      voice?.stop(sid);
+    }),
     (id) => runtime(id).snapshot(),
     log,
   );
   runtime = createRuntime({ store, channel, log });
   // Builder speaks through the stage when a voice is configured; otherwise its lines go to meeting chat.
   if (config.agentEnabled && !config.ttsVoice) console.warn("TTS_VOICE is not set: Builder's lines go to meeting chat instead of voice.");
-  const agent = config.agentEnabled ? {
-    port: createOpenRouterPort(config, { log }),
-    ...(config.ttsVoice ? {
-      speech: createSpeech({
-        tts: createOpenRouterTts({ apiKey: config.openrouterApiKey!, voice: config.ttsVoice, model: OPENROUTER_TTS_MODEL }),
-        runtime, recall, store, channel, log,
-      }),
-    } : {}),
-  } : undefined;
+  const speech = config.agentEnabled && config.ttsVoice ? createSpeech({
+    tts: createOpenRouterTts({ apiKey: config.openrouterApiKey!, voice: config.ttsVoice, model: OPENROUTER_TTS_MODEL }),
+    runtime, recall, store, channel, log,
+  }) : undefined;
+  voice = speech;
+  const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }), ...(speech ? { speech } : {}) } : undefined;
   const app = createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 

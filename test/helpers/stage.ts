@@ -16,6 +16,8 @@ import type { Store } from "../../src/store.ts";
 export type Stage = {
   page: Page; script(steps: unknown[]): Promise<void>; runtime: ReturnType<typeof createRuntime>; sessionId: string;
   channel: StageSink; store: Store;
+  /** Session ids of the barge_in messages the stage has sent. */
+  bargeIns: string[];
 };
 
 export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) => Promise<void>) {
@@ -28,11 +30,12 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
     const store = openStore(":memory:");
     const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-1" }, { status: 201 })) as any, sleep: async () => {} });
     const server = http.createServer();
+    const bargeIns: string[] = [];
     let runtime!: ReturnType<typeof createRuntime>;
     const channel = createStageChannel(
       server,
       (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
-      (id, msg) => handleStageMessage(runtime, id, msg),
+      (id, msg) => handleStageMessage(runtime, id, msg, (sid) => bargeIns.push(sid)),
       (id) => runtime(id).snapshot(),
     );
     runtime = createRuntime({ store, channel, log: () => {} });
@@ -53,7 +56,7 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
         const body = (await r.json()) as any;
         for (const res of body.results ?? []) assert.equal(res.ok, true, `script step ${res.index}: ${res.error}`);
       };
-      await fn({ page, script, runtime, sessionId: session.id, channel, store });
+      await fn({ page, script, runtime, sessionId: session.id, channel, store, bargeIns });
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     } finally {
       server.closeAllConnections();

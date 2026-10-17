@@ -101,3 +101,94 @@ export function connectStage({ sessionPath, token, onEvent, onAudio = () => {} }
     },
   };
 }
+
+// ---------- Bot-local meeting data: who is talking, so Builder can stop the moment a person starts ----------
+
+// Reachable only from inside a Recall Output Media page. Same message shape as real-time transcription.
+export const MEETING_DATA_URL = "wss://meeting-data.bot.recall.ai/api/v1/transcript";
+const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
+const MD_MIN_RETRY_MS = 2000;
+const MD_MAX_RETRY_MS = 60_000;
+
+/**
+ * Where to connect for meeting data, or null for nowhere. Tests override with `?meetingData=ws://127.0.0.1:<port>`;
+ * the override is honoured only for a loopback host, so a public stage URL cannot aim the page at another socket.
+ * A stage served from loopback (tests, local runs) is not in the bot, so it connects only to an override.
+ */
+export function meetingDataUrl(loc = location) {
+  const override = new URLSearchParams(loc.search).get("meetingData");
+  if (override !== null) {
+    try {
+      const u = new URL(override);
+      return (u.protocol === "ws:" || u.protocol === "wss:") && LOOPBACK.has(u.hostname) ? u.href : null;
+    } catch {
+      return null;
+    }
+  }
+  return LOOPBACK.has(loc.hostname) ? null : MEETING_DATA_URL;
+}
+
+const nameOf = (v) => (typeof v === "string" ? v : v && typeof v === "object" && typeof v.name === "string" ? v.name : null);
+
+/** True when a meeting-data message carries words spoken by anyone other than the bot. Parses defensively. */
+export function isHumanSpeech(msg, botName = "Builder") {
+  const root = msg && typeof msg === "object" ? msg : null;
+  const t = root?.transcript ?? root?.data?.transcript ?? root?.data ?? root;
+  if (!t || typeof t !== "object") return false;
+  const words = Array.isArray(t.words) ? t.words : [];
+  if (!words.some((w) => (typeof w === "string" ? w : w?.text)?.toString().trim())) return false;
+  const who = nameOf(t.speaker) ?? nameOf(t.participant) ?? nameOf(t.speaker_name);
+  return who?.trim() !== botName;
+}
+
+/**
+ * Calls onHumanSpeech() for each meeting-data message with words from someone other than the bot.
+ * Where the socket is unavailable (outside the bot) it fails quietly and retries ever more slowly.
+ */
+export function connectMeetingData({ url = meetingDataUrl(), onHumanSpeech, botName = "Builder" }) {
+  if (!url) return { close() {} };
+  let sock = null;
+  let timer = null;
+  let delay = MD_MIN_RETRY_MS;
+  let closed = false;
+
+  function open() {
+    timer = null;
+    if (closed) return;
+    let s;
+    try {
+      s = new WebSocket(url);
+    } catch {
+      return void schedule();
+    }
+    sock = s;
+    s.onopen = () => { delay = MD_MIN_RETRY_MS; };
+    s.onmessage = (e) => {
+      if (typeof e.data !== "string") return;
+      let msg;
+      try {
+        msg = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (isHumanSpeech(msg, botName)) onHumanSpeech();
+    };
+    s.onclose = () => { if (sock === s) sock = null; schedule(); };
+    s.onerror = () => s.close();
+  }
+
+  function schedule() {
+    if (closed || timer) return;
+    timer = setTimeout(open, delay);
+    delay = Math.min(delay * 2, MD_MAX_RETRY_MS);
+  }
+
+  open();
+  return {
+    close() {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      if (sock) sock.close();
+    },
+  };
+}

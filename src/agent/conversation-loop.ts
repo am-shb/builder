@@ -513,9 +513,16 @@ export function createConversationLoop(deps: {
     },
 
     // Partials only make the character react: being addressed shows at once, before any model call.
+    // Someone talking over Builder's voice stops it (the server fallback to the stage's own barge-in, spec 7).
     onPartial(sessionId: string, p: { speaker: string | null; text: string | null }): void {
-      if (p.speaker === botName || !p.text || !ADDRESS_RE.test(p.text)) return;
-      guard("onPartial", sessionId, () => markAddressed(sessionId, state(sessionId)));
+      if (p.speaker === botName || !p.text) return;
+      guard("onPartial", sessionId, () => {
+        if (speech.speaking(sessionId)) {
+          speech.stop(sessionId);
+          log("barge_in", { session_id: sessionId, source: "partial" });
+        }
+        if (ADDRESS_RE.test(p.text!)) markAddressed(sessionId, state(sessionId));
+      });
     },
 
     onParticipant(sessionId: string, e: { kind: "join" | "leave"; name: string | null }): void {

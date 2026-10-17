@@ -187,7 +187,7 @@
 <div id="dock"></div>
 <div id="comparison"></div>
 <script type="module">
-import { connectStage } from "@renderer/client.js";
+import { connectStage, connectMeetingData, meetingDataUrl } from "@renderer/client.js";
 import { renderTree } from "@renderer/render.js";
 import { initialUiState, reduceInteraction, bindInteractions, findNode } from "@renderer/interact.js";
 import { startClock, onFrame, animate } from "@renderer/clock.js";
@@ -549,6 +549,20 @@ window.stageCharacter = character;
 window.stageVoice = voice;
 const token = new URLSearchParams(location.search).get("token") ?? "";
 window.stage = connectStage({ sessionPath: location.pathname, token, onEvent, onAudio });
+
+// ---------- Barge-in: a person starts talking, so Builder stops at once (spec 7) ----------
+// The bot-local meeting-data socket tells the stage first-hand; the server is told so it ends the line too.
+window.stageMeetingDataUrl = meetingDataUrl();
+connectMeetingData({
+  url: window.stageMeetingDataUrl,
+  onHumanSpeech() {
+    if (voiceId === null) return;
+    voiceId = null;
+    voice.stop();
+    character.setMouth(0);
+    window.stage.send({ type: "barge_in" });
+  },
+});
 </script>
 </body>
 </html>

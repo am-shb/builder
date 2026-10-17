@@ -46,9 +46,15 @@ export function buildComparisonView(proto: Prototype, conflict: Conflict): Compa
   return variants.length >= 2 ? { conflictId: conflict.id, topic: conflict.topic, variants } : null;
 }
 
-/** Messages the stage sends up its WebSocket. Only `{ type: "ui_screen", screen }` is understood. */
-export function handleStageMessage(runtime: (sessionId: string) => SessionRuntime, sessionId: string, msg: unknown) {
+/**
+ * Messages the stage sends up its WebSocket: `{ type: "ui_screen", screen }`, and `{ type: "barge_in" }`
+ * (a person started talking over Builder), which calls `onBargeIn` so the caller can stop the speech.
+ */
+export function handleStageMessage(
+  runtime: (sessionId: string) => SessionRuntime, sessionId: string, msg: unknown, onBargeIn?: (sessionId: string) => void,
+) {
   const m = msg as { type?: unknown; screen?: unknown } | null;
+  if (m && typeof m === "object" && m.type === "barge_in") onBargeIn?.(sessionId);
   if (m && typeof m === "object" && m.type === "ui_screen" && typeof m.screen === "string") runtime(sessionId).setUiScreen(m.screen);
 }
 
