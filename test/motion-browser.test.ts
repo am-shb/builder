@@ -226,7 +226,7 @@ test("pending region shows a shimmer placeholder and clears it", async (t) => {
   });
 });
 
-test("frame budget: 10 queued focus moments hold the 15fps clock", { timeout: 60_000 }, async (t) => {
+test("frame budget: a burst of 10 focus moments (capped queue) holds the 15fps clock", { timeout: 60_000 }, async (t) => {
   await withStage(t, async ({ page, script }) => {
     await page.setCpuThrottle(2);
     await page.eval(`import("@renderer/clock.js").then((m) => { window.__ticks = []; m.onFrame((now) => window.__ticks.push(now)); })`);
@@ -235,13 +235,18 @@ test("frame budget: 10 queued focus moments hold the 15fps clock", { timeout: 60
     ] } }));
     await script(steps);
     await sleep(15_000);
-    const r = await page.eval<{ ticks: number[]; focus: number }>(`({ ticks: window.__ticks.slice(), focus: window.__motionLog.filter((e) => e.fn === "playFocus").length })`);
+    const r = await page.eval<{ ticks: number[]; focus: number; played: string[] }>(`(() => {
+      const played = window.__motionLog.filter((e) => e.fn === "playFocus").map((e) => e.id);
+      return { ticks: window.__ticks.slice(), focus: played.length, played };
+    })()`);
     const gaps = r.ticks.slice(1).map((v, i) => v - r.ticks[i]).sort((a, b) => a - b);
     const p95 = gaps[Math.floor(gaps.length * 0.95)];
     const max = gaps[gaps.length - 1];
     console.log(`frame budget: ${gaps.length} ticks, p95 ${p95.toFixed(1)}ms, max ${max.toFixed(1)}ms, ${r.focus} focus moments`);
     assert.ok(gaps.length >= 200, `only ${gaps.length} ticks in 15s`);
     assert.ok(p95 <= 90, `tick interval p95 ${p95}ms`);
-    assert.ok(r.focus >= 9, `${r.focus} focus moments played`);
+    // The burst is capped: the one playing plus at most 3 pending, the newest kept.
+    assert.equal(r.focus, 4, `played ${JSON.stringify(r.played)}`);
+    assert.deepEqual(r.played.slice(1), ["item-7", "item-8", "item-9"]);
   });
 });

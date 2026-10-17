@@ -7,6 +7,7 @@ import { slotOf } from "@renderer/components.js";
 export const SPOTLIGHT_MS = 1500;
 export const DIM = 0.35; // everything outside the ring shows at this strength
 const MAX_SPOTLIGHTS_PER_PATCH = 3;
+const MAX_PENDING = 3; // across all patches, not counting the one playing
 const RING_PAD = 10;
 const EASE = "ease-out";
 
@@ -20,13 +21,17 @@ function div(cls, text) {
   return e;
 }
 
-/** Pure scheduler: one change plays at a time, for playMs each. */
-export function createFocusQueue({ playMs = SPOTLIGHT_MS } = {}) {
+/**
+ * Pure scheduler: one change plays at a time, for playMs each. At most maxPending wait behind it;
+ * a newer change drops the oldest waiting one, so focus never lags far behind the screen.
+ */
+export function createFocusQueue({ playMs = SPOTLIGHT_MS, maxPending = MAX_PENDING } = {}) {
   const queue = [];
   let until = -Infinity;
   return {
     enqueue(change) {
       queue.push(change);
+      if (queue.length > maxPending) queue.splice(0, queue.length - maxPending);
     },
     /** The change to start now, or null while one is playing or none is queued. `accept` drops stale ones. */
     next(now, accept = () => true) {

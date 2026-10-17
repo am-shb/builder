@@ -43,6 +43,20 @@ test("focus queue skips changes the caller cannot play without spending a slot",
   assert.equal(q.next(1500), null);
 });
 
+test("queue keeps at most 3 pending moments, dropping the oldest, without touching the playing one", () => {
+  const q = createFocusQueue({ playMs: 1500 });
+  q.enqueue(change("playing"));
+  assert.equal(q.next(0)?.id, "playing");
+  for (const id of ["a", "b", "c", "d", "e"]) q.enqueue(change(id));
+  assert.equal(q.size, 3);
+  assert.equal(q.isPlaying(100), true, "the playing moment is unaffected");
+  assert.equal(q.next(100), null);
+  assert.equal(q.next(1500)?.id, "c");
+  assert.equal(q.next(3000)?.id, "d");
+  assert.equal(q.next(4500)?.id, "e");
+  assert.equal(q.next(6000), null);
+});
+
 type FakeAnim = {
   playState: string; currentTime: number | null; paused: number; finished: number;
   pause(): void; finish(): void; effect: { getComputedTiming(): { endTime: number } };
