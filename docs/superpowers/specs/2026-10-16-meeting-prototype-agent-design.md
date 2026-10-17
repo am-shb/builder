@@ -242,6 +242,15 @@ unmistakable focus on what's changing, and an agent that feels responsive and
 alive. The mockup is in the brainstorm session
 (`personality-and-focus.html`).
 
+**Layout** (decided after seeing the first build, 2026-10-17): no outer stage
+shell. There's no header strip, no dark margins and no frame around the
+prototype; the prototype fills the left of the 1280×720 frame edge to edge at
+full height. A right column holds the Agreed / Pending / Open questions panel,
+with the current phase as a small line at its top, and Builder's dock below
+it. **No live transcript or caption bar is shown on the stage.** Caption events
+still feed the listening animation and the agent loops, but the panel is the
+only text summary the room sees.
+
 **Character.** One recognisable character named **Builder** (decided), an
 evolution of the existing blue robot. "Builder" is also the bot's display name
 in Meet, and the name people say to address it. It sits in a dock while the prototype is on screen, and takes
@@ -452,7 +461,8 @@ transcript stream, which keeps its input small.
   (`wss://meeting-data.bot.recall.ai/api/v1/transcript`). That gives the
   stage page an interruption signal without waiting for its 1 s poll, so use
   it for barge-in.
-- Captions on the stage show the agent's lines too, labelled as the agent.
+- Builder's lines are spoken only. The stage shows no captions (see §10a,
+  Layout). If speech fails, the line goes to meeting chat.
 
 ## 14. Handoff
 
