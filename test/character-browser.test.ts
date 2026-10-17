@@ -180,3 +180,55 @@ test("caption bar labels agent lines Builder, and human speech pulses the listen
     await page.waitFor(`${rings} === 0`, 4000); // the rings settle once the room goes quiet
   });
 });
+
+test("panel keeps every pending and open item visible with 4 two-line agreed, 3 pending, 3 open", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const now = Date.now();
+    const long = (n: number) => `Agreed decision number ${n} that is long enough to wrap onto two lines`;
+    const q = (id: string, t: string) => ({ id, text: t, raisedBy: "Sara", since: now, lastEngagedAt: now });
+    await script([{ doc: doc([
+      ...[1, 2, 3, 4].map((n) => decision(`a${n}`, long(n), "agreed", { decidedAt: now })),
+      decision("p1", "Due dates only on some tasks", "pending", { pendingSince: now - 5000 }),
+      decision("p2", "Dark theme", "pending", { pendingSince: now - 3000 }),
+      decision("p3", "Weekly summary email", "pending", { pendingSince: now - 1000 }),
+    ], [q("q1", "Where do done tasks go?"), q("q2", "Who can delete a task?"), q("q3", "Do we need sub-tasks?")]) }]);
+    await page.waitFor(`document.querySelectorAll("#pending .item").length === 3 && document.querySelectorAll("#open .item").length === 3`, 2000);
+    await sleep(500); // entries settle
+    const r = await page.eval<{ outside: string[]; agreedShown: string[]; agreedHead: string; lines: number }>(`(() => {
+      const p = document.getElementById("panel").getBoundingClientRect();
+      const outside = [...document.querySelectorAll("#pending .item, #open .item")].filter((li) => {
+        const b = li.getBoundingClientRect();
+        return b.width === 0 || b.top < p.top || b.bottom > p.bottom || b.left < p.left || b.right > p.right;
+      }).map((li) => li.textContent);
+      const shown = [...document.querySelectorAll("#agreed .item")].filter((li) => li.getClientRects().length > 0);
+      const txt = shown.length ? shown[0].querySelector(".txt") : null;
+      return { outside, agreedShown: shown.map((li) => li.querySelector(".txt").textContent),
+               agreedHead: document.querySelector("#panel section h2").textContent,
+               lines: txt ? Math.round(txt.getBoundingClientRect().height / parseFloat(getComputedStyle(txt).lineHeight)) : 0 };
+    })()`);
+    assert.deepEqual(r.outside, [], "every pending and open item is fully inside the panel");
+    assert.ok(r.agreedShown.length >= 1 && r.agreedShown.length < 4, `agreed shown: ${JSON.stringify(r.agreedShown)}`);
+    assert.equal(r.agreedShown.at(-1), long(4), "the most recent agreed item stays");
+    assert.equal(r.lines, 2, "agreed items are two lines here");
+    assert.match(r.agreedHead, new RegExp(`\\+${4 - r.agreedShown.length} more`), r.agreedHead);
+  });
+});
+
+test("settle plays even when another doc update arrives during the glide", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const now = Date.now();
+    const q1 = { id: "q1", text: "Where do done tasks go?", raisedBy: "Sara", since: now, lastEngagedAt: now };
+    const agreed = decision("d1", "Quick-add at top", "agreed", { decidedAt: now });
+    await script([{ doc: doc([agreed, decision("d2", "Dark theme", "pending", { pendingSince: now })]) }]);
+    await page.waitFor(`document.querySelector('#pending [data-decision-id="d2"]')`, 2000);
+    await page.eval(`window.__motionLog = []`);
+    // d2 agrees (glides from Pending into Agreed); 120 ms later, mid-glide, another update lands.
+    const done = decision("d2", "Dark theme", "agreed", { decidedAt: now });
+    await script([{ doc: doc([agreed, done]) }, { wait: 120, doc: doc([agreed, done], [q1]) }]);
+    await page.waitFor(`document.querySelector('#open [data-question-id="q1"]')`, 2000);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playSettled")`, 2500);
+    const cls = await page.eval<string>(`document.querySelector('[data-decision-id="d2"]').className`);
+    assert.match(cls, /\bitem\b/);
+    assert.match(cls, /\bis-agreed\b/);
+  });
+});

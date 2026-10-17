@@ -33,12 +33,13 @@
   #placeholder .sub { position:absolute; left:0; right:0; top:398px; text-align:center; color:var(--muted); font-size:22px; }
 
   /* ---------- right panel: Agreed / Pending / Open questions ---------- */
-  #panel { position:absolute; left:908px; top:56px; width:352px; height:472px; padding:14px 14px; border-radius:12px; background:var(--panel);
-           display:flex; flex-direction:column; gap:14px; overflow:hidden;
+  #panel { position:absolute; left:908px; top:56px; width:352px; height:472px; padding:12px 14px; border-radius:12px; background:var(--panel);
+           display:flex; flex-direction:column; gap:10px; overflow:hidden;
            --b-draft:var(--pending); --b-agreed:var(--agreed); /* the settled morph, in panel colours */ }
-  #panel h2 { margin:0 0 8px; font:800 15px/1 var(--font); letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); }
-  #panel ul { position:relative; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-  .item { position:relative; display:flex; align-items:flex-start; gap:10px; padding:7px 10px; border-radius:10px; border:2px solid transparent; font:600 20px/1.3 var(--font); }
+  #panel h2 { margin:0 0 6px; font:800 15px/1 var(--font); letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); }
+  #panel h2 .more { margin-left:8px; color:var(--ink); }
+  #panel ul { position:relative; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .item { position:relative; display:flex; align-items:flex-start; gap:10px; padding:5px 10px; border-radius:10px; border:2px solid transparent; font:600 20px/1.3 var(--font); }
   .item .txt { flex:1; min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .item.is-agreed { border:2px solid var(--agreed); background:var(--agreed-bg); }
   .item.is-pending { border:2px dashed var(--pending); background:var(--pending-bg); --hole:var(--pending-bg); }
@@ -46,7 +47,7 @@
   .mark { flex:none; width:28px; height:28px; margin-top:-1px; border-radius:50%; display:flex; align-items:center; justify-content:center; font:900 18px/1 var(--font); color:var(--bg); }
   .mark.check { background:var(--agreed); }
   .mark.ask { background:var(--ask); }
-  #panel .none, #panel .more { color:var(--muted); font:500 18px/1.3 var(--font); padding:2px 4px; }
+  #panel .none { color:var(--muted); font:500 18px/1.3 var(--font); padding:2px 4px; }
   /* Countdown ring: amber is the time left in the 30 s no-objection window. Two rotating halves
      (transform only) paint the elapsed part in the track colour; a hole makes the pie a ring. */
   .cd { position:relative; overflow:hidden; background:var(--pending); }
@@ -177,9 +178,9 @@
   <div id="placeholder"><div class="sub">Describe what you want to build. The prototype will appear here.</div></div>
 </div>
 <aside id="panel" class="m-root">
-  <section><h2>Agreed</h2><ul id="agreed"></ul></section>
-  <section><h2>Pending</h2><ul id="pending"></ul></section>
-  <section><h2>Open questions</h2><ul id="open"></ul></section>
+  <section><h2>Agreed<span class="more" id="agreed-more"></span></h2><ul id="agreed"></ul></section>
+  <section><h2>Pending<span class="more" id="pending-more"></span></h2><ul id="pending"></ul></section>
+  <section><h2>Open questions<span class="more" id="open-more"></span></h2><ul id="open"></ul></section>
 </aside>
 <footer id="captions"></footer>
 <div id="builder"></div>
@@ -260,12 +261,15 @@ let commands = Promise.resolve(); // voice commands run in order, each after its
 
 // ---------- header and right panel: phase, Agreed / Pending / Open questions ----------
 const PENDING_MS = 30_000; // NO_OBJECTION_MS (src/consensus/doc.ts): a pending item auto-agrees then
-const SHOW = { agreed: 4, pending: 3, open: 3 }; // newest kept; older ones fold into "+N earlier"
+const SHOW = { agreed: 4, pending: 3, open: 3 }; // newest first; fitPanel may show fewer
+// When the panel is full, items fold away in this order: oldest agreed first, then oldest open
+// question; the newest pending item always stays (its countdown is the one thing that expires).
+const FOLD_ORDER = ["agreed", "open", "pending"];
 const EMPTY = { agreed: "Nothing agreed yet", pending: "Nothing waiting", open: "No open questions" };
 const PHASES = { opening: "Opening", understand: "Understand", explore: "Explore", converge: "Converge", detail: "Detail", recap: "Recap" };
 const lists = { agreed: document.getElementById("agreed"), pending: document.getElementById("pending"), open: document.getElementById("open") };
 const panelItems = new Map(); // "d:<id>" | "q:<id>" -> li, reused as a decision moves between lists
-const panelNotes = new Map(); // "<list>:none" | "<list>:more" -> li
+const panelNotes = new Map(); // "<list>:none" -> li
 const glides = new WeakMap(); // li -> its in-flight glide
 
 function el(tag, cls, text) {
@@ -300,7 +304,9 @@ function countdown(since) {
 
 function updateItem(li, it) {
   const wasState = li.dataset.state;
-  li.className = `item is-${it.kind}`;
+  // classList, not className: motion helpers may have added classes of their own.
+  li.classList.add("item");
+  for (const k of ["agreed", "pending", "open"]) li.classList.toggle(`is-${k}`, k === it.kind);
   li.dataset.state = it.kind;
   const txt = li.querySelector(".txt");
   if (txt.textContent !== it.text) txt.textContent = it.text;
@@ -343,7 +349,6 @@ function renderDoc(doc) {
   for (const [list, all] of Object.entries(want)) {
     const rows = [];
     const visible = all.slice(-SHOW[list]);
-    if (all.length > visible.length) rows.push(note(list, "more", `+${all.length - visible.length} earlier`));
     for (const it of visible) {
       let li = panelItems.get(it.key);
       if (!li) {
@@ -365,23 +370,50 @@ function renderDoc(doc) {
     for (const c of [...ul.children]) if (!rows.includes(c) && !c.classList.contains("m-ghost")) c.remove();
   }
 
-  // Last, invert, play: moved items glide from where they were; a newly agreed one then settles.
+  fitPanel(want);
+
+  // Last, invert, play: moved items glide from where they were; new (or unfolded) ones grow in.
   for (const [key, li] of panelItems) {
+    if (li.hidden) continue;
     const from = before.get(key);
-    if (!from) continue;
+    if (!from || (from.width === 0 && from.height === 0)) {
+      entered.push(li);
+      continue;
+    }
     const to = li.getBoundingClientRect();
     const dx = from.left - to.left;
     const dy = from.top - to.top;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
-      if (settled.includes(li)) playSettled(li);
-      continue;
-    }
-    const a = animate(li, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE });
-    glides.set(li, a);
-    if (settled.includes(li)) a.finished.then(() => playSettled(li), () => {});
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    glides.set(li, animate(li, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE }));
   }
-  for (const li of entered) {
-    if (before.size) animate(li, [{ opacity: 0, transform: "scale(0.96)" }, { opacity: 1, transform: "none" }], { duration: ENTER_MS, easing: EASE });
+  for (const li of new Set(entered)) {
+    if (before.size && !li.hidden) animate(li, [{ opacity: 0, transform: "scale(0.96)" }, { opacity: 1, transform: "none" }], { duration: ENTER_MS, easing: EASE });
+  }
+  // A newly agreed item settles where it lands, once its glide is due to end. Started from the
+  // transition itself, so a later doc update that re-glides the item cannot swallow it.
+  for (const li of settled) {
+    setTimeout(() => {
+      if (li.isConnected && !li.hidden && li.dataset.state === "agreed") playSettled(li);
+    }, GLIDE_MS);
+  }
+}
+
+// Shows as many items as fit the panel's fixed height, folding the lowest-priority ones away
+// (FOLD_ORDER); each section heading counts what it is not showing ("+2 more").
+function fitPanel(want) {
+  const panel = document.getElementById("panel");
+  const shown = {};
+  for (const [list, all] of Object.entries(want)) {
+    shown[list] = all.slice(-SHOW[list]).map((it) => panelItems.get(it.key));
+    for (const li of shown[list]) li.hidden = false;
+  }
+  const bottom = panel.getBoundingClientRect().bottom - parseFloat(getComputedStyle(panel).paddingBottom);
+  const full = () => lists.open.getBoundingClientRect().bottom > bottom + 0.5;
+  const foldable = FOLD_ORDER.flatMap((list) => (list === "pending" ? shown[list].slice(0, -1) : shown[list]));
+  for (let i = 0; i < foldable.length && full(); i++) foldable[i].hidden = true;
+  for (const [list, all] of Object.entries(want)) {
+    const left = all.length - shown[list].filter((li) => !li.hidden).length;
+    document.getElementById(`${list}-more`).textContent = left > 0 ? `+${left} more` : "";
   }
 }
 
