@@ -130,3 +130,7 @@ Run in a real Google Meet with 2 or more people. Not yet done.
 - The local control UI has no login. It relies on being reachable only from localhost, detected by the
   absence of proxy headers. Fine for a personal test, not for a shared deployment.
 - Calendar scheduling is deferred; sessions start from a pasted meeting URL.
+
+## Known issues
+
+Remaining fixes from the final review are listed in [docs/known-issues.md](docs/known-issues.md).
