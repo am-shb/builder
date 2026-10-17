@@ -4,6 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { ConsensusDocSchema } from "./consensus/doc.ts";
+import type { ConsensusDoc } from "./consensus/doc.ts";
+import { Prototype as PrototypeSchema } from "./ui/schema.ts";
+import type { Prototype } from "./ui/schema.ts";
 
 export type Session = {
   id: string;
@@ -57,6 +61,12 @@ export function openStore(path: string) {
       speaker TEXT,
       text TEXT,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS consensus (
+      session_id TEXT PRIMARY KEY,
+      doc_json TEXT,
+      proto_json TEXT,
+      updated_at TEXT
     );
   `);
   // Additive migration for databases created before the stage columns existed.
@@ -132,6 +142,20 @@ export function openStore(path: string) {
     listEvents(sessionId: string): StoredEvent[] {
       return db.prepare(`SELECT id, session_id, kind, speaker, text, created_at FROM events WHERE session_id = ? ORDER BY id`)
         .all(sessionId) as StoredEvent[];
+    },
+    getConsensus(sessionId: string): { doc: ConsensusDoc; proto: Prototype } | undefined {
+      const row = db.prepare(`SELECT doc_json, proto_json FROM consensus WHERE session_id = ?`)
+        .get(sessionId) as { doc_json: string; proto_json: string } | undefined;
+      if (!row) return undefined;
+      return {
+        doc: ConsensusDocSchema.parse(JSON.parse(row.doc_json)),
+        proto: PrototypeSchema.parse(JSON.parse(row.proto_json)),
+      };
+    },
+    saveConsensus(sessionId: string, doc: ConsensusDoc, proto: Prototype): void {
+      db.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET doc_json = excluded.doc_json, proto_json = excluded.proto_json, updated_at = excluded.updated_at`)
+        .run(sessionId, JSON.stringify(doc), JSON.stringify(proto), now());
     },
     close() {
       db.close();
