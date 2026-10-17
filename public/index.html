@@ -31,6 +31,7 @@
   .line.bot b { color:var(--accent); }
   #sessions a { color:var(--accent); cursor:pointer; text-decoration:none; display:block; padding:2px 0; font-size:13px; overflow-wrap:anywhere; }
   .muted { color:var(--muted); font-size:13px; }
+  #handoffLink { color:var(--accent); }
 </style>
 </head>
 <body>
@@ -53,6 +54,7 @@
       <span class="badge" id="status">—</span>
     </div>
     <div id="statusDetail" class="muted"></div>
+    <div class="row muted" style="margin-top:4px"><a id="handoffLink" target="_blank" rel="noopener">Handoff page</a><span>Cost: <span id="cost">$0.00</span></span></div>
     <div id="transcript"></div>
     <div class="line partial" id="partial" hidden></div>
     <form id="chat" style="margin-top:12px">
@@ -126,6 +128,7 @@ async function openSession(id) {
   setStatus(session.state === "create_failed" ? "create_failed" : session.bot_status, session.bot_sub_code || session.error);
   $("stagePanel").hidden = session.state !== "created";
   $("stageLink").href = session.stage_url;
+  $("handoffLink").href = session.handoff_url;
   $("stageHtml").value = session.stage_html || "";
   if (session.state !== "created") return;
   source = new EventSource(`/api/sessions/${id}/stream`);

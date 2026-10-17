@@ -15,6 +15,7 @@ import { createRuntime } from "./session/runtime.ts";
 import type { SessionRuntime } from "./session/runtime.ts";
 import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
+import { buildHandoffHtml, buildExportHtml } from "./handoff/export.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -45,6 +46,8 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   const rendererDir = new URL("../public/renderer/", import.meta.url);
   const stageUrl = (s: Session) =>
     `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
+
+  const handoffPath = (s: Session) => `/handoff/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
 
   // ---- live fan-out to browsers (SSE) ----
   const subscribers = new Map<string, Set<http.ServerResponse>>();
@@ -169,7 +172,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     res.end(JSON.stringify(body));
   }
   function sessionView(s: Session) {
-    return { ...s, stage_url: stageUrl(s), events: store.listEvents(s.id) };
+    return { ...s, stage_url: stageUrl(s), handoff_url: `${config.publicBaseUrl}${handoffPath(s)}`, events: store.listEvents(s.id) };
   }
   function openStream(req: http.IncomingMessage, res: http.ServerResponse, s: Session) {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -200,6 +203,26 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(stageHtml);
+    }
+
+    // ---- handoff: read by engineers after the meeting (public, token-gated; reuses the stage token) ----
+    const handoff = path.match(/^\/handoff\/([0-9a-f-]{36})(\/export)?$/);
+    if (req.method === "GET" && handoff) {
+      const s = store.getSession(handoff[1]);
+      if (!s || !tokenMatches(url.searchParams.get("token"), s.stage_token)) return json(res, 404, { error: "not found" });
+      const consensus = store.getConsensus(s.id);
+      if (!consensus) return json(res, 404, { error: "not found" });
+      const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" };
+      let body: string;
+      if (handoff[2]) {
+        headers["Content-Disposition"] = 'attachment; filename="builder-handoff.html"';
+        body = buildExportHtml(consensus.doc, consensus.proto);
+      } else {
+        body = buildHandoffHtml(consensus.doc, consensus.proto, `/handoff/${s.id}/export?token=${encodeURIComponent(s.stage_token!)}`);
+      }
+      log("handoff.served", { session_id: s.id, export: Boolean(handoff[2]), bytes: body.length });
+      res.writeHead(200, headers);
+      return res.end(body);
     }
 
     // Static renderer assets: public, no secrets.
