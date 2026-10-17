@@ -159,7 +159,10 @@ export function createOpenRouterPort(
           const schema = schemas.get(block.name);
           if (schema) {
             const parsed = schema.safeParse(input);
-            if (!parsed.success) { drop("invalid_input", { issues: parsed.error.issues.length }); continue; }
+            if (!parsed.success) {
+              drop("invalid_input", { issues: parsed.error.issues.length, issue_details: issueDetails(parsed.error.issues) });
+              continue;
+            }
             input = parsed.data;
           }
           toolCalls.push({ name: block.name, input });
@@ -177,7 +180,13 @@ export function createOpenRouterPort(
   };
 }
 
-const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+// Where and how a tool input failed validation: the dotted path (schema keys and array
+// indexes) and the zod issue code. Never the issue message or values, which can carry content.
+export function issueDetails(issues: readonly { path: readonly PropertyKey[]; code: string }[]): { path: string; code: string }[] {
+  return issues.map((i) => ({ path: i.path.map(String).join("."), code: i.code }));
+}
+
+const zeroUsage = (): Usage =>({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
 // Scripted port for tests: call N returns script[N] (empty once exhausted) with
 // small nonzero usage so cost accounting has something to record.

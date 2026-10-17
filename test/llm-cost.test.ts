@@ -234,3 +234,25 @@ test("result reports stopReason and dropped count for invalid calls", async () =
   const fake = await createFakePort([[{ name: "a", input: {} }]]).runTools({ loop: "build", ...REQ, tools: [], effort: "medium" });
   assert.deepEqual([fake.stopReason, fake.dropped], ["tool_use", 0]);
 });
+
+test("llm_tool_dropped logs each zod issue's dotted path and code, never values or messages", async () => {
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const Nested = z.strictObject({ items: z.array(z.strictObject({ tag: z.string(), kind: z.enum(["a", "b"]) })) });
+  const tool = { name: "nest", description: "n", strict: true, input_schema: {}, schema: Nested };
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, {
+    fetch: (async () => sse(toolUseStream({ name: "nest", json: ['{"items":[{"tag":"ok","kind":"a"},{"tag":9137,"kind":"secret-kind","extra":"leak-me"}]}'] }))) as typeof fetch,
+    log: (msg, fields) => logs.push({ msg, fields }),
+  });
+  const r = await port.runTools({ loop: "conversation", ...REQ, tools: [tool], effort: "low" });
+  assert.equal(r.dropped, 1);
+  const drop = logs.find((l) => l.msg === "llm_tool_dropped")!;
+  assert.equal(drop.fields!.reason, "invalid_input");
+  assert.equal(drop.fields!.issues, 3);
+  const details = drop.fields!.issue_details as { path: string; code: string }[];
+  assert.deepEqual(
+    [...details].sort((a, b) => a.path.localeCompare(b.path)),
+    [{ path: "items.1", code: "unrecognized_keys" }, { path: "items.1.kind", code: "invalid_value" }, { path: "items.1.tag", code: "invalid_type" }],
+  );
+  const text = JSON.stringify(logs);
+  for (const leak of ["leak-me", "secret-kind", "extra", "9137", "expected"]) assert.ok(!text.includes(leak), `log must not contain ${leak}`);
+});
