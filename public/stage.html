@@ -16,7 +16,9 @@
      Layout (px), no outer shell and no transcript: the prototype fills the left edge to edge,
      and the right column holds the panel (phase line on top) over Builder's dock.
        prototype 0,0 900x720 | panel 900,0 380x548
-                             | dock  900,548 380x172 */
+                             | dock  900,548 380x172
+     While the room compares options, the comparison spans the whole frame (comparison.js): the
+     panel and dock step aside and Builder sits small in the top-right corner. */
   :root { --bg:#0f1115; --panel:#171a21; --ink:#f4f6fa; --muted:#b4bccb; --accent:#8fb0ff; --live:#3ddc84;
           --agreed:#34c473; --agreed-bg:#132219; --pending:#f0a43a; --pending-bg:#231c10; --track:#3a404d;
           --ask:#c7a6ff; --line:#2a2f3b; --font:system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -31,7 +33,7 @@
   #placeholder .sub { position:absolute; left:0; right:0; top:531px; text-align:center; color:var(--muted); font-size:22px; }
 
   /* ---------- right panel: Agreed / Pending / Open questions ---------- */
-  #panel { position:absolute; left:900px; top:0; width:380px; height:548px; padding:14px 16px 12px;
+  #panel { position:absolute; left:900px; top:0; width:380px; height:548px; padding:14px 16px 12px; transition:transform 450ms ease-out, opacity 450ms ease-out;
            display:flex; flex-direction:column; gap:10px; overflow:hidden;
            --b-draft:var(--pending); --b-agreed:var(--agreed); /* the settled morph, in panel colours */ }
   #panel .phase { display:flex; align-items:center; gap:8px; margin-bottom:4px; font:700 17px/1 var(--font); color:var(--muted); }
@@ -59,8 +61,11 @@
   .cd-half.l i { left:14px; transform-origin:0 50%; }
 
   /* The dock is the column's lower part, set off by a rule; the rule fades while Builder is centre stage. */
-  #dock { position:absolute; left:916px; top:548px; width:348px; height:172px; border-top:2px solid var(--line); transition:opacity 500ms ease-out; }
+  #dock { position:absolute; left:916px; top:548px; width:348px; height:172px; border-top:2px solid var(--line); transition:opacity 500ms ease-out, transform 450ms ease-out; }
   #builder[data-placement="center"] ~ #dock { opacity:0; }
+  body.comparing #panel, body.comparing #dock { opacity:0; transform:translateX(160px); }
+  #comparison { position:absolute; inset:0; z-index:40; }
+  #comparison:empty { display:none; }
 
   /* ---------- Builder (character.js builds the parts) ---------- */
   .builder { position:absolute; inset:0; z-index:50; pointer-events:none; --mood:var(--accent); }
@@ -77,6 +82,9 @@
   #builder[data-placement="center"] .bot-label { transform:translate(340px, 477px); }
   #builder[data-placement="dock"] .bot { transform:translate(1146px, 563px) scale(0.72); }
   #builder[data-placement="dock"] .bot-label { transform:translate(916px, 601px); }
+  /* Comparing: small, top-right, clear of the options (which start at y 112). */
+  #builder[data-placement="corner"] .bot { transform:translate(1196px, 18px) scale(0.4); }
+  #builder[data-placement="corner"] .bot-label { transform:translate(1000px, 34px) scale(0.8); }
 
   .bot div { position:absolute; }
   .bot-rig, .bot-pose, .bot-act, .bot-eye, .bot-eyeball, .bot-arc, .bot-cheek, .bot-mouth, .bot-bulb, .bot-ring,
@@ -177,6 +185,7 @@
 </aside>
 <div id="builder"></div>
 <div id="dock"></div>
+<div id="comparison"></div>
 <script type="module">
 import { connectStage } from "@renderer/client.js";
 import { renderTree } from "@renderer/render.js";
@@ -185,6 +194,7 @@ import { startClock, onFrame, animate } from "@renderer/clock.js";
 import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
+import { showComparison, resolveComparison } from "@renderer/comparison.js";
 
 const EASE = "ease-out";
 const protoEl = document.getElementById("proto");
@@ -192,6 +202,7 @@ const character = createCharacter(document.getElementById("builder"));
 let proto = null;
 let ui = null;
 let nodes = new Map();
+let built = false;
 
 // `changes` animates the redraw: a patch's changes, or [] for a local interaction.
 function draw(changes) {
@@ -201,9 +212,41 @@ function draw(changes) {
   nodes = renderTree(protoEl, proto, ui, changes);
   // Builder takes centre stage until the first real content exists, then moves to the dock.
   const screens = proto.root.children.filter((c) => c.type === "Screen");
-  const built = screens.some((sc) => sc.children.length);
+  built = screens.some((sc) => sc.children.length);
   document.getElementById("placeholder").hidden = built;
-  character.setPlacement(built ? "dock" : "center");
+  placeCharacter();
+}
+
+// ---------- comparison: options side by side across the whole frame ----------
+const comparisonEl = document.getElementById("comparison");
+let comparing = false; // the panel and dock have stepped aside, Builder sits in the corner
+let covered = false; // the comparison covers the prototype, until its resolve or close has played out
+let uncovering = 0;
+
+function placeCharacter() {
+  character.setPlacement(comparing ? "corner" : built ? "dock" : "center");
+}
+
+function setComparing(on) {
+  comparing = on;
+  document.body.classList.toggle("comparing", on);
+  placeCharacter();
+}
+
+// The normal layout comes back at once, alongside the comparison's exit (`done`); focus moments
+// wait until the exit has played out.
+function uncover(done) {
+  setComparing(false);
+  const n = ++uncovering;
+  const clear = () => { if (n === uncovering && !comparing) covered = false; };
+  done.then(clear, clear);
+}
+
+function presentComparison(view) {
+  if (!view) return void (comparing && uncover(showComparison(comparisonEl, null)));
+  covered = true;
+  setComparing(true);
+  showComparison(comparisonEl, view);
 }
 
 bindInteractions(protoEl, () => proto, () => ui, (next) => { ui = next; draw([]); });
@@ -244,7 +287,7 @@ function focusable(prevProto, changes) {
 const focusQueue = createFocusQueue({ playMs: SPOTLIGHT_MS });
 const shown = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
 onFrame((now) => {
-  if (now < screenTransitionEndsAt()) return;
+  if (covered || now < screenTransitionEndsAt()) return;
   const c = focusQueue.next(now, (ch) => shown(nodes.get(ch.id)));
   if (c) playFocus(nodes.get(c.id), c);
 });
@@ -420,6 +463,7 @@ function onEvent(ev) {
       draw();
       if (ev.doc) renderDoc(ev.doc);
       if (ev.mood) character.setMood(ev.mood);
+      presentComparison(ev.comparison ?? null);
       break;
     }
     case "patch": {
@@ -427,7 +471,7 @@ function onEvent(ev) {
       const changes = ev.changes ?? [];
       proto = ev.proto;
       if (ui) ui = { ...ui, screen: followScreen(prevProto, changes) };
-      draw(changes);
+      draw(covered ? undefined : changes); // under the comparison: no motion; its focus waits
       for (const c of focusTargets(focusable(prevProto, changes), nodes)) focusQueue.enqueue(c);
       break;
     }
@@ -452,8 +496,14 @@ function onEvent(ev) {
     case "mood":
       character.setMood(ev.mood);
       break;
+    case "comparison":
+      presentComparison(ev.view);
+      break;
+    case "resolve":
+      uncover(resolveComparison(comparisonEl, ev.winner));
+      break;
     default:
-      break; // comparison, speech: later tasks
+      break; // speech: a later task
   }
 }
 

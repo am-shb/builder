@@ -28,7 +28,7 @@ function findIn(node: UiNode, id: string): UiNode | undefined {
   return undefined;
 }
 
-function findParent(node: UiNode, id: string): UiNode | undefined {
+export function findParent(node: UiNode, id: string): UiNode | undefined {
   for (const c of node.children) {
     if (c.id === id) return node;
     const hit = findParent(c, id);

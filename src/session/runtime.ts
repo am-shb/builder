@@ -1,9 +1,9 @@
 // Per-session runtime: owns the prototype, consensus doc, mood and captions,
 // persists them, and pushes every change to the stage over the channel.
-import { applyBatch as applyPatchBatch, emptyPrototype } from "../ui/tree.ts";
+import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent } from "../ui/tree.ts";
 import type { Prototype, PatchBatch, Interaction } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
-import type { ConsensusDoc } from "../consensus/doc.ts";
+import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
 import type { Caption, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "./mood.ts";
@@ -14,6 +14,27 @@ export type Log = (msg: string, fields?: Record<string, unknown>) => void;
 const MAX_FINAL_CAPTIONS = 3;
 
 export type SessionRuntime = ReturnType<typeof makeRuntime>;
+
+/**
+ * The side-by-side view of a conflict: each variant applied to the current prototype, with the
+ * ids its changes touched (a removal focuses the parent it left). A variant whose batch does not
+ * apply is dropped; with fewer than two left there is nothing to compare, so the result is null.
+ */
+export function buildComparisonView(proto: Prototype, conflict: Conflict): ComparisonView | null {
+  const variants: ComparisonView["variants"] = [];
+  for (const v of conflict.variants) {
+    const r = applyPatchBatch(proto, v.batch);
+    if (!r.ok) continue;
+    const focusIds = new Set<string>();
+    for (const c of r.changes) {
+      if (c.kind === "screen") continue;
+      const id = c.kind === "removed" ? findParent(proto.root, c.id)?.id : c.id;
+      if (id && findNode(r.proto, id)) focusIds.add(id);
+    }
+    variants.push({ label: v.label, summary: v.summary, backers: v.backers, proto: r.proto, focusIds: [...focusIds] });
+  }
+  return variants.length >= 2 ? { conflictId: conflict.id, topic: conflict.topic, variants } : null;
+}
 
 export function createRuntime(deps: { store: Store; channel: StageSink; clock?: () => number; log?: Log }) {
   const clock = deps.clock ?? Date.now;

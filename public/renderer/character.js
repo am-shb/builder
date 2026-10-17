@@ -2,7 +2,7 @@
 // agent is doing. This module builds its DOM and drives it; the stage page's CSS draws it.
 // Moods only switch classes and data attributes: each part's pose comes in through a CSS
 // transition and its idle motion is a CSS animation, both stepped by the shared 15 fps clock.
-// Placement (centre stage vs the dock) is a FLIP between the two CSS-defined spots.
+// Placement (centre stage, the dock, or a corner while comparing) is a FLIP between CSS-defined spots.
 import { animate, logMotion, onFrame } from "@renderer/clock.js";
 
 export const MOODS = ["listening", "thinking", "building", "speaking", "curious", "unsure", "pleased"];
@@ -15,6 +15,7 @@ export const MOOD_LABELS = {
   unsure: "Unsure",
   pleased: "Pleased",
 };
+const PLACEMENTS = ["center", "dock", "corner"];
 export const PLACEMENT_MS = 500;
 const LABEL_FADE_MS = 300;
 const HEARING_MS = 1800; // rings keep pulsing this long after the last human caption
@@ -55,7 +56,7 @@ function build() {
  * Builds the character into `el` and returns its controls:
  * - setMood(mood): one of MOODS (anything else is ignored);
  * - setMouth(level): 0..1, the speaking mouth follows it on the clock's frames;
- * - setPlacement("center" | "dock"): moves there over PLACEMENT_MS;
+ * - setPlacement("center" | "dock" | "corner"): moves there over PLACEMENT_MS (corner: small, while comparing);
  * - hear(): a participant is speaking; the listening rings pulse for a moment.
  */
 export function createCharacter(el) {
@@ -93,7 +94,7 @@ export function createCharacter(el) {
     },
 
     setPlacement(placement) {
-      if (placement !== "center" && placement !== "dock") return;
+      if (!PLACEMENTS.includes(placement)) return;
       if (el.dataset.placement === placement) return;
       if (!el.dataset.placement) {
         el.dataset.placement = placement; // first draw: no move
