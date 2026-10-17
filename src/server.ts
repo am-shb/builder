@@ -19,14 +19,15 @@ async function main() {
   const store = openStore(config.dbPath);
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();
+  const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   let runtime!: ReturnType<typeof createRuntime>;
   const channel = createStageChannel(
     server,
     (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
     () => {},
     (id) => runtime(id).snapshot(),
+    log,
   );
-  const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   runtime = createRuntime({ store, channel, log });
   const app = createApp({ config, recall, store, runtime, log });
   server.on("request", app.handler);

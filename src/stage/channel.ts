@@ -45,6 +45,7 @@ export function createStageChannel(
   auth: (sessionId: string, token: string) => boolean,
   onClientMessage: (sessionId: string, msg: unknown) => void,
   snapshotFor: (sessionId: string) => StageEvent,
+  log: (msg: string, fields?: Record<string, unknown>) => void = () => {},
 ): StageSink {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_MESSAGE });
   const bySession = new Map<string, Set<WebSocket>>();
@@ -77,7 +78,12 @@ export function createStageChannel(
           // malformed client message: ignore
         }
       });
-      ws.send(JSON.stringify(snapshotFor(sessionId)));
+      try {
+        ws.send(JSON.stringify(snapshotFor(sessionId)));
+      } catch {
+        log("channel.snapshot_failed", { session_id: sessionId });
+        ws.terminate();
+      }
     });
   });
 

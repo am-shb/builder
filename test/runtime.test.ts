@@ -316,3 +316,54 @@ test("createBot sends bot_name Builder and variant web_4_core by default", async
   assert.equal(create.bot_name, "Builder");
   assert.equal(create.variant.google_meet, "web_4_core");
 });
+
+const mkRuntime = (id: string, sent: StageEvent[]) => {
+  const store = openStore(":memory:");
+  const s = store.createIntent(id, "https://meet.google.com/x");
+  return createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
+};
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("pleased mood expires and pushes listening after the window", async () => {
+  const sent: StageEvent[] = [];
+  const rt = mkRuntime("66666666-6666-6666-6666-666666666666", sent);
+  rt.updateMoodInputs({ pleasedUntil: Date.now() + 60 });
+  assert.deepEqual(sent, [{ type: "mood", mood: "pleased" }]);
+  await sleepMs(200);
+  assert.deepEqual(sent, [{ type: "mood", mood: "pleased" }, { type: "mood", mood: "listening" }]);
+});
+
+test("re-setting a window after expiry pushes again (lastMood resynced)", async () => {
+  const sent: StageEvent[] = [];
+  const rt = mkRuntime("77777777-7777-7777-7777-777777777777", sent);
+  rt.updateMoodInputs({ pleasedUntil: Date.now() + 40 });
+  await sleepMs(150);
+  rt.updateMoodInputs({ pleasedUntil: Date.now() + 5000 });
+  assert.deepEqual(sent.map((e: any) => e.mood), ["pleased", "listening", "pleased"]);
+  rt.updateMoodInputs({ pleasedUntil: 0 });
+});
+
+test("snapshotFor throwing terminates only that socket and the server keeps serving", async () => {
+  const server = http.createServer((_q, res) => res.end("ok"));
+  openServers.add(server);
+  const logs: string[] = [];
+  let boom = true;
+  createStageChannel(server, () => true, () => {}, () => {
+    if (boom) throw new Error("corrupt secret text");
+    return { type: "speech_stop" };
+  }, (m) => logs.push(m));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as any).port;
+  const id = "88888888-8888-8888-8888-888888888888";
+  const bad = connect(`ws://127.0.0.1:${port}/stage/${id}/ws?token=x`);
+  await bad.closed;
+  assert.equal(bad.queue.length, 0);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200, "server still serving");
+  boom = false;
+  const good = connect(`ws://127.0.0.1:${port}/stage/${id}/ws?token=x`);
+  await good.opened;
+  assert.equal((await good.next()).type, "speech_stop");
+  assert.deepEqual(logs, ["channel.snapshot_failed"]);
+  good.ws.close();
+  await good.closed;
+});

@@ -39,6 +39,24 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
   let moodInputs: MoodInputs = { ...NEUTRAL_MOOD_INPUTS };
   let lastMood: Mood = deriveMood(moodInputs, clock());
 
+  // Re-derive against the clock, push only on change, and wake up at the next
+  // window boundary so expiries reach the stage without another input.
+  let moodTimer: ReturnType<typeof setTimeout> | undefined;
+  function refreshMood() {
+    clearTimeout(moodTimer);
+    const now = clock();
+    const mood = deriveMood(moodInputs, now);
+    if (mood !== lastMood) {
+      lastMood = mood;
+      send({ type: "mood", mood });
+    }
+    const upcoming = [moodInputs.unsureUntil, moodInputs.pleasedUntil, moodInputs.addressedUntil].filter((t) => t > now);
+    if (upcoming.length) {
+      moodTimer = setTimeout(refreshMood, Math.min(...upcoming) - now + 1);
+      moodTimer.unref();
+    }
+  }
+
   const send = (ev: StageEvent) => channel.send(sessionId, ev);
   const persist = () => store.saveConsensus(sessionId, doc, proto);
 
@@ -71,11 +89,7 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
 
     updateMoodInputs(inputs: Partial<MoodInputs>) {
       moodInputs = { ...moodInputs, ...inputs };
-      const mood = deriveMood(moodInputs, clock());
-      if (mood !== lastMood) {
-        lastMood = mood;
-        send({ type: "mood", mood });
-      }
+      refreshMood();
     },
 
     // Keeps the last 3 final captions plus one in-progress partial.
