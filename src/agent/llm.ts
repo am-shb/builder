@@ -225,3 +225,13 @@ export function createFakePort(script: ToolCall[][], usage: Usage = { inputToken
     },
   };
 }
+
+// Scripted port for end-to-end replays: the conversation loop (Haiku) and the build loop (Opus)
+// share one port, so each call is routed to its own loop's script by the request's `loop`.
+export function createRoutedFakePort(scripts: Record<Loop, ToolCall[][]>, usage?: Usage): ModelPort {
+  const ports: Record<Loop, ModelPort> = {
+    conversation: createFakePort(scripts.conversation, usage),
+    build: createFakePort(scripts.build, usage),
+  };
+  return { runTools: (req) => ports[req.loop].runTools(req) };
+}

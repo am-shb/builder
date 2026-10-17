@@ -17,6 +17,7 @@ import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
 import { buildHandoffHtml, buildExportHtml } from "./handoff/export.ts";
 import { createBuildLoop } from "./agent/build-loop.ts";
+import type { Timers } from "./agent/build-loop.ts";
 import { createUiCommandRunner } from "./agent/ui-command.ts";
 import { createChatSpeech, createConversationLoop } from "./agent/conversation-loop.ts";
 import type { Speech } from "./agent/conversation-loop.ts";
@@ -45,7 +46,8 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
 // Agent deps are injected (server.ts builds the real ones when OPENROUTER_API_KEY is set); without
 // them the app is listen-only. Speech is Builder's voice (src/voice/speech.ts) when server.ts has a
 // TTS voice configured, and meeting chat otherwise.
-export type AgentDeps = { port: ModelPort; speech?: Speech };
+// `clock` and `timers` default to real time; replays and tests inject virtual ones.
+export type AgentDeps = { port: ModelPort; speech?: Speech; clock?: () => number; timers?: Timers };
 
 export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {
   const { config, recall, store } = deps;
@@ -53,10 +55,11 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
   const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
+  const clock = deps.agent?.clock ?? Date.now;
   const conversation = deps.agent ? createConversationLoop({
-    port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log,
-    buildLoop: createBuildLoop({ port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log }),
-    uiCommand: createUiCommandRunner({ runtime, clock: Date.now }),
+    port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log,
+    buildLoop: createBuildLoop({ port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, ...(deps.agent.timers ? { timers: deps.agent.timers } : {}) }),
+    uiCommand: createUiCommandRunner({ runtime, clock }),
     speech: deps.agent.speech ?? createChatSpeech({ recall, runtime, store, botName: BOT_NAME }),
   }) : null;
   const rendererDir = new URL("../public/renderer/", import.meta.url);
@@ -369,6 +372,6 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     },
     pollOnce,
     // Stuck detection; server.ts calls it about once a second.
-    tickAgent: () => conversation?.poll(Date.now()),
+    tickAgent: () => conversation?.poll(clock()),
   };
 }

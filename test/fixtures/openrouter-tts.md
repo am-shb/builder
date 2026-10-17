@@ -62,9 +62,9 @@ lily, matilda, river, roger, will
   measured. One named constant on each side: `PCM_SAMPLE_RATE` in
   `src/voice/tts.ts` (server: frame alignment, playback-length estimate) and `PCM_RATE` in
   `public/renderer/audio.js` (stage: AudioContext rate). Change both together.
-- **Pending manual check: confirm the PCM rate live.** Run `node scripts/probe-tts.ts` (one request, a fraction of
-  a cent). It prints the content type, time to first chunk, byte count and the duration each candidate rate
-  implies, and saves `probe-tts.pcm` so you can listen to it at 24 kHz. Not run yet (controller ruling R2).
+- **Confirmed live (2026-10-17): the rate is 24 kHz mono.** `node scripts/probe-tts.ts` (one request, a fraction
+  of a cent) prints the content type, time to first chunk, byte count and the duration each candidate rate
+  implies, and saves `probe-tts.pcm`. The first audio chunk arrived in about 1 to 1.2 s.
 
 ## Pricing
 

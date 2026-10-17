@@ -1,0 +1,618 @@
+{
+  "participants": [
+    "Ada",
+    "Bo"
+  ],
+  "utterances": [
+    {
+      "t": 3000,
+      "speaker": "Ada",
+      "text": "Let's build a team to-do app. I want a quick add box at the top of the page."
+    },
+    {
+      "t": 15000,
+      "speaker": "Bo",
+      "text": "Yes, a quick add box at the top works for me."
+    },
+    {
+      "t": 27000,
+      "speaker": "Ada",
+      "text": "Each task should show who owns it, as a small badge."
+    },
+    {
+      "t": 39000,
+      "speaker": "Bo",
+      "text": "Agreed, the owner badge sounds right."
+    },
+    {
+      "t": 51000,
+      "speaker": "Bo",
+      "text": "We could also add a due date to each task."
+    },
+    {
+      "t": 85000,
+      "speaker": "Ada",
+      "text": "I think done tasks should hide behind a Show done switch."
+    },
+    {
+      "t": 88000,
+      "speaker": "Bo",
+      "text": "I would rather have a separate Done tab."
+    },
+    {
+      "t": 100000,
+      "speaker": "Ada",
+      "text": "Let's go with B, the Done tab."
+    },
+    {
+      "t": 104000,
+      "speaker": "Bo",
+      "text": "Builder, click Add."
+    },
+    {
+      "t": 110000,
+      "speaker": "Ada",
+      "text": "Hey Builder what have",
+      "partial": true
+    },
+    {
+      "t": 111000,
+      "speaker": "Ada",
+      "text": "Hey Builder, what have we agreed so far?"
+    }
+  ],
+  "tailMs": 25000,
+  "fakeModel": {
+    "conversation": [
+      [
+        {
+          "name": "speak",
+          "input": {
+            "text": "Hi, I'm Builder. I'll listen and sketch what you agree on.",
+            "reason": "opening"
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Quick add",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Quick-add box at the top",
+                    "proposedBy": "Ada",
+                    "supporters": [],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "exploring",
+            "groundingIds": [
+              3
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Quick add",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Quick-add box at the top",
+                    "proposedBy": "Ada",
+                    "supporters": [
+                      "Bo"
+                    ],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "converging",
+            "groundingIds": [
+              3,
+              4
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Owners",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Owner badge on each task",
+                    "proposedBy": "Ada",
+                    "supporters": [],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "exploring",
+            "groundingIds": [
+              5
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Owners",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Owner badge on each task",
+                    "proposedBy": "Ada",
+                    "supporters": [
+                      "Bo"
+                    ],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "converging",
+            "groundingIds": [
+              5,
+              6
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Due dates",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Due date on each task",
+                    "proposedBy": "Bo",
+                    "supporters": [],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "exploring",
+            "groundingIds": [
+              7
+            ]
+          }
+        }
+      ],
+      [],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Done tasks",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [
+                  {
+                    "text": "Hide done tasks behind a Show done switch",
+                    "proposedBy": "Ada",
+                    "supporters": [],
+                    "objectors": []
+                  },
+                  {
+                    "text": "A separate Done tab",
+                    "proposedBy": "Bo",
+                    "supporters": [],
+                    "objectors": []
+                  }
+                ]
+              }
+            ],
+            "mood": "exploring",
+            "groundingIds": [
+              8,
+              9
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_build",
+          "input": {
+            "topics": [
+              {
+                "title": "Done tasks",
+                "screenHint": "home",
+                "questionsRaised": [],
+                "proposals": [],
+                "resolvedChoice": {
+                  "conflictId": "c-done",
+                  "winner": "B"
+                }
+              }
+            ],
+            "mood": "converging",
+            "groundingIds": [
+              10
+            ]
+          }
+        },
+        {
+          "name": "speak",
+          "input": {
+            "text": "Going with B, the Done tab. Shout if that is wrong.",
+            "reason": "confirm_conflict"
+          }
+        }
+      ],
+      [
+        {
+          "name": "ui_command",
+          "input": {
+            "action": "click",
+            "target": "Add"
+          }
+        }
+      ],
+      [
+        {
+          "name": "speak",
+          "input": {
+            "text": "A quick add box, owner badges, due dates and the Done tab. Anything else to sketch?",
+            "reason": "answer"
+          }
+        }
+      ],
+      [
+        {
+          "name": "speak",
+          "input": {
+            "text": "Still with me? Say Builder if you want a recap.",
+            "reason": "stuck"
+          }
+        }
+      ]
+    ],
+    "build": [
+      [
+        {
+          "name": "apply_patches",
+          "input": {
+            "label": "Added: quick add · Ada",
+            "ops": [
+              {
+                "op": "add",
+                "parentId": "home",
+                "node": {
+                  "id": "home.input",
+                  "type": "Input",
+                  "props": [
+                    {
+                      "key": "placeholder",
+                      "value": "Add a task"
+                    }
+                  ],
+                  "status": "draft",
+                  "decisionId": "d-quick-add"
+                }
+              },
+              {
+                "op": "add",
+                "parentId": "home",
+                "node": {
+                  "id": "home.add",
+                  "type": "Button",
+                  "props": [
+                    {
+                      "key": "label",
+                      "value": "Add"
+                    }
+                  ],
+                  "status": "draft",
+                  "decisionId": "d-quick-add",
+                  "on": {
+                    "click": [
+                      {
+                        "kind": "append",
+                        "list": "home.list",
+                        "fromInput": "home.input"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "op": "add",
+                "parentId": "home",
+                "node": {
+                  "id": "home.list",
+                  "type": "List",
+                  "props": [],
+                  "status": "draft",
+                  "decisionId": "d-quick-add"
+                }
+              }
+            ],
+            "by": "Ada"
+          }
+        },
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "add_decision",
+                "id": "d-quick-add",
+                "text": "Quick-add box at the top",
+                "proposedBy": "Ada",
+                "affects": [
+                  "home.input",
+                  "home.add",
+                  "home.list"
+                ]
+              },
+              {
+                "op": "mark_pending",
+                "decisionId": "d-quick-add"
+              },
+              {
+                "op": "set_app",
+                "name": "Team To-Do"
+              },
+              {
+                "op": "set_phase",
+                "phase": "explore"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "support",
+                "decisionId": "d-quick-add",
+                "speaker": "Bo"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "apply_patches",
+          "input": {
+            "label": "Added: owner badge · Ada",
+            "ops": [
+              {
+                "op": "add",
+                "parentId": "home",
+                "node": {
+                  "id": "home.owner",
+                  "type": "Badge",
+                  "props": [
+                    {
+                      "key": "text",
+                      "value": "Owner: Ada"
+                    }
+                  ],
+                  "status": "draft",
+                  "decisionId": "d-owner-badge"
+                }
+              }
+            ],
+            "by": "Ada"
+          }
+        },
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "add_decision",
+                "id": "d-owner-badge",
+                "text": "Owner badge on each task",
+                "proposedBy": "Ada",
+                "affects": [
+                  "home.owner"
+                ]
+              },
+              {
+                "op": "mark_pending",
+                "decisionId": "d-owner-badge"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "support",
+                "decisionId": "d-owner-badge",
+                "speaker": "Bo"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "apply_patches",
+          "input": {
+            "label": "Added: due date · Bo",
+            "ops": [
+              {
+                "op": "add",
+                "parentId": "home",
+                "node": {
+                  "id": "home.due",
+                  "type": "Text",
+                  "props": [
+                    {
+                      "key": "text",
+                      "value": "Due date"
+                    }
+                  ],
+                  "status": "draft",
+                  "decisionId": "d-due-dates"
+                }
+              }
+            ],
+            "by": "Bo"
+          }
+        },
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "add_decision",
+                "id": "d-due-dates",
+                "text": "Due date on each task",
+                "proposedBy": "Bo",
+                "affects": [
+                  "home.due"
+                ]
+              },
+              {
+                "op": "mark_pending",
+                "decisionId": "d-due-dates"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "add_conflict",
+                "id": "c-done",
+                "topic": "Where done tasks go",
+                "variants": [
+                  {
+                    "label": "A",
+                    "summary": "Hide done tasks behind a Show done switch",
+                    "backers": [
+                      "Ada"
+                    ],
+                    "batch": {
+                      "label": "Option A",
+                      "ops": [
+                        {
+                          "op": "add",
+                          "parentId": "home",
+                          "node": {
+                            "id": "home.show-done",
+                            "type": "Toggle",
+                            "props": [
+                              {
+                                "key": "label",
+                                "value": "Show done"
+                              }
+                            ],
+                            "status": "draft"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "label": "B",
+                    "summary": "Move done tasks to a Done tab",
+                    "backers": [
+                      "Bo"
+                    ],
+                    "batch": {
+                      "label": "Option B",
+                      "ops": [
+                        {
+                          "op": "add",
+                          "parentId": "home",
+                          "node": {
+                            "id": "home.tabs",
+                            "type": "Tabs",
+                            "props": [
+                              {
+                                "key": "tabs",
+                                "value": [
+                                  "To do",
+                                  "Done"
+                                ]
+                              }
+                            ],
+                            "status": "draft"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "set_phase",
+                "phase": "converge"
+              }
+            ]
+          }
+        }
+      ],
+      [
+        {
+          "name": "update_consensus",
+          "input": {
+            "ops": [
+              {
+                "op": "set_phase",
+                "phase": "detail"
+              },
+              {
+                "op": "set_next_up",
+                "items": [
+                  "Recap and hand off"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    ]
+  }
+}

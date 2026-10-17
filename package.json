@@ -2,7 +2,7 @@
   "name": "meet2build-live-agent-poc",
   "version": "0.1.0",
   "private": true,
-  "description": "Feasibility test: a Recall.ai bot joins a Google Meet and streams a live, speaker-labelled transcript to this backend.",
+  "description": "Builder: a Recall.ai meeting bot that listens to a Google Meet, steers the group, and live-builds a clickable prototype on a screenshared stage.",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/server.ts",
     "smoke": "node src/server.ts --smoke",
+    "replay": "node scripts/replay.ts",
     "test": "node --test test/",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
