@@ -5,10 +5,13 @@
 // animate, all stepped by the shared 15 fps clock; everything else is painted once.
 import { animate, logMotion } from "@renderer/clock.js";
 import { renderTree, initialUiState } from "@renderer/render.js";
-import { layoutBox } from "@renderer/motion.js";
+import { layoutBox, tagAbove } from "@renderer/motion.js";
 
 export const SPLIT_MS = 450;
 export const EXPAND_MS = 500;
+// "Show option B": how long the other options stay dimmed while B is ringed, and how dim they get.
+export const FOCUS_OPTION_MS = 3000;
+const FOCUS_DIM = 0.4;
 const FOLD_MS = 350;
 const FADE_MS = 300;
 const DISSOLVE_MS = 250;
@@ -20,10 +23,10 @@ const SPREAD = 0.25; // the split starts the options this far back toward the pr
 // body text still shows at ~15-16 px.
 const SCALE = { 2: 0.72, 3: 0.66 };
 const RING_PAD = 9; // clears a draft node's dashed outline
-const DRAFT_TAG = 13; // a draft node's tag sits this far above it (theme.css)
 const MAX_RINGS = 3;
 
-const shown = new WeakMap(); // container -> { key, view, el, blank, bg, top, options: [{ label, el, card, head, preview, marks, scale }] }
+// container -> { key, view, el, blank, bg, top, options: [{ label, el, card, head, preview, marks, scale }], focus?: Animation[] }
+const shown = new WeakMap();
 
 function div(cls, text) {
   const e = document.createElement("div");
@@ -95,7 +98,7 @@ function fillPreview(o, variant, scale) {
   const top = els.filter((el) => !els.some((p) => p !== el && p.contains(el))).slice(0, MAX_RINGS);
   const boxes = top.map((el) => {
     const b = layoutBox(el, o.frame);
-    const tag = el.classList.contains("is-draft") ? DRAFT_TAG : 0;
+    const tag = tagAbove(el); // the ring clears a draft node's tag too
     return b && { id: el.dataset.nodeId, x: b.x, y: b.y - tag, w: b.w, h: b.h + tag };
   }).filter(Boolean);
 
@@ -208,6 +211,29 @@ export function resolveComparison(container, conflictId, winnerLabel) {
   const winner = st.options.find((o) => o.label === winnerLabel);
   if (!winner) return showComparison(container, null); // the winner was not among the options shown
   return expandWinner(container, st, winner);
+}
+
+/**
+ * "Show option B": for FOCUS_OPTION_MS the other options dim and B is ringed, so the room sees which
+ * one is being talked about. Nothing is picked: the room still says which it wants. Returns false,
+ * touching nothing, when the comparison shown is not for `conflictId` or has no such option.
+ */
+export function focusOption(container, conflictId, label) {
+  const st = shown.get(container);
+  const target = st && st.view.conflictId === conflictId ? st.options.find((o) => o.label === label) : null;
+  if (!target) return false;
+  for (const a of st.focus ?? []) a.cancel(); // a newer request replaces the one playing
+  const hold = (from, to) => [{ opacity: from }, { opacity: to, offset: 0.1 }, { opacity: to, offset: 0.9 }, { opacity: from }];
+  const ring = div("c-focus");
+  target.el.append(ring);
+  const shine = animate(ring, hold(0, 1), { duration: FOCUS_OPTION_MS, easing: EASE });
+  finished(shine).then(() => ring.remove());
+  st.focus = [
+    shine,
+    ...st.options.filter((o) => o !== target).map((o) => animate(o.el, hold(1, FOCUS_DIM), { duration: FOCUS_OPTION_MS, easing: EASE })),
+  ];
+  logMotion({ fn: "focusOption", conflictId, label });
+  return true;
 }
 
 async function expandWinner(container, st, winner) {

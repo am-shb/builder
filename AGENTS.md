@@ -15,10 +15,14 @@ production product with accounts, billing and the rest.
 ## Current stack (engine)
 - Node 24 or newer, running TypeScript natively through type stripping, with no build step
 - `node:sqlite`, `node:test`, zod v4, `@anthropic-ai/sdk` pointed at OpenRouter, `ws`
+- TypeScript 7 for type checking only (`tsc`, no emit). Use erasable syntax only: no enums, namespaces or
+  parameter properties ([ADR 0001](docs/adr/0001-ci-and-type-checking.md))
 - New areas can choose differently, but record the choice in an ADR
 
 ## Commands
-- `npm test` runs all tests, and `npm run smoke` boots the app against fakes. Both must pass before you open a PR.
+- Use Node 24 (`.nvmrc`). `npm run check` runs the type check, all tests and the smoke boot against fakes. It must
+  pass before you open a PR, and CI runs it on every PR. You can also run the parts on their own: `npm run typecheck`,
+  `npm test`, `npm run smoke`.
 - `npm start` runs the server. It needs `.env`; see `.env.example`.
 - Ask the human before running anything that costs money: `scripts/probe-*.ts`, `npm run replay -- --live-models`,
   or sending a real bot to a meeting.

@@ -26,12 +26,18 @@ export const ADDRESSED_MS = 8_000;
 export const CONFIRM_MS = 10_000;
 export const FEEDBACK_MS = 5_000;
 export const MAX_SPOKEN = 300;
+// The opening is the room's first impression: about five seconds out loud. A longer one is not
+// said, and the fallback below is said instead (the live test's opening ran about ten seconds).
+export const OPENING_MAX = 100;
+// A question someone asks within this long of Builder's line, as the first thing said after it, is
+// a reply to Builder ("why?"), so Builder may answer it as if addressed by name (known issue M4).
+export const FOLLOW_UP_MS = 15_000;
 const CHAT_MAX = 500;
 const SCREEN_MAX_NODES = 80;
 // Follow-up turns that failed or invisible commands may trigger before a person speaks again.
 export const MAX_COMMAND_FOLLOW_UPS = 2;
 // Said when the opening turn fails or the model doesn't open (controller ruling).
-export const FALLBACK_OPENING = "Hi, I'm Builder. I'll mostly listen and sketch what you agree on. Say 'Builder' anytime you want me.";
+export const FALLBACK_OPENING = "Hi, I'm Builder. I'll listen and sketch; say my name if you need me.";
 
 const SYSTEM = readFileSync(new URL("./prompts/conversation.md", import.meta.url), "utf8");
 
@@ -119,6 +125,8 @@ type SessionState = {
   openingPending: boolean;
   addressedAt: number | null;
   answeredAt: number | null;
+  // When Builder's last line went out, until a person says something after it.
+  spokeAt: number | null;
   stuck: StuckEvent | null;
   confirmed: Set<string>;
   command: CommandRecord | null;
@@ -131,7 +139,7 @@ type SessionState = {
 const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 const questions = (text: string) => (text.match(/\?/g) ?? []).length;
 
-/** Meeting-chat stand-in for voice: posts the line (≤500 chars, the Meet limit) and adds an agent caption. */
+/** Meeting-chat stand-in for voice: posts the line (≤500 chars, the Meet limit) and tells the stage Builder spoke. */
 export function createChatSpeech(deps: {
   recall: Pick<RecallClient, "sendChatMessage">;
   runtime: (sessionId: string) => SessionRuntime;
@@ -146,7 +154,7 @@ export function createChatSpeech(deps: {
       if (!botId) throw new Error("no bot for session");
       await deps.recall.sendChatMessage(botId, line);
       deps.store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
-      deps.runtime(sessionId).caption({ speaker: botName, text: line, partial: false, isAgent: true });
+      deps.runtime(sessionId).caption({ partial: false, isAgent: true });
       return randomUUID();
     },
     stop() {},
@@ -224,6 +232,8 @@ export function createConversationLoop(deps: {
   // Without a runner (tests, listen-only wiring) every command is reported as unsupported.
   const uiCommand = deps.uiCommand ?? (() => ({ ok: false, reason: "unsupported" }) as CommandOutcome);
   const sessions = new Map<string, SessionState>();
+  // Sessions whose call is over: no more turns, speech or stuck checks (known issue I5).
+  const ended = new Set<string>();
 
   const state = (sessionId: string, fromRecording = false): SessionState => {
     let st = sessions.get(sessionId);
@@ -235,7 +245,7 @@ export function createConversationLoop(deps: {
         detector: createStuckDetector({ clock }),
         lines: [], humanIds: new Set(), present: new Set(), heard: new Set(),
         recording: already, opened: already, openingTried: already, openingPending: false,
-        addressedAt: null, answeredAt: null, stuck: null, confirmed: new Set(), command: null, commandFollowUps: 0,
+        addressedAt: null, answeredAt: null, spokeAt: null, stuck: null, confirmed: new Set(), command: null, commandFollowUps: 0,
         handedOffThrough: 0, inFlight: false, dirty: false,
       };
       sessions.set(sessionId, st);
@@ -288,6 +298,7 @@ export function createConversationLoop(deps: {
   }
 
   function schedule(sessionId: string, st: SessionState) {
+    if (ended.has(sessionId)) return;
     if (st.inFlight) {
       st.dirty = true;
       return;
@@ -366,6 +377,7 @@ export function createConversationLoop(deps: {
     const doc = view(sessionId).doc;
     const why = !first ? "one_per_turn"
       : !openReasons(st, turn, doc, now).includes(reason) ? "reason_not_open"
+      : reason === "opening" && text.length > OPENING_MAX ? "too_long"
       : questions(text) > 1 ? "too_many_questions"
       : speech.speaking(sessionId) ? "already_speaking"
       : null;
@@ -393,6 +405,7 @@ export function createConversationLoop(deps: {
       return false;
     }
     pushLine(st, { id: null, speaker: botName, text });
+    st.spokeAt = clock();
     const asked = text.trim().endsWith("?");
     if (asked) st.detector.onAgentQuestion();
     const inputs: { lastSpeechWasQuestion: boolean; addressedUntil?: number } = { lastSpeechWasQuestion: asked };
@@ -437,7 +450,7 @@ export function createConversationLoop(deps: {
         log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorName(err) });
       }
       // The room always gets an opening: the fixed line when the model failed or didn't open.
-      if (turn.opening && !st.opened) {
+      if (turn.opening && !st.opened && !ended.has(sessionId)) {
         st.opened = true;
         log("conversation.opening_fallback", { session_id: sessionId });
         await deliver(sessionId, st, FALLBACK_OPENING, "opening", st.addressedAt);
@@ -457,6 +470,11 @@ export function createConversationLoop(deps: {
       loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
       messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],
     });
+    // The call ended while the model was thinking: its answer is too late to act on.
+    if (ended.has(sessionId)) {
+      log("conversation.turn_discarded", { session_id: sessionId, reason: "ended", tool_calls: result.toolCalls.length });
+      return;
+    }
     const counts = await apply(sessionId, st, turn, result);
     log("conversation.turn", {
       session_id: sessionId, trigger: turn.trigger.split(":")[0], stop_reason: result.stopReason,
@@ -493,16 +511,20 @@ export function createConversationLoop(deps: {
   return {
     onUtterance(sessionId: string, u: { id: number; speaker: string | null; text: string | null }): void {
       const text = u.text;
-      if (u.speaker === botName || !text) return;
+      if (u.speaker === botName || !text || ended.has(sessionId)) return;
       guard("onUtterance", sessionId, () => {
         const st = state(sessionId);
         pushLine(st, { id: u.id, speaker: u.speaker ?? "Unknown", text });
         st.humanIds.add(u.id);
         if (u.speaker) st.heard.add(u.speaker);
         st.commandFollowUps = 0;
-        st.detector.onHumanUtterance(text, u.speaker);
+        // Builder's name, or a question as the first reply to Builder's last line ("why?").
+        const followUp = st.spokeAt !== null && clock() - st.spokeAt <= FOLLOW_UP_MS && text.trim().endsWith("?");
+        st.spokeAt = null;
+        const addressed = ADDRESS_RE.test(text) || followUp;
+        st.detector.onHumanUtterance(text, u.speaker, addressed);
         try {
-          if (ADDRESS_RE.test(text)) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
+          if (addressed) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
           else runtime(sessionId).updateMoodInputs({ lastSpeechWasQuestion: false });
         } catch (err) {
           log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
@@ -515,7 +537,7 @@ export function createConversationLoop(deps: {
     // Partials only make the character react: being addressed shows at once, before any model call.
     // Someone talking over Builder's voice stops it (the server fallback to the stage's own barge-in, spec 7).
     onPartial(sessionId: string, p: { speaker: string | null; text: string | null }): void {
-      if (p.speaker === botName || !p.text) return;
+      if (p.speaker === botName || !p.text || ended.has(sessionId)) return;
       guard("onPartial", sessionId, () => {
         if (speech.speaking(sessionId)) {
           speech.stop(sessionId);
@@ -527,7 +549,7 @@ export function createConversationLoop(deps: {
 
     onParticipant(sessionId: string, e: { kind: "join" | "leave"; name: string | null }): void {
       const name = e.name;
-      if (!name || name === botName) return;
+      if (!name || name === botName || ended.has(sessionId)) return;
       guard("onParticipant", sessionId, () => {
         const st = state(sessionId);
         if (e.kind === "join") st.present.add(name);
@@ -540,10 +562,50 @@ export function createConversationLoop(deps: {
     },
 
     onBotRecording(sessionId: string): void {
+      if (ended.has(sessionId)) return;
       guard("onBotRecording", sessionId, () => {
         const st = state(sessionId, true);
         st.recording = true;
         maybeOpen(sessionId, st);
+      });
+    },
+
+    // After a restart, for a call still recording (known issue M2): the opening is done, and the
+    // transcript window and who is in the meeting are rebuilt from the stored events. The reloaded
+    // lines count as handed off: the build loop had its turn at them, and handing them off again
+    // could replay support for a decision reopened since.
+    resume(sessionId: string): void {
+      if (ended.has(sessionId) || sessions.has(sessionId)) return;
+      guard("resume", sessionId, () => {
+        const st = state(sessionId);
+        for (const e of store.listEvents(sessionId)) {
+          if (e.speaker === botName) continue;
+          if (e.kind === "utterance" && e.text) {
+            pushLine(st, { id: e.id, speaker: e.speaker ?? "Unknown", text: e.text });
+            st.humanIds.add(e.id);
+            if (e.speaker) st.heard.add(e.speaker);
+            st.handedOffThrough = Math.max(st.handedOffThrough, e.id);
+          } else if (!e.speaker) {
+            continue;
+          } else if (e.kind === "join") {
+            st.present.add(e.speaker);
+          } else if (e.kind === "leave") {
+            st.present.delete(e.speaker);
+            st.heard.delete(e.speaker);
+          }
+        }
+        log("conversation.resumed", { session_id: sessionId, lines: st.lines.length, people: humans(st).length });
+      });
+    },
+
+    // The bot left the call (done, call_ended or fatal): stop speaking and drop the session's state.
+    // A turn still in flight finishes, but its result is discarded.
+    onBotEnded(sessionId: string): void {
+      guard("onBotEnded", sessionId, () => {
+        ended.add(sessionId);
+        sessions.delete(sessionId);
+        speech.stop(sessionId);
+        log("conversation.ended", { session_id: sessionId });
       });
     },
 

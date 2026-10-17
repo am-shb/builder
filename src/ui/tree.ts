@@ -5,6 +5,9 @@ export type ApplyResult =
   | { ok: true; proto: Prototype; changes: Change[] }
   | { ok: false; error: string };
 
+// The app's title until the room names it.
+export const UNTITLED_APP = "Untitled app";
+
 export function emptyPrototype(appName: string): Prototype {
   return {
     currentScreen: "home",

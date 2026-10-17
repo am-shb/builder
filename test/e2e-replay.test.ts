@@ -129,7 +129,7 @@ test("todo-app session replays end to end", async () => {
   assert.ok(store.sessionCost(session.id) > 0);
 
   // Handoff page lists the decisions; the export is self-contained.
-  const token = store.getSession(session.id)!.stage_token!;
+  const token = store.getSession(session.id)!.handoff_token!;
   const page = await (await fetch(`${base}/handoff/${session.id}?token=${token}`)).text();
   for (const d of doc.decisions.filter((x) => x.status === "agreed")) assert.ok(page.includes(d.text), `handoff lists ${d.id}`);
   const exported = await (await fetch(`${base}/handoff/${session.id}/export?token=${token}`)).text();

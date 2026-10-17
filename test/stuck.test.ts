@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createStuckDetector, SILENCE_MS, CONFLICT_MS, OPEN_QUESTION_MS, STUCK_COOLDOWN_MS } from "../src/agent/stuck.ts";
+import { ADDRESS_RE, createStuckDetector, SILENCE_MS, CONFLICT_MS, OPEN_QUESTION_MS, STUCK_COOLDOWN_MS } from "../src/agent/stuck.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 
@@ -110,4 +110,20 @@ test("only one stuck event per poll, silence first", () => {
   assert.deepEqual(d.poll(at(310_000)), { reason: "conflict" });
   assert.equal(d.poll(at(429_999)), null);
   assert.deepEqual(d.poll(at(430_000)), { reason: "open_question" });
+});
+
+test("Builder's name is heard as an address; 'form builder' and the like are not (known issue M4)", () => {
+  for (const t of ["Builder, what do you think?", "Hey Builder what have we agreed?", "What do you think, Builder?", "ok builder show settings", "So BUILDER, tabs?"]) {
+    assert.ok(ADDRESS_RE.test(t), t);
+  }
+  for (const t of ["We need a form builder.", "Like a page builder?", "the website builder", "a drag-and-drop builder", "Is the app-builder free?", "builders and makers", "rebuilder"]) {
+    assert.ok(!ADDRESS_RE.test(t), t);
+  }
+});
+
+test("a question meant for Builder, such as a follow-up to its line, starts no silence", () => {
+  const { d, at } = detector();
+  at(0);
+  d.onHumanUtterance("Why?", "Sara", true);
+  assert.equal(d.poll(at(60_000)), null);
 });

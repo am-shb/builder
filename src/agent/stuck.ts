@@ -9,8 +9,16 @@ export const CONFLICT_MS = 180_000;
 export const OPEN_QUESTION_MS = 180_000;
 export const STUCK_COOLDOWN_MS = 120_000;
 
-/** Someone says Builder's name ("Builder" or "hey Builder"). */
-export const ADDRESS_RE = /\b(hey\s+)?builder\b/i;
+// After one of these words, "builder" is part of a thing's name ("a form builder", "the page
+// builder", "drag-and-drop builder"), not someone talking to Builder (known issue M4).
+const NOT_THE_NAME = [
+  "a", "an", "the", "form", "page", "site", "website", "web", "app", "report", "query", "flow", "workflow",
+  "survey", "quiz", "email", "resume", "profile", "team", "ui", "layout", "dashboard", "chart", "table",
+  "template", "theme", "menu", "plan", "code", "bot", "agent", "drop",
+];
+
+/** Someone says Builder's name ("Builder" or "hey Builder"), not a noun like "form builder". */
+export const ADDRESS_RE = new RegExp(`(?<!\\b(?:${NOT_THE_NAME.join("|")})[\\s-]+)\\b(hey\\s+)?builder\\b`, "i");
 
 export type StuckEvent = { reason: "silence" | "conflict" | "open_question" };
 
@@ -23,10 +31,11 @@ export function createStuckDetector(deps: { clock: () => number }) {
   const reported = new Set<string>();
 
   return {
-    onHumanUtterance(text: string, _speaker: string | null) {
+    // `toBuilder`: the line is for Builder (its name, or a follow-up to its last line), so a
+    // question in it is Builder's to answer, not the room's.
+    onHumanUtterance(text: string, _speaker: string | null, toBuilder = ADDRESS_RE.test(text)) {
       // Any human line breaks the silence. A question to the room (not to Builder) starts it again.
-      const t = text.trim();
-      questionAt = t.endsWith("?") && !ADDRESS_RE.test(t) ? clock() : null;
+      questionAt = text.trim().endsWith("?") && !toBuilder ? clock() : null;
     },
 
     onAgentQuestion() {

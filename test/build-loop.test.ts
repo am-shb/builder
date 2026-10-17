@@ -568,6 +568,44 @@ test("a throwing runtime during a run does not wedge the loop", async () => {
   }
 });
 
+// ---- end of the call (known issue I5) ----
+
+test("after end(), pending decisions stay pending, timers stop and later hand-offs make no model call", async () => {
+  const s = setup([[...QUICK_ADD, consensus([
+    { op: "add_decision", id: "d-quick-add", text: "Quick-add at top", proposedBy: "Amir", affects: ["home.quick-add", "home.quick-add-btn"] },
+    { op: "mark_pending", decisionId: "d-quick-add" },
+  ])], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  s.loop.end(s.sessionId);
+  await s.timers.advance(120_000);
+  assert.equal(s.doc().decisions[0].status, "pending", "no promotion after the call: the handoff is final");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "draft");
+  s.loop.handoff(s.sessionId, handoff([s.say("Sara", "and due dates")]));
+  await s.timers.advance(60_000);
+  assert.equal(s.requests.length, 1, "no model call after the call ended");
+  assert.ok(s.logs.some((l) => l.msg === "build.handoff_ignored"));
+  assert.equal(s.loop.idle(s.sessionId), true);
+});
+
+test("a run in flight when the call ends is discarded, and queued work is dropped", async () => {
+  const g = gatedPort([[...QUICK_ADD], [...QUICK_ADD]]);
+  const s = setup(g.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([s.say("Sara", "yes please")], {}, "Queued"));
+  await flush();
+  assert.equal(s.requests.length, 1);
+  s.loop.end(s.sessionId);
+  g.release();
+  await flush();
+  await s.timers.advance(60_000);
+  assert.equal(findNode(s.proto(), "home.quick-add"), undefined, "the late result never reaches the prototype");
+  assert.equal(s.requests.length, 1, "the queued hand-off never runs");
+  assert.ok(s.logs.some((l) => l.msg === "build.run" && l.fields?.discarded === "ended"));
+});
+
 test("invalid hand-offs are dropped without a model call", async () => {
   const s = setup([[]]);
   s.loop.handoff(s.sessionId, { topics: "nope" } as unknown as Handoff);
@@ -596,4 +634,260 @@ test("tool schemas sent to the model are strict-compatible", async () => {
     };
     walk(schema);
   }
+});
+
+// ---- agreed nodes change only through decisions (known issue I2) ----
+
+const AGREE_QUICK_ADD = [...QUICK_ADD, consensus([
+  { op: "add_decision", id: "d-quick-add", text: "Quick-add at top", proposedBy: "Amir", affects: ["home.quick-add", "home.quick-add-btn"] },
+  { op: "mark_pending", decisionId: "d-quick-add" },
+  { op: "support", decisionId: "d-quick-add", speaker: "Sara" },
+])];
+
+test("a model change to an agreed node sends it back to draft until a decision covering it is agreed (known issue I2)", async () => {
+  const s = setup([
+    AGREE_QUICK_ADD,
+    [
+      patches("Changed: placeholder", [
+        { op: "update", id: "home.quick-add", props: [{ key: "placeholder", value: "New task" }], decisionId: "d-placeholder" },
+        // Changes nothing, so it is dropped: an update cannot demote an agreed node by itself.
+        { op: "update", id: "home.quick-add-btn", props: [{ key: "label", value: "Add" }], status: "draft" },
+      ], "Lee"),
+      consensus([
+        { op: "add_decision", id: "d-placeholder", text: "Say 'New task'", proposedBy: "Lee", affects: [] },
+        { op: "mark_pending", decisionId: "d-placeholder" },
+      ]),
+    ],
+    [consensus([{ op: "support", decisionId: "d-placeholder", speaker: "Sara" }])],
+    [consensus([{ op: "object", decisionId: "d-quick-add", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top"), s.say("Sara", "yes")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "agreed");
+
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "the box should say New task")]));
+  await flush();
+  const input = findNode(s.proto(), "home.quick-add")!;
+  assert.deepEqual([input.status, input.decisionId, input.props.placeholder], ["draft", "d-placeholder", "New task"], "changed, so not agreed any more");
+  assert.equal(findNode(s.proto(), "home.quick-add-btn")!.status, "agreed", "a no-op update leaves the node alone");
+  assert.deepEqual(s.patches().at(-1)!.changes.map((c) => c.id), ["home.quick-add"]);
+  assert.equal(s.doc().decisions.find((d) => d.id === "d-quick-add")!.status, "agreed", "the earlier decision stands");
+
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Sara", "sure, New task")]));
+  await flush();
+  const agreed = findNode(s.proto(), "home.quick-add")!;
+  assert.deepEqual([agreed.status, agreed.decisionId], ["agreed", "d-placeholder"], "drawn with the decision's id, so its agreement flips it");
+
+  // Reopening the first decision leaves the node another decision has agreed since.
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "actually, no quick-add")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.quick-add-btn")!.status, "draft");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "agreed");
+});
+
+test("a model remove of an agreed node, or of anything holding one, is dropped unless the run reopens its decision (known issue I2)", async () => {
+  const s = setup([
+    [
+      ...AGREE_QUICK_ADD,
+      patches("Added: note", [addNode("home", "home.box", "Stack"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
+      consensus([
+        { op: "add_decision", id: "d-note", text: "A due note", proposedBy: "Amir", affects: ["home.box.note"] },
+        { op: "mark_pending", decisionId: "d-note" },
+        { op: "support", decisionId: "d-note", speaker: "Sara" },
+      ]),
+    ],
+    [patches("Removed: quick-add", [{ op: "remove", id: "home.quick-add" }]), patches("Removed: box", [{ op: "remove", id: "home.box" }])],
+    [patches("Removed: add button", [{ op: "remove", id: "home.quick-add-btn" }]), consensus([{ op: "object", decisionId: "d-quick-add", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top, and a due note"), s.say("Sara", "yes")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.box")!.status, "draft");
+  assert.equal(findNode(s.proto(), "home.box.note")!.status, "agreed");
+
+  await s.timers.advance(10_000);
+  const before = s.patches().length;
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "tidy it up")]));
+  await flush();
+  for (const id of ["home.quick-add", "home.box", "home.box.note"]) assert.ok(findNode(s.proto(), id), `${id} is still there`);
+  assert.equal(s.patches().length, before, "nothing drawn");
+  assert.equal(s.logs.filter((l) => l.msg === "build.run").at(-1)?.fields?.patches_empty, 2);
+
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "no, drop the quick-add button")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.quick-add-btn"), undefined, "its decision was reopened in the same run");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "draft");
+  assert.equal(s.doc().decisions.find((d) => d.id === "d-quick-add")!.status, "draft");
+});
+
+// ---- a resolved choice claims a merge only when it happened (known issue I3) ----
+
+test("the model sees resolvedChoice only for a pick merged just now; an unmerged pick becomes a redraw proposal (known issue I3)", async () => {
+  // B updates the heading, then adds under a missing parent, so its whole batch is rejected at resolve time.
+  const s = setup([[
+    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    consensus([{
+      op: "add_conflict", id: "c-done", topic: "Heading",
+      variants: [
+        conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
+        conflictVariant("B", "Rename and tab", ["Sara"], [
+          { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
+          addNode("missing", "missing.tabs", "Tabs"),
+        ]),
+      ],
+    }]),
+  ], [], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "rename"), s.say("Sara", "today")]));
+  await flush();
+  s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Sara", "B please")]));
+  await flush();
+  assert.equal(s.requests.length, 2, "a new pick still bypasses the floor");
+  const turn = s.userText(1);
+  assert.ok(!turn.includes("resolvedChoice"), "the model is not told the winner merged");
+  assert.ok(turn.includes("Redraw option B of conflict c-done, which the room picked (decision d-c-done): Rename and tab"));
+  assert.ok((s.requests[1].messages as { content: string }[])[0].content.includes(`"proposedBy":"Sara"`), "credited to a backer heard picking it");
+  assert.ok(s.logs.some((l) => l.msg === "build.resolve_unmerged"));
+
+  // Picking it again settles nothing new: no claim, no redraw, no floor bypass.
+  s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Amir", "yes, B")]));
+  await flush();
+  assert.equal(s.requests.length, 2);
+  await s.timers.advance(10_000);
+  assert.equal(s.requests.length, 3);
+  assert.ok(!s.userText(2).includes("resolvedChoice") && !s.userText(2).includes("Redraw"));
+});
+
+test("a pick merged just now reaches the model as resolvedChoice (known issue I3)", async () => {
+  const s = setup([[DONE_CONFLICT], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "toggle"), s.say("Sara", "tab")]));
+  await flush();
+  s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Sara", "B")]));
+  await flush();
+  assert.ok(findNode(s.proto(), "home.tabs"));
+  assert.ok((s.requests[1].messages as { content: string }[])[0].content.includes(`"resolvedChoice":{"conflictId":"c-done","winner":"B"}`));
+});
+
+// ---- one comparison at a time (known issue M1) ----
+
+test("two conflicts raised in one run are shown one after the other (known issue M1)", async () => {
+  const due = consensus([{
+    op: "add_conflict", id: "c-due", topic: "Due dates",
+    variants: [
+      conflictVariant("A", "A due date on every task", ["Amir"], [addNode("home", "home.due", "Input", [["label", "Due"]])]),
+      conflictVariant("B", "No due dates yet", ["Sara"], [addNode("home", "home.later", "Text", [["text", "Due dates later"]])]),
+    ],
+  }]);
+  const s = setup([[DONE_CONFLICT, due], []]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "toggle, and due dates"), s.say("Sara", "a tab, no due dates")]));
+  await flush();
+  const shown = () => s.sent.filter((e): e is Extract<StageEvent, { type: "comparison" }> => e.type === "comparison").map((e) => e.view?.conflictId ?? null);
+  assert.deepEqual(shown(), ["c-done"], "the first conflict is on screen");
+  assert.ok(s.logs.some((l) => l.msg === "build.comparison_queued" && l.fields?.conflict_id === "c-due"));
+  assert.equal(s.logs.find((l) => l.msg === "build.run")?.fields?.conflicts, 2);
+
+  s.loop.handoff(s.sessionId, RESOLVE_B([s.say("Sara", "B")]));
+  await flush();
+  assert.deepEqual(shown(), ["c-done", "c-due"], "the next conflict follows the one resolved");
+  const types = s.sent.map((e) => e.type);
+  assert.ok(types.indexOf("resolve") < types.lastIndexOf("comparison"));
+  const snap = s.rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.equal(snap.comparison?.conflictId, "c-due");
+  assert.ok(findNode(snap.comparison!.variants[0].proto, "home.tabs"), "built on the prototype with the first winner merged");
+});
+
+// ---- on-screen credit is grounded (known issue M9) ----
+
+test("a batch's by must be someone heard in the grounding lines (known issue M9)", async () => {
+  const s = setup([[
+    patches("Added: quick-add", [addNode("home", "home.quick-add", "Input")], "Bob"),
+    patches("Added: button", [addNode("home", "home.add", "Button", [["label", "Add"]])], "Amir"),
+    consensus([{
+      op: "add_conflict", id: "c-x", topic: "Where done tasks go",
+      variants: [
+        { ...conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]), batch: { label: "Option A", by: "Bob", ops: [addNode("home", "home.show-done", "Toggle")] } },
+        { ...conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]), batch: { label: "Option B", by: "Sara", ops: [addNode("home", "home.tabs", "Tabs")] } },
+      ],
+    }]),
+  ]]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add"), s.say("Sara", "tabs")]));
+  await flush();
+  const credits = s.patches().flatMap((p) => p.changes.map((c) => [c.id, c.by ?? null]));
+  assert.deepEqual(credits, [["home.quick-add", null], ["home.add", "Amir"]], "Bob was never heard: no credit");
+  const variants = s.doc().conflicts[0].variants;
+  assert.deepEqual(variants.map((v) => v.batch.by ?? null), [null, "Sara"]);
+  assert.equal(s.logs.find((l) => l.msg === "build.run")?.fields?.grounding_dropped, 2);
+});
+
+// ---- a promotion waits for objections already on their way (known issue M10) ----
+
+const PENDING_QUICK_ADD = [...QUICK_ADD, consensus([
+  { op: "add_decision", id: "d-quick-add", text: "Quick-add at top", proposedBy: "Amir", affects: ["home.quick-add", "home.quick-add-btn"] },
+  { op: "mark_pending", decisionId: "d-quick-add" },
+])];
+
+test("a decision due while an objection to it is being applied is never shown as agreed (known issue M10)", async () => {
+  const g = gatedPort([PENDING_QUICK_ADD, [consensus([{ op: "object", decisionId: "d-quick-add", speaker: "Lee" }])]]);
+  const s = setup(g.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+  await flush();
+  g.release();
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+
+  await s.timers.advance(20_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "no, I don't want that")]));
+  await flush();
+  assert.equal(s.requests.length, 2, "the objection's run is in flight");
+  await s.timers.advance(15_000); // 35 s pending: due, but held
+  assert.equal(s.doc().decisions[0].status, "pending", "held while its objection may be on the way");
+  g.release();
+  await flush();
+  await s.timers.advance(60_000);
+  assert.equal(s.doc().decisions[0].status, "draft");
+  assert.equal(s.patches().some((p) => p.changes[0]?.label.startsWith("Agreed: ")), false, "never flipped to agreed and back");
+});
+
+test("a held promotion goes through once the earlier hand-offs are applied; later ones don't hold it (known issue M10)", async () => {
+  const g = gatedPort([PENDING_QUICK_ADD, [], []]);
+  const s = setup(g.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+  await flush();
+  g.release();
+  await flush();
+  await s.timers.advance(20_000);
+  s.loop.handoff(s.sessionId, handoff([s.say("Sara", "and tags later")]));
+  await flush();
+  await s.timers.advance(20_000); // due at 30 s, held by the run in flight
+  s.loop.handoff(s.sessionId, handoff([s.say("Lee", "what about colours")])); // received after it was due
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  g.release();
+  await flush();
+  assert.equal(s.requests.length, 3, "the later hand-off's run is in flight");
+  await s.timers.advance(1_000);
+  assert.equal(s.doc().decisions[0].status, "agreed", "promoted without waiting for the later hand-off");
+  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "agreed");
+  g.release();
+  await flush();
+});
+
+// ---- after a restart (known issue M2) ----
+
+test("after a restart, resume() runs the no-objection timer again for decisions still pending (known issue M2)", async () => {
+  const s = setup([PENDING_QUICK_ADD]);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add at the top")]));
+  await flush();
+  s.loop.end(s.sessionId); // the old process is gone, and its timers with it
+  const runtime = createRuntime({ store: s.store, clock: s.timers.now, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
+  const loop = createBuildLoop({ port: createFakePort([]), runtime, store: s.store, clock: s.timers.now, timers: s.timers });
+  const status = () => (runtime(s.sessionId).snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc.decisions[0].status;
+  await s.timers.advance(40_000);
+  assert.equal(status(), "pending", "nothing runs the timer yet");
+  loop.resume(s.sessionId);
+  await s.timers.advance(1_000);
+  assert.equal(status(), "agreed");
+  assert.equal(findNode((runtime(s.sessionId).snapshot() as Extract<StageEvent, { type: "snapshot" }>).proto, "home.quick-add")!.status, "agreed");
 });

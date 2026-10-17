@@ -185,18 +185,18 @@ test("applyBatch failure sends nothing and keeps persisted proto", async () => {
   await c.closed;
 });
 
-test("captions keep the last 3 finals plus one partial", () => {
+test("captions reach the stage as flags only and never enter the snapshot (known issue I7)", () => {
   const store = openStore(":memory:");
   const s = store.createIntent("22222222-2222-2222-2222-222222222222", "https://meet.google.com/x");
-  const rt = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(s.id);
-  const cap = (text: string, partial = false) => ({ speaker: "Ada", text, partial, isAgent: false });
-  for (const t of ["a", "b", "c", "d"]) rt.caption(cap(t));
-  rt.caption(cap("typ", true));
-  rt.caption(cap("typing", true));
-  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
-  assert.deepEqual(snap.captions.map((c) => c.text), ["b", "c", "d", "typing"]);
-  rt.caption(cap("e"));
-  assert.deepEqual((rt.snapshot() as any).captions.map((c: any) => c.text), ["c", "d", "e"]);
+  const sent: StageEvent[] = [];
+  const rt = createRuntime({ store, channel: { send: (_id, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
+  rt.caption({ partial: true, isAgent: false });
+  rt.caption({ partial: false, isAgent: true });
+  assert.deepEqual(sent, [
+    { type: "caption", caption: { partial: true, isAgent: false } },
+    { type: "caption", caption: { partial: false, isAgent: true } },
+  ]);
+  assert.equal("captions" in (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>), false);
 });
 
 test("mood changes are pushed once, not on every input update", () => {
@@ -240,10 +240,13 @@ test("resolveComparison applies the winner, resolves the doc, persists and sends
   assert.equal(saved.doc.conflicts[0].status, "resolved");
   assert.equal(saved.doc.conflicts[0].winner, "A");
   assert.ok(JSON.stringify(saved.proto).includes("home.a"));
-  // Resolving again is idempotent: the batch is not applied twice.
+  // Resolving again is idempotent: nothing is applied, changed or sent twice, even for another label.
   sent.length = 0;
+  const saved1 = JSON.stringify(store.getConsensus(s.id));
   assert.deepEqual(rt.resolveComparison("c1", "A"), { ok: true, applied: false }, "already resolved: not re-applied");
-  assert.deepEqual(sent.map((e) => e.type), ["resolve", "doc"]);
+  assert.deepEqual(rt.resolveComparison("c1", "B"), { ok: true, applied: false });
+  assert.deepEqual(sent, []);
+  assert.equal(JSON.stringify(store.getConsensus(s.id)), saved1);
   assert.equal(rt.resolveComparison("nope", "A").ok, false);
 });
 
@@ -366,4 +369,17 @@ test("snapshotFor throwing terminates only that socket and the server keeps serv
   assert.deepEqual(logs, ["channel.snapshot_failed"]);
   good.ws.close();
   await good.closed;
+});
+
+test("the operator's cost poll reads one total, and only locally (known issue M7)", async () => {
+  const ctx = await start();
+  const cost = (headers: Record<string, string> = {}) => fetch(`${ctx.base}/api/sessions/${ctx.session.id}/cost`, { headers });
+  assert.deepEqual(await (await cost()).json(), { cost_usd: 0 });
+  for (const usd of [0.25, 0.5]) {
+    ctx.store.addModelCall({ sessionId: ctx.session.id, loop: "build", model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, usd, ms: 1 });
+  }
+  assert.deepEqual(await (await cost()).json(), { cost_usd: 0.75 });
+  assert.equal((await cost({ "x-forwarded-for": "203.0.113.9" })).status, 404, "not through the tunnel");
+  const page = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.ok(page.includes("fetch(`/api/sessions/${current.id}/cost`)"), "the operator page polls the total, not the whole session");
 });

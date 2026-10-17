@@ -194,7 +194,7 @@ import { startClock, onFrame, animate } from "@renderer/clock.js";
 import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
-import { showComparison, resolveComparison } from "@renderer/comparison.js";
+import { showComparison, resolveComparison, focusOption } from "@renderer/comparison.js";
 import { createAudioPlayer } from "@renderer/audio.js";
 
 const EASE = "ease-out";
@@ -231,6 +231,8 @@ const comparisonEl = document.getElementById("comparison");
 let comparing = false; // the panel and dock have stepped aside, Builder sits in the corner
 let covered = false; // the comparison covers the prototype, until its resolve or close has played out
 let uncovering = 0;
+let exiting = null; // the exit (resolve or close) of the comparison that was shown, while it plays
+let queued; // what to show once that exit ends: a view, or null (undefined: nothing asked)
 
 function placeCharacter() {
   character.setPlacement(comparing ? "corner" : built ? "dock" : "center");
@@ -243,15 +245,24 @@ function setComparing(on) {
 }
 
 // The normal layout comes back at once, alongside the comparison's exit (`done`); focus moments
-// wait until the exit has played out.
+// wait until the exit has played out, and so does a comparison sent meanwhile (the next conflict).
 function uncover(done) {
   setComparing(false);
   const n = ++uncovering;
-  const clear = () => { if (n === uncovering && !comparing) covered = false; };
-  done.then(clear, clear);
+  const exit = done.then(() => {}, () => {});
+  exiting = exit;
+  exit.then(() => {
+    if (exiting !== exit) return;
+    exiting = null;
+    if (n === uncovering && !comparing) covered = false;
+    const next = queued;
+    queued = undefined;
+    if (next !== undefined) presentComparison(next);
+  });
 }
 
 function presentComparison(view) {
+  if (exiting) return void (queued = view);
   if (!view) return void (comparing && uncover(showComparison(comparisonEl, null)));
   covered = true;
   setComparing(true);
@@ -522,6 +533,15 @@ function onEvent(ev) {
       // Only for the comparison on screen: a late resolve for another conflict changes nothing.
       const done = resolveComparison(comparisonEl, ev.conflictId, ev.winner);
       if (done) uncover(done);
+      break;
+    }
+    case "focus_option": {
+      // "Show option B": the pointer goes to B's label, then the other options dim for a moment.
+      const label = comparisonEl.querySelector(`.c-option[data-label="${CSS.escape(String(ev.label))}"] .c-label`);
+      commands = commands
+        .then(() => animatePointer(label))
+        .then(() => focusOption(comparisonEl, ev.conflictId, ev.label))
+        .catch((err) => console.error("focus option failed", err));
       break;
     }
     case "speech_start":

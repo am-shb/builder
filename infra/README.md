@@ -1,10 +1,14 @@
 # infra: environments, deployment, CI and observability
 
-**Status:** placeholder, no code yet. **Owner:** TBD. Claim it in [docs/workstreams.md](../../docs/workstreams.md).
+**Status:** CI running, nothing deployed. **Owner:** TBD. Claim it in [docs/workstreams.md](../../docs/workstreams.md).
 
 ## Current state
-v0 runs on a laptop behind a Cloudflare quick tunnel, and the tunnel's URL changes every time it restarts. Recall needs
-a stable public HTTPS URL for its webhooks and for the stage page.
+- v0 runs on a laptop behind a Cloudflare quick tunnel, and the tunnel's URL changes every time it restarts. Recall
+  needs a stable public HTTPS URL for its webhooks and for the stage page.
+- CI is in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), proposed in
+  [ADR 0001](../docs/adr/0001-ci-and-type-checking.md). It runs typecheck, tests and smoke on every PR, plus the full
+  suite with headless Chrome. Dependabot is in `.github/dependabot.yml`.
+- The process logs one JSON object per line to stdout. `GET /healthz` returns `{"ok":true}` and needs no auth.
 
 ## In scope
 - Dev, staging and production environments, each with a persistent public URL
@@ -23,4 +27,6 @@ a stable public HTTPS URL for its webhooks and for the stage page.
 
 ## First tasks
 - [ ] A staging environment with a persistent URL, so live meeting tests no longer depend on a tunnel
-- [ ] A CI workflow that runs the tests on every PR
+- [x] A CI workflow that runs the tests on every PR
+- [ ] Branch protection on `main`: require the **check** job and one review
+- [ ] Lint and format (see ADR 0001: one reformat-only PR)

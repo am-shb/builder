@@ -1,11 +1,11 @@
 // Per-session runtime: owns the prototype, consensus doc, mood and captions,
 // persists them, and pushes every change to the stage over the channel.
-import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent } from "../ui/tree.ts";
+import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent, UNTITLED_APP } from "../ui/tree.ts";
 import type { Prototype, PatchBatch, Interaction } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
 import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
-import type { Caption, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
+import type { ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "./mood.ts";
 import type { Mood, MoodInputs } from "./mood.ts";
 import { initialUiState, reduceInteraction } from "../../public/renderer/interact.js";
@@ -20,8 +20,6 @@ export type UiState = {
 };
 
 export type Log = (msg: string, fields?: Record<string, unknown>) => void;
-
-const MAX_FINAL_CAPTIONS = 3;
 
 export type SessionRuntime = ReturnType<typeof makeRuntime>;
 
@@ -44,6 +42,19 @@ export function buildComparisonView(proto: Prototype, conflict: Conflict): Compa
     variants.push({ label: v.label, summary: v.summary, backers: v.backers, proto: r.proto, focusIds: [...focusIds] });
   }
   return variants.length >= 2 ? { conflictId: conflict.id, topic: conflict.topic, variants } : null;
+}
+
+/**
+ * The comparison to show: the first open conflict, in the order they were raised, that has one.
+ * Conflicts open at the same time are shown one after another (known issue M1).
+ */
+export function nextComparison(proto: Prototype, doc: ConsensusDoc): ComparisonView | null {
+  for (const c of doc.conflicts) {
+    if (c.status !== "open") continue;
+    const view = buildComparisonView(proto, c);
+    if (view) return view;
+  }
+  return null;
 }
 
 /**
@@ -74,11 +85,10 @@ export function createRuntime(deps: { store: Store; channel: StageSink; clock?: 
 
 function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock: () => number, log: Log) {
   const saved = store.getConsensus(sessionId);
-  let proto: Prototype = saved?.proto ?? emptyPrototype("Untitled app");
+  let proto: Prototype = saved?.proto ?? emptyPrototype(UNTITLED_APP);
   let doc: ConsensusDoc = saved?.doc ?? emptyDoc();
-  let comparison: ComparisonView | null = null;
-  let finals: Caption[] = [];
-  let partial: Caption | null = null;
+  // After a restart the room still sees the comparison it was choosing from (known issue M2).
+  let comparison: ComparisonView | null = nextComparison(proto, doc);
   let moodInputs: MoodInputs = { ...NEUTRAL_MOOD_INPUTS };
   // What the room sees. Starts at the prototype's screen, then follows the stage's own reports
   // and the commands run here.
@@ -110,7 +120,6 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
     snapshot(): StageEvent {
       return {
         type: "snapshot", proto, uiScreen: uiState.screen, doc,
-        captions: partial ? [...finals, partial] : [...finals],
         mood: deriveMood(moodInputs, clock()), comparison,
       };
     },
@@ -138,14 +147,10 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
       refreshMood();
     },
 
-    // Keeps the last 3 final captions plus one in-progress partial.
-    caption(c: Caption) {
-      if (c.partial) partial = c;
-      else {
-        finals = [...finals, c].slice(-MAX_FINAL_CAPTIONS);
-        partial = null;
-      }
-      send({ type: "caption", caption: c });
+    // Tells the stage someone is talking. Only the flags go out, never who or what (known issue I7):
+    // the stage token reaches the bot, and the stage shows no transcript.
+    caption(c: { partial: boolean; isAgent: boolean }) {
+      send({ type: "caption", caption: { partial: c.partial, isAgent: c.isAgent } });
     },
 
     pendingRegion(parentId: string | null) {
@@ -172,9 +177,18 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
       send({ type: "comparison", view });
     },
 
+    // A voice command asked to see one option of the comparison on screen ("show option B").
+    // Returns false, and sends nothing, when no comparison with that option is shown.
+    focusOption(label: string): boolean {
+      if (!comparison?.variants.some((v) => v.label === label)) return false;
+      send({ type: "focus_option", conflictId: comparison.conflictId, label });
+      return true;
+    },
+
     // Applies the winning variant's batch to the main prototype and resolves the
     // conflict in the doc. An unappliable batch still resolves the doc; `applied`
-    // says whether the winner's batch landed on the prototype in this call.
+    // says whether the winner's batch landed on the prototype in this call. A conflict
+    // already resolved is settled: nothing is applied, changed or sent again.
     resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; applied?: boolean; error?: string } {
       const conflict = doc.conflicts.find((c) => c.id === conflictId);
       const variant = conflict?.variants.find((v) => v.label === winner);
@@ -182,22 +196,22 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
         log("runtime.resolve_unknown", { session_id: sessionId, conflict_id: conflictId, winner });
         return { ok: false, error: `no conflict ${conflictId} with variant ${winner}` };
       }
+      if (conflict.status === "resolved") return { ok: true, applied: false };
 
-      // An already-resolved conflict is not re-applied.
-      let applied: Extract<ReturnType<typeof applyPatchBatch>, { ok: true }> | null = null;
-      if (conflict.status !== "resolved") {
-        const r = applyPatchBatch(proto, variant.batch);
-        if (r.ok) applied = r;
-        else log("runtime.winner_batch_rejected", { session_id: sessionId, conflict_id: conflictId, winner });
-      }
+      const r = applyPatchBatch(proto, variant.batch);
+      if (!r.ok) log("runtime.winner_batch_rejected", { session_id: sessionId, conflict_id: conflictId, winner });
       doc = resolveConflict(doc, conflictId, winner, clock()).doc;
-      if (applied) proto = applied.proto;
-      comparison = null;
+      if (r.ok) proto = r.proto;
+      // Only this conflict's comparison closes (the stage plays it out on "resolve"); then the next
+      // open conflict, if any, takes the screen. Another conflict's comparison stays (known issue M1).
+      const shown = comparison;
+      if (!shown || shown.conflictId === conflictId) comparison = nextComparison(proto, doc);
       persist();
       send({ type: "resolve", conflictId, winner });
-      if (applied) send({ type: "patch", proto, changes: applied.changes });
+      if (r.ok) send({ type: "patch", proto, changes: r.changes });
       send({ type: "doc", doc });
-      return { ok: true, applied: applied !== null };
+      if (comparison && comparison !== shown) send({ type: "comparison", view: comparison });
+      return { ok: true, applied: r.ok };
     },
   };
 }

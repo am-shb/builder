@@ -68,6 +68,9 @@ function pick(hits: Hit[], accept: (n: UiNode) => Plan | null): Plan {
   return (hits.length === 1 && accept(hits[0].node)) || { ok: false, reason: "not_found" };
 }
 
+/** "option b", "B" -> "B": the label of a side-by-side option. */
+const optionLabel = (target: string) => target.trim().toLowerCase().replace(/^option\s+/, "").toUpperCase();
+
 const toggles = (n: UiNode) => n.type === "Toggle" || n.type === "Checkbox";
 const CLICKABLE = new Set(["Button", "ListItem", "Tabs"]);
 const clickable = (n: UiNode) => CLICKABLE.has(n.type) || toggles(n) || !!n.on?.click?.length;
@@ -115,7 +118,7 @@ function planCommand(proto: Prototype, ui: UiState, cmd: UiCommand, comparison: 
       return hit ? plan(hit.id, clickInteractions(hit)) : { ok: false, reason: "not_found" };
     }
     case "focus_option": {
-      const label = cmd.target.trim().toLowerCase().replace(/^option\s+/, "").toUpperCase();
+      const label = optionLabel(cmd.target);
       if (!comparison?.variants.some((v) => v.label === label)) return { ok: false, reason: "not_found" };
       return plan(`option-${label}`, [{ kind: "open", target: `option-${label}` }]);
     }
@@ -147,8 +150,10 @@ export function createUiCommandRunner(deps: { runtime: (sessionId: string) => Se
       rt.updateMoodInputs({ unsureUntil: deps.clock() + UNSURE_MS });
       return p.reason === "ambiguous" ? { ok: false, reason: "ambiguous", candidates: p.candidates } : { ok: false, reason: "not_found" };
     }
-    // Picking an option has no effect of its own: the comparison already shows every option.
-    if (cmd.action === "focus_option") return { ok: true, visible: false };
+    // "Show option B": the stage points at it and sets it off from the others. Picking it is the room's call.
+    if (cmd.action === "focus_option") {
+      return rt.focusOption(optionLabel(cmd.target)) ? { ok: true, visible: true } : { ok: false, reason: "not_found" };
+    }
     // Only the first interaction gets the pointer cue: the rest name no node, which the stage skips.
     p.interactions.forEach((i, n) => rt.command(n === 0 ? p.nodeId : "", i));
     return { ok: true, visible: true };

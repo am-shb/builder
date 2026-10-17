@@ -6,6 +6,7 @@
 export const FPS = 15;
 const LOG_MAX = 500;
 
+/** @param {{ fps?: number, now?: () => number, getAnimations?: () => any[] }} [opts] */
 export function createClock({
   fps = FPS,
   now = () => performance.now(),

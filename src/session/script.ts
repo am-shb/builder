@@ -29,7 +29,8 @@ const Step = z.strictObject({
   mood: MoodName.optional(),
   comparison: ComparisonViewSchema.nullable().optional(),
   resolve: z.strictObject({ conflictId: z.string(), winner: Label }).optional(),
-  caption: z.strictObject({ speaker: z.string(), text: z.string(), partial: z.boolean(), isAgent: z.boolean() }).optional(),
+  // speaker and text are accepted for older scripts but never sent to the stage (known issue I7).
+  caption: z.strictObject({ speaker: z.string().optional(), text: z.string().optional(), partial: z.boolean(), isAgent: z.boolean() }).optional(),
 });
 
 export const Script = z.strictObject({ steps: z.array(Step).max(500) });
@@ -66,7 +67,7 @@ export async function runScript(rt: SessionRuntime, script: Script, clock: () =>
     }
     if (step.comparison !== undefined) rt.showComparison(step.comparison);
     if (step.resolve) r = rt.resolveComparison(step.resolve.conflictId, step.resolve.winner);
-    if (step.caption) rt.caption(step.caption);
+    if (step.caption) rt.caption({ partial: step.caption.partial, isAgent: step.caption.isAgent });
     results.push({ index, ...r });
   }
   return results;

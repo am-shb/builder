@@ -1,0 +1,46 @@
+# Runs on every PR and on main. Uses fakes only: no secrets, no network calls to Recall or OpenRouter.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, tests, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Browser tests skip here (no Chrome configured); the browser job runs them.
+      - run: npm test
+      - run: npm run smoke
+
+  browser:
+    name: Tests with headless Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Point the tests at the runner's Chrome
+        run: echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable)" >> "$GITHUB_ENV"
+      - run: npm test

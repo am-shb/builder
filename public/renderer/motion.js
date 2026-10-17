@@ -50,6 +50,13 @@ export function layoutBox(el, root) {
   return { x, y, w: el.offsetWidth, h: el.offsetHeight };
 }
 
+/** How far above `el` its draft tag reaches (theme.css), or 0 when it shows none. */
+export function tagAbove(el) {
+  const tag = getComputedStyle(el, "::after");
+  if (tag.content === "none" || tag.content === "normal") return 0;
+  return Math.max(0, -(parseFloat(tag.top) || 0));
+}
+
 /** Overlay layer (content coordinates of the root) for settle outlines. */
 export function motionLayer(root) {
   let layer = root.querySelector(":scope > .m-layer");

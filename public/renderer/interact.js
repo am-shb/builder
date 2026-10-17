@@ -1,6 +1,7 @@
 // Declarative interactions. Pure and import-free: Node loads this file server-side as well.
 // UI state: { screen, toggles, open, lists, values } -- all keyed by node id.
 
+/** @returns {{ screen: string, toggles: Record<string, boolean>, open: Record<string, boolean>, lists: Record<string, string[]>, values: Record<string, string> }} */
 export function initialUiState(proto) {
   return { screen: proto.currentScreen, toggles: {}, open: {}, lists: {}, values: {} };
 }

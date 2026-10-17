@@ -1,7 +1,7 @@
 // Focus moments and responsiveness cues: the spotlight on what changed (one at a time, 1500 ms),
 // the shimmering placeholder where a streamed element is coming, and the voice-command pointer.
 import { animate, logMotion } from "@renderer/clock.js";
-import { rootOf, layoutBox, fadeOutInPlace } from "@renderer/motion.js";
+import { rootOf, layoutBox, fadeOutInPlace, tagAbove } from "@renderer/motion.js";
 import { slotOf } from "@renderer/components.js";
 
 export const SPOTLIGHT_MS = 1500;
@@ -9,6 +9,8 @@ export const DIM = 0.35; // everything outside the ring shows at this strength
 const MAX_SPOTLIGHTS_PER_PATCH = 3;
 const MAX_PENDING = 3; // across all patches, not counting the one playing
 const RING_PAD = 10;
+const LABEL_GAP = 10; // between the ring and its label
+const EDGE = 6; // the label stays this far inside the canvas
 const EASE = "ease-out";
 
 const whenDone = (a, fn) => a.finished.then(fn, fn);
@@ -33,7 +35,11 @@ export function createFocusQueue({ playMs = SPOTLIGHT_MS, maxPending = MAX_PENDI
       queue.push(change);
       if (queue.length > maxPending) queue.splice(0, queue.length - maxPending);
     },
-    /** The change to start now, or null while one is playing or none is queued. `accept` drops stale ones. */
+    /**
+     * The change to start now, or null while one is playing or none is queued. `accept` drops stale ones.
+     * @param {number} now
+     * @param {(change: any) => boolean} [accept]
+     */
     next(now, accept = () => true) {
       if (now < until) return null;
       while (queue.length) {
@@ -86,6 +92,63 @@ function reveal(root, box) {
   if (content) animate(content, [{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: 450, easing: EASE });
 }
 
+/**
+ * Text and form fields on the canvas outside `target`, as boxes in the root's visible area: what
+ * a label should not cover. Each is placed by its element's layout box, so a glide or the reveal
+ * still in flight does not move it.
+ */
+function inkRects(root, target) {
+  const rects = [];
+  const skip = (el) => !el || target.contains(el) || !!el.closest(".m-focus, .m-ghost, .m-layer, .m-pending");
+  const add = (el, r) => {
+    const box = r.width > 0 && r.height > 0 ? layoutBox(el, root) : null;
+    if (!box) return;
+    const at = el.getBoundingClientRect();
+    rects.push({ x: box.x + r.left - at.left - root.scrollLeft, y: box.y + r.top - at.top - root.scrollTop, w: r.width, h: r.height });
+  };
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.data.trim() || skip(n.parentElement)) continue;
+    range.selectNodeContents(n);
+    for (const r of range.getClientRects()) add(n.parentElement, r);
+  }
+  for (const f of root.querySelectorAll("input, select, textarea")) if (!skip(f)) add(f, f.getBoundingClientRect());
+  return rects;
+}
+
+/**
+ * Where the label goes, around `ring` in the root's visible area: above it on the left (the usual
+ * spot), above on the right, below, or beside it, whichever covers the least of the other text on
+ * the canvas, so it doesn't sit on the content above the change. Inside the ring's top edge when
+ * none of those fits on the canvas.
+ */
+function placeLabel(root, ring, lw, lh, target) {
+  const vw = root.clientWidth;
+  const vh = root.clientHeight;
+  const clampX = (x) => Math.max(EDGE, Math.min(x, vw - lw - EDGE));
+  const above = ring.y - lh - LABEL_GAP;
+  const below = ring.y + ring.h + LABEL_GAP;
+  const middle = ring.y + (ring.h - lh) / 2;
+  const spots = [
+    { x: clampX(ring.x), y: above }, { x: clampX(ring.x + ring.w - lw), y: above },
+    { x: clampX(ring.x), y: below }, { x: clampX(ring.x + ring.w - lw), y: below },
+    { x: ring.x + ring.w + LABEL_GAP, y: middle }, { x: ring.x - lw - LABEL_GAP, y: middle },
+  ].filter((s) => s.x >= EDGE && s.x + lw <= vw - EDGE && s.y >= EDGE && s.y + lh <= vh - EDGE);
+  if (!spots.length) return { x: clampX(ring.x), y: Math.max(EDGE, ring.y + LABEL_GAP) };
+  const ink = inkRects(root, target);
+  const span = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  const covered = (s) => ink.reduce((sum, r) => sum + span(s.x, s.x + lw, r.x, r.x + r.w) * span(s.y, s.y + lh, r.y, r.y + r.h), 0);
+  let best = spots[0];
+  let least = covered(best);
+  for (const s of spots.slice(1)) {
+    if (least === 0) break;
+    const c = covered(s);
+    if (c < least) [best, least] = [s, c];
+  }
+  return best;
+}
+
 let spotlight = null;
 
 /**
@@ -103,8 +166,8 @@ export function playFocus(el, change) {
   const vw = root.clientWidth;
   const vh = root.clientHeight;
   const x = box.x - root.scrollLeft - RING_PAD;
-  const hasTag = el.classList.contains("is-draft") && el.dataset.type !== "App" && el.dataset.type !== "Screen";
-  const y = box.y - root.scrollTop - RING_PAD - (hasTag ? 12 : 0); // include the draft tag
+  const tag = tagAbove(el);
+  const y = box.y - root.scrollTop - Math.max(RING_PAD, tag ? tag + 5 : 0); // include the draft tag
   const w = box.w + RING_PAD * 2;
   const h = box.y - root.scrollTop + box.h + RING_PAD - y;
 
@@ -119,14 +182,8 @@ export function playFocus(el, change) {
   layer.append(hole, ring, label);
   root.append(layer);
 
-  // Label above the ring, else below it, else inside its top edge; always on the canvas.
-  const lw = label.offsetWidth;
-  const lh = label.offsetHeight;
-  let ly = y - lh - 10;
-  if (ly < 6) ly = y + h + 10;
-  if (ly + lh > vh - 6) ly = Math.max(6, y + 10);
-  const lx = Math.max(6, Math.min(x, vw - lw - 6));
-  Object.assign(label.style, { left: `${lx}px`, top: `${ly}px` });
+  const spot = placeLabel(root, { x, y, w, h }, label.offsetWidth, label.offsetHeight, el);
+  Object.assign(label.style, { left: `${spot.x}px`, top: `${spot.y}px` });
 
   // 300 ms in, hold, 300 ms out.
   const a = animate(layer, [

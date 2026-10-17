@@ -94,15 +94,19 @@
 .b-empty-title { font-size: 28px; font-weight: 800; }
 .b-empty-text { margin-top: 6px; }
 
-/* Draft: not agreed yet. Dashed outline plus a "draft" tag; containers stay quiet. */
+/* Draft: not agreed yet. Dashed outline plus a "draft" tag (20px, the stage minimum), once per
+   draft region: a draft inside another draft shows neither, because the outer one already marks it.
+   Containers (App, Screen) stay quiet. focus.js and comparison.js read the tag's offset from here. */
 .b-node.is-draft { outline: 3px dashed var(--b-draft); outline-offset: 3px; position: relative; }
 .b-node.is-draft::after {
-  content: "draft"; position: absolute; top: -13px; right: 10px; padding: 1px 10px; border-radius: 6px;
-  background: var(--b-draft); color: #fff; font: 800 15px/1.4 var(--b-font); text-transform: uppercase; letter-spacing: .5px;
+  content: "draft"; position: absolute; top: -17px; right: 10px; padding: 1px 10px; border-radius: 6px;
+  background: var(--b-draft); color: #fff; font: 800 20px/1.25 var(--b-font); text-transform: uppercase; letter-spacing: .5px;
   pointer-events: none;
 }
 .b-node.is-draft[data-type="App"], .b-node.is-draft[data-type="Screen"] { outline: none; }
 .b-node.is-draft[data-type="App"]::after, .b-node.is-draft[data-type="Screen"]::after { content: none; }
+.b-node.is-draft:not([data-type="App"]):not([data-type="Screen"]) .b-node.is-draft { outline: none; }
+.b-node.is-draft:not([data-type="App"]):not([data-type="Screen"]) .b-node.is-draft::after { content: none; }
 .b-node.is-draft[data-type="Modal"] { position: absolute; }
 
 /* Motion and focus layers (motion.js, focus.js). Only transform and opacity ever animate, each
@@ -170,3 +174,5 @@
 /* The part that differs: the rest of the preview is softened a little, and each change is ringed. */
 .c-hole { position: absolute; border-radius: 12px; box-shadow: 0 0 0 3000px rgb(255 255 255 / 0.45); }
 .c-ring { position: absolute; box-sizing: border-box; border: 4px solid var(--b-focus); border-radius: 12px; }
+/* "Show option B": a ring around the whole option while the others dim (focusOption). */
+.c-focus { position: absolute; inset: 0; border: 5px solid #8fb0ff; border-radius: 16px; pointer-events: none; opacity: 0; }

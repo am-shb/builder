@@ -14,7 +14,7 @@ import { createConversationLoop } from "../src/agent/conversation-loop.ts";
 import { createFakeTts, PCM_SAMPLE_RATE } from "../src/voice/tts.ts";
 import type { TtsProvider } from "../src/voice/tts.ts";
 import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "../src/voice/openrouter-tts.ts";
-import { createSpeech } from "../src/voice/speech.ts";
+import { createSpeech, firstChunkTimeout } from "../src/voice/speech.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise<void>((r) => setImmediate(r)); };
@@ -103,7 +103,7 @@ async function stageWithClient() {
 
 // ---------- createSpeech ----------
 
-test("say streams start→audio→end to stage and adds agent caption", async () => {
+test("say streams start→audio→end to stage and flags an agent caption without its text", async () => {
   const stage = await stageWithClient();
   // Odd-sized chunks: frames must still carry whole 16-bit samples.
   const all = pcm(2400);
@@ -130,7 +130,7 @@ test("say streams start→audio→end to stage and adds agent caption", async ()
   assert.ok(audio.length >= 1 && audio.every((i) => i > start && i < end), `audio between start and end: ${kinds}`);
 
   const startEv = (stage.received[start] as { json: any }).json;
-  assert.deepEqual(startEv, { type: "speech_start", utteranceId, text: "A sidebar could work." });
+  assert.deepEqual(startEv, { type: "speech_start", utteranceId }, "the line itself never goes to the stage");
   assert.deepEqual((stage.received[end] as { json: any }).json, { type: "speech_end", utteranceId });
   const bodies = audio.map((i) => (stage.received[i] as { binary: Buffer }).binary);
   for (const b of bodies) {
@@ -140,7 +140,8 @@ test("say streams start→audio→end to stage and adds agent caption", async ()
   assert.deepEqual(Buffer.concat(bodies.map((b) => b.subarray(36))), Buffer.from(all), "the PCM arrives intact and in order");
 
   const captions = stage.received.flatMap((m) => ("json" in m && m.json.type === "caption" ? [m.json.caption] : []));
-  assert.deepEqual(captions, [{ speaker: "Builder", text: "A sidebar could work.", partial: false, isAgent: true }]);
+  assert.deepEqual(captions, [{ partial: false, isAgent: true }]);
+  assert.ok(!stage.received.some((m) => "json" in m && JSON.stringify(m.json).includes("sidebar")), "no stage message carries the line");
   const moods = stage.received.flatMap((m) => ("json" in m && m.json.type === "mood" ? [m.json.mood] : []));
   assert.equal(moods[0], "speaking");
   assert.deepEqual(chats, [], "no chat when the voice works");
@@ -254,6 +255,23 @@ test("tts failure falls back to chat without blocking the conversation loop", as
   utter("Okay, let's do it.");
   await sleep(100);
   assert.equal(requests.length, 2, "the next turn ran");
+});
+
+test("a long line gets longer for its first audio, up to twice the gap allowed between chunks (known issue M5)", async () => {
+  assert.equal(firstChunkTimeout(""), 4000);
+  assert.equal(firstChunkTimeout("x".repeat(100)), 5500);
+  assert.equal(firstChunkTimeout("x".repeat(300)), 8000);
+  assert.equal(firstChunkTimeout("x".repeat(20), 60), 120);
+
+  // The provider takes longer than the gap allowed between chunks to start this line: it is still heard.
+  const slow: TtsProvider = { async *stream() { await sleep(280); yield pcm(480); } };
+  const s = setup({ tts: slow, timeoutMs: 200 });
+  const line = "A longer line, which takes the provider a moment.";
+  assert.ok(firstChunkTimeout(line, 200) >= 380);
+  await s.speech.say(s.sessionId, line);
+  assert.deepEqual(s.chats, [], "spoken, not sent to chat");
+  assert.equal(s.frames.length, 1);
+  assert.ok(!s.logs.some((l) => l.msg === "speech.fallback"));
 });
 
 // ---------- OpenRouter provider (local fake server; never the network) ----------

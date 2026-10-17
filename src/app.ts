@@ -15,6 +15,8 @@ import { createRuntime } from "./session/runtime.ts";
 import type { SessionRuntime } from "./session/runtime.ts";
 import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
+import { emptyDoc } from "./consensus/doc.ts";
+import { emptyPrototype, UNTITLED_APP } from "./ui/tree.ts";
 import { buildHandoffHtml, buildExportHtml } from "./handoff/export.ts";
 import { createBuildLoop } from "./agent/build-loop.ts";
 import type { Timers } from "./agent/build-loop.ts";
@@ -31,6 +33,9 @@ const MEETING_HOSTS = /^(meet\.google\.com|([a-z0-9-]+\.)?zoom\.us|teams\.micros
 const MAX_STAGE_HTML = 200_000;
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
+
+// Error names only: messages can carry request bodies (V8's JSON.parse quotes its input).
+const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 // Requests that arrived through the public tunnel carry proxy headers; direct
 // localhost requests don't. Only Recall-facing routes are reachable publicly.
@@ -56,22 +61,29 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
   const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
   const clock = deps.agent?.clock ?? Date.now;
-  const conversation = deps.agent ? createConversationLoop({
-    port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log,
-    buildLoop: createBuildLoop({ port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, ...(deps.agent.timers ? { timers: deps.agent.timers } : {}) }),
+  const buildLoop = deps.agent
+    ? createBuildLoop({ port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, ...(deps.agent.timers ? { timers: deps.agent.timers } : {}) })
+    : null;
+  const conversation = deps.agent && buildLoop ? createConversationLoop({
+    port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, buildLoop,
     uiCommand: createUiCommandRunner({ runtime, clock }),
     speech: deps.agent.speech ?? createChatSpeech({ recall, runtime, store, botName: BOT_NAME }),
   }) : null;
+  // After a restart, pick up the calls still going (known issue M2): the conversation loop reloads
+  // its transcript window, and the build loop restarts the no-objection timer.
+  for (const s of buildLoop ? store.listActiveSessions() : []) {
+    if (s.bot_status === "in_call_recording") conversation?.resume(s.id);
+    buildLoop?.resume(s.id);
+  }
   const rendererDir = new URL("../public/renderer/", import.meta.url);
   const stageUrl = (s: Session) =>
     `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
 
-  const handoffPath = (s: Session) => `/handoff/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
+  // The handoff has its own read-only token: the stage token also opens the stage socket (known issue I7).
+  const handoffPath = (s: Session) => `/handoff/${s.id}?token=${encodeURIComponent(store.ensureHandoffToken(s.id))}`;
 
   // ---- live fan-out to browsers (SSE) ----
   const subscribers = new Map<string, Set<http.ServerResponse>>();
-  // In-progress (partial) utterance per session, for the polled stage view.
-  const latestPartial = new Map<string, { speaker: string | null; text: string | null }>();
   function publish(sessionId: string, type: string, data: unknown) {
     for (const res of subscribers.get(sessionId) ?? []) {
       res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -127,10 +139,23 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
           log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
           publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
           if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
+          if (isTerminal(last.code)) endSession(s.id, last.code);
         }
       } catch (err) {
         log("bot.poll_failed", { session_id: s.id, error: err instanceof RecallApiError ? err.status : "network" });
       }
+    }
+  }
+
+  // The call is over (known issue I5): Builder stops speaking and the agent stops for this session,
+  // so nothing costs money any more and the consensus, and with it the handoff, is final (spec §14).
+  function endSession(sessionId: string, status: string) {
+    try {
+      conversation?.onBotEnded(sessionId);
+      buildLoop?.end(sessionId);
+      log("session.ended", { session_id: sessionId, status });
+    } catch (err) {
+      log("session.end_failed", { session_id: sessionId, error: errorName(err) });
     }
   }
 
@@ -150,26 +175,24 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       log("realtime.unknown_session", { kind: parsed.kind });
       return;
     }
+    // Late events after the call ended are stored, but the agent no longer acts on them.
+    const agent = isTerminal(session.bot_status) ? null : conversation;
     if (parsed.kind === "partial") {
-      latestPartial.set(session.id, { speaker: parsed.speaker, text: parsed.text });
-      runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: true, isAgent: false });
+      runtime(session.id).caption({ partial: true, isAgent: false });
       publish(session.id, "partial", { speaker: parsed.speaker, text: parsed.text });
-      conversation?.onPartial(session.id, { speaker: parsed.speaker, text: parsed.text });
+      agent?.onPartial(session.id, { speaker: parsed.speaker, text: parsed.text });
       return;
     }
-    if (parsed.kind === "utterance") latestPartial.delete(session.id);
     const stored = store.addEvent({ sessionId: session.id, recallMsgId: msgId, kind: parsed.kind, speaker: parsed.speaker, text: parsed.text });
     if (!stored) {
       log("realtime.duplicate", { kind: parsed.kind });
       return;
     }
     log("realtime.processed", { session_id: session.id, kind: parsed.kind });
-    if (parsed.kind === "utterance") {
-      runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: false, isAgent: false });
-    }
+    if (parsed.kind === "utterance") runtime(session.id).caption({ partial: false, isAgent: false });
     publish(session.id, "event", stored);
-    if (parsed.kind === "utterance") conversation?.onUtterance(session.id, { id: stored.id, speaker: parsed.speaker, text: parsed.text });
-    else if (parsed.kind === "join" || parsed.kind === "leave") conversation?.onParticipant(session.id, { kind: parsed.kind, name: parsed.speaker });
+    if (parsed.kind === "utterance") agent?.onUtterance(session.id, { id: stored.id, speaker: parsed.speaker, text: parsed.text });
+    else if (parsed.kind === "join" || parsed.kind === "leave") agent?.onParticipant(session.id, { kind: parsed.kind, name: parsed.speaker });
   }
 
   // ---- HTTP plumbing ----
@@ -215,11 +238,11 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     const path = url.pathname;
 
     // ---- stage: the page the bot screenshares into the meeting (public, token-gated) ----
-    const stage = path.match(/^\/stage\/([0-9a-f-]{36})(\/stream|\/state)?$/);
+    // No transcript is served here: the operator's live stream is /api/sessions/<id>/stream (local only).
+    const stage = path.match(/^\/stage\/([0-9a-f-]{36})(\/state)?$/);
     if (req.method === "GET" && stage) {
       const s = store.getSession(stage[1]);
       if (!s || !tokenMatches(url.searchParams.get("token"), s.stage_token)) return json(res, 404, { error: "not found" });
-      if (stage[2] === "/stream") return openStream(req, res, s);
       // The stage polls this: quick-tunnel proxies buffer text/event-stream.
       if (stage[2] === "/state") {
         return json(res, 200, { ...runtime(s.id).snapshot(), html: s.stage_html });
@@ -228,20 +251,20 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return res.end(stageHtml);
     }
 
-    // ---- handoff: read by engineers after the meeting (public, token-gated; reuses the stage token) ----
+    // ---- handoff: read by engineers after the meeting (public, gated by its own read-only token) ----
     const handoff = path.match(/^\/handoff\/([0-9a-f-]{36})(\/export)?$/);
     if (req.method === "GET" && handoff) {
       const s = store.getSession(handoff[1]);
-      if (!s || !tokenMatches(url.searchParams.get("token"), s.stage_token)) return json(res, 404, { error: "not found" });
-      const consensus = store.getConsensus(s.id);
-      if (!consensus) return json(res, 404, { error: "not found" });
+      if (!s || !tokenMatches(url.searchParams.get("token"), s.handoff_token)) return json(res, 404, { error: "not found" });
+      // Before anything is drawn or decided, the handoff is empty rather than missing (known issue M8).
+      const consensus = store.getConsensus(s.id) ?? { doc: emptyDoc(), proto: emptyPrototype(UNTITLED_APP) };
       const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" };
       let body: string;
       if (handoff[2]) {
         headers["Content-Disposition"] = 'attachment; filename="builder-handoff.html"';
         body = buildExportHtml(consensus.doc, consensus.proto);
       } else {
-        body = buildHandoffHtml(consensus.doc, consensus.proto, `/handoff/${s.id}/export?token=${encodeURIComponent(s.stage_token!)}`);
+        body = buildHandoffHtml(consensus.doc, consensus.proto, `/handoff/${s.id}/export?token=${encodeURIComponent(s.handoff_token!)}`);
       }
       log("handoff.served", { session_id: s.id, export: Boolean(handoff[2]), bytes: body.length });
       res.writeHead(200, headers);
@@ -272,7 +295,15 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       }
       const msgId = (req.headers["webhook-id"] as string | undefined) ?? null;
       json(res, 200, { ok: true });
-      setImmediate(() => processRealtime(raw, msgId));
+      // Runs outside the request: an error here would otherwise take the whole process down,
+      // and again on every later event for the session (known issue I6).
+      setImmediate(() => {
+        try {
+          processRealtime(raw, msgId);
+        } catch (err) {
+          log("realtime.process_failed", { error: errorName(err) });
+        }
+      });
       return;
     }
 
@@ -301,7 +332,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return json(res, result.status, result.body);
     }
 
-    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/chat|\/leave|\/screenshare|\/stage|\/script)?$/);
+    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/cost|\/chat|\/leave|\/screenshare|\/stage|\/script)?$/);
     if (m) {
       const session = store.getSession(m[1]);
       if (!session) return json(res, 404, { error: "not found" });
@@ -309,6 +340,8 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
 
       if (req.method === "GET" && !sub) return json(res, 200, { session: sessionView(session) });
       if (req.method === "GET" && sub === "/stream") return openStream(req, res, session);
+      // The operator page's running total, polled every few seconds: one sum, not every stored event (known issue M7).
+      if (req.method === "GET" && sub === "/cost") return json(res, 200, { cost_usd: store.sessionCost(session.id) });
 
       // Content shown on the shared screen. Later, the LLM agent writes here.
       if (req.method === "POST" && sub === "/stage") {
@@ -366,7 +399,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   return {
     handler: (req: http.IncomingMessage, res: http.ServerResponse) => {
       handle(req, res).catch((err) => {
-        log("http.error", { error: (err as Error).message });
+        log("http.error", { error: errorName(err) });
         if (!res.headersSent) json(res, 500, { error: "internal error" });
       });
     },

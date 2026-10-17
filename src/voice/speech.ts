@@ -13,6 +13,14 @@ import type { RecallClient } from "../recall-client.ts";
 import type { Store } from "../store.ts";
 
 export const TTS_TIMEOUT_MS = 4000;
+// The provider sends a line's audio only once it has generated it, so a longer line's first chunk
+// comes later: that wait grows with the text, up to twice the gap allowed between chunks (known issue M5).
+export const FIRST_CHUNK_MS_PER_CHAR = 15;
+
+/** How long to wait for a line's first audio: 4 s plus 15 ms a character, at most 8 s (with the default timeout). */
+export function firstChunkTimeout(text: string, timeoutMs = TTS_TIMEOUT_MS): number {
+  return Math.min(2 * timeoutMs, timeoutMs + text.length * FIRST_CHUNK_MS_PER_CHAR);
+}
 const CHAT_MAX = 500; // Google Meet's chat limit
 // The stage holds back a short buffer before it plays (PREBUFFER_MS in pcm-worklet.js), and frames
 // take a moment to arrive: Builder counts as speaking this much past the audio's own length.
@@ -91,18 +99,18 @@ export function createSpeech(deps: {
     const a: Active = { utteranceId, controller, stopped: false };
     active.set(sessionId, a);
     const rt = runtime(sessionId);
-    // Not rendered on the stage (spec §10a, Layout), but it keeps the line in the session's captions.
-    rt.caption({ speaker: botName, text, partial: false, isAgent: true });
+    // Only says that Builder is talking: the line itself never goes to the stage (spec §10a, known issue I7).
+    rt.caption({ partial: false, isAgent: true });
 
-    // The stream must keep coming: timeoutMs to the first chunk, and between chunks.
+    // The stream must keep coming: firstChunkTimeout to the first chunk, then timeoutMs between chunks.
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = () => {
+    const arm = (ms: number) => {
       clearTimeout(timer);
       timer = setTimeout(() => {
         timedOut = true;
         controller.abort(new DOMException("TTS timed out", "TimeoutError"));
-      }, timeoutMs);
+      }, ms);
     };
     // Races every read, so a stop or timeout ends the line even if the provider ignores the signal.
     const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }));
@@ -114,16 +122,16 @@ export function createSpeech(deps: {
     let playsUntil = 0; // when the stage will have played everything sent so far
     let it: AsyncIterator<Uint8Array> | undefined;
     try {
-      arm();
+      arm(firstChunkTimeout(text, timeoutMs));
       it = tts.stream(text, controller.signal)[Symbol.asyncIterator]();
       for (;;) {
         const r = await Promise.race([it.next(), aborted]);
         if (r.done) break;
-        arm();
+        arm(timeoutMs);
         const pcm = align(r.value);
         if (!pcm.length) continue;
         if (!bytes) {
-          channel.send(sessionId, { type: "speech_start", utteranceId, text });
+          channel.send(sessionId, { type: "speech_start", utteranceId });
           rt.updateMoodInputs({ speaking: true });
           log("speech.started", { session_id: sessionId, utterance_id: utteranceId, first_audio_ms: Math.round(now() - t0) });
         }

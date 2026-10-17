@@ -160,6 +160,18 @@ test("ambiguous and not_found make Builder look unsure for 3 s; success does not
   assert.equal(snap().mood, "listening");
 });
 
+test("show option B points the stage at that option; with no such option shown it is not found", () => {
+  const { id, runtime, run, sent } = setup();
+  assert.deepEqual(run(id, { action: "focus_option", target: "option B" }), { ok: false, reason: "not_found" });
+  const variant = (label: string) => ({ label, summary: label, backers: [], proto: twoScreens(), focusIds: [] });
+  runtime(id).showComparison({ conflictId: "c1", topic: "t", variants: [variant("A"), variant("B")] });
+  sent.length = 0;
+  assert.deepEqual(run(id, { action: "focus_option", target: "option b" }), { ok: true, visible: true }, "visible, so Builder says nothing");
+  assert.deepEqual(sent, [{ type: "focus_option", conflictId: "c1", label: "B" }]);
+  assert.deepEqual(run(id, { action: "focus_option", target: "C" }), { ok: false, reason: "not_found" });
+  assert.equal(runtime(id).focusOption("C"), false);
+});
+
 test("navigate updates server uiState screen and stage receives command", async (t) => {
   await withStage(t, async ({ page, runtime, sessionId, script }) => {
     const p = twoScreens();

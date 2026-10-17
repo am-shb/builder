@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/store.ts";
-import { buildComparisonView, createRuntime } from "../src/session/runtime.ts";
+import { buildComparisonView, createRuntime, nextComparison } from "../src/session/runtime.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { applyBatch, emptyPrototype, findNode } from "../src/ui/tree.ts";
 import type { PatchBatch, Prototype, UiNode } from "../src/ui/schema.ts";
@@ -143,6 +143,71 @@ test("resolveComparison with an unknown conflict returns ok:false and sends noth
     { msg: "runtime.resolve_unknown", fields: { session_id: s.id, conflict_id: "nope", winner: "A" } },
     { msg: "runtime.resolve_unknown", fields: { session_id: s.id, conflict_id: "c1", winner: "C" } },
   ]);
+});
+
+// A second conflict, about the heading, that applies whatever the first one's winner was.
+const SECOND: Conflict = {
+  id: "c2", topic: "What is the list called?", status: "open", openedAt: 2,
+  variants: [
+    { label: "A", summary: "To do", backers: ["Ada"], batch: { label: "To do", ops: [{ op: "update", id: "home.heading", props: { text: "To do" } }] } },
+    { label: "B", summary: "This week", backers: ["Bo"], batch: { label: "This week", ops: [{ op: "update", id: "home.heading", props: { text: "This week" } }] } },
+  ],
+};
+
+function twoConflicts(id: string) {
+  const store = openStore(":memory:");
+  const s = store.createIntent(id, "https://meet.google.com/x");
+  const sent: StageEvent[] = [];
+  const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
+  assert.equal(rt.applyBatch(BASE).ok, true);
+  rt.setDoc({ ...docWith(THREE), conflicts: [THREE, SECOND] });
+  const snap = () => rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  return { store, id: s.id, sent, rt, snap };
+}
+
+test("resolving a conflict that is not on screen leaves the comparison that is (known issue M1)", () => {
+  const { sent, rt, snap } = twoConflicts("abababab-abab-abab-abab-abababababab");
+  assert.equal(nextComparison(baseProto(), snap().doc)?.conflictId, "c1", "the first conflict raised goes first");
+  rt.showComparison(buildComparisonView(baseProto(), SECOND));
+  sent.length = 0;
+  assert.deepEqual(rt.resolveComparison("c1", "B"), { ok: true, applied: true });
+  assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc"], "no comparison event: the one shown stays");
+  assert.equal(snap().comparison?.conflictId, "c2");
+  // Resolving the one on screen closes it; with no conflict left open, nothing follows.
+  sent.length = 0;
+  assert.deepEqual(rt.resolveComparison("c2", "A"), { ok: true, applied: true });
+  assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc"]);
+  assert.equal(snap().comparison, null);
+});
+
+test("resolving the comparison on screen brings up the next open conflict, built on the merged prototype (known issue M1)", () => {
+  const { sent, rt, snap } = twoConflicts("bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc");
+  rt.showComparison(buildComparisonView(baseProto(), THREE));
+  sent.length = 0;
+  rt.resolveComparison("c1", "B");
+  assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc", "comparison"]);
+  const next = sent.at(-1) as Extract<StageEvent, { type: "comparison" }>;
+  assert.equal(next.view?.conflictId, "c2");
+  assert.ok(next.view!.variants.every((v) => findNode(v.proto, "home.done")), "each option shows the first winner too");
+  assert.equal(snap().comparison?.conflictId, "c2");
+});
+
+test("a runtime made from a saved doc shows the open comparison again (known issue M2)", () => {
+  const store = openStore(":memory:");
+  const s = store.createIntent("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", "https://meet.google.com/x");
+  store.saveConsensus(s.id, docWith(THREE), baseProto());
+  const rt = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(s.id);
+  const view = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison;
+  assert.equal(view?.conflictId, "c1");
+  assert.deepEqual(view?.variants.map((v) => v.label), ["A", "B", "C"]);
+
+  // An open conflict whose options no longer apply has nothing to show.
+  const t = store.createIntent("dededede-dede-dede-dede-dededededede", "https://meet.google.com/y");
+  store.saveConsensus(t.id, docWith(conflict([
+    { label: "A", summary: "x", backers: [], batch: broken },
+    { label: "B", summary: "y", backers: [], batch: broken },
+  ])), baseProto());
+  assert.equal((createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(t.id).snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison, null);
 });
 
 // Geometry and content of the comparison view as the stage shows it.
@@ -317,5 +382,67 @@ test("resolve with no comparison shown is a no-op", async (t) => {
     assert.deepEqual([r.panelOpacity, r.dockOpacity, r.placement], ["1", "1", "dock"]);
     assert.equal(await page.eval(`document.body.classList.contains("comparing")`), false);
     assert.deepEqual(await page.eval(`window.__motionLog.map((e) => e.fn)`), []);
+  });
+});
+
+test("show option B: the pointer goes to it, the others dim and B is ringed for a moment; nothing is picked", { timeout: 40_000 }, async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const view = buildComparisonView(baseProto(), THREE);
+    await script([{ batch: BASE, doc: docWith(THREE) }, { wait: 400, comparison: view }]);
+    await page.waitFor(`document.querySelectorAll("#comparison .c-option").length === 3`);
+    await sleep(700);
+    await page.eval(`window.__motionLog.length = 0`);
+    await page.eval(`window.stageEvent({ type: "focus_option", conflictId: "c1", label: "B" })`);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "focusOption")`, 3000);
+    const order = await page.eval<string[]>(`window.__motionLog.map((e) => e.fn + (e.phase ? ":" + e.phase : ""))`);
+    assert.deepEqual(order.slice(0, 3), ["animatePointer:glide", "animatePointer:press", "focusOption"], "the pointer first, then the focus");
+    const anims = await page.eval<{ ms: number; props: string[] }[]>(COMPARISON_ANIMS);
+    assert.ok(anims.length >= 3 && anims.every((a) => a.props.every((p) => p === "opacity")), `opacity only: ${JSON.stringify(anims)}`);
+    await sleep(600);
+    const mid = await page.eval<{ opacity: Record<string, number>; ring: string | null }>(`({
+      opacity: Object.fromEntries([...document.querySelectorAll("#comparison .c-option")].map((o) => [o.dataset.label, Number(getComputedStyle(o).opacity)])),
+      ring: document.querySelector("#comparison .c-focus")?.closest(".c-option")?.dataset.label ?? null,
+    })`);
+    assert.equal(mid.ring, "B");
+    assert.ok(mid.opacity.A < 0.6 && mid.opacity.C < 0.6 && mid.opacity.B === 1, JSON.stringify(mid.opacity));
+    await sleep(3000);
+    const after = await page.eval<{ opacity: number[]; ring: boolean; options: number; placement: string }>(`({
+      opacity: [...document.querySelectorAll("#comparison .c-option")].map((o) => Number(getComputedStyle(o).opacity)),
+      ring: !!document.querySelector("#comparison .c-focus"),
+      options: document.querySelectorAll("#comparison .c-option").length,
+      placement: document.getElementById("builder").dataset.placement,
+    })`);
+    assert.deepEqual(after, { opacity: [1, 1, 1], ring: false, options: 3, placement: "corner" }, "back as it was, still comparing");
+    // Another conflict's option, or a missing one, changes nothing.
+    assert.equal(await page.eval(`import("@renderer/comparison.js").then((m) => m.focusOption(document.getElementById("comparison"), "other", "A"))`), false);
+  });
+});
+
+test("a second open conflict opens once the first one's resolve has played out (known issue M1)", { timeout: 40_000 }, async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const second: Conflict = {
+      id: "c2", topic: "What is the list called?", status: "open", openedAt: 2,
+      variants: [
+        { label: "A", summary: "To do", backers: ["Ada"], batch: { label: "To do", ops: [{ op: "update", id: "home.heading", props: { text: "To do" } }] } },
+        { label: "B", summary: "This week", backers: ["Bo"], batch: { label: "This week", ops: [{ op: "update", id: "home.heading", props: { text: "This week" } }] } },
+      ],
+    };
+    await script([{ batch: BASE, doc: { ...docWith(THREE), conflicts: [THREE, second] } }, { wait: 400, comparison: buildComparisonView(baseProto(), THREE) }]);
+    await page.waitFor(`document.querySelectorAll("#comparison .c-option").length === 3`);
+    await sleep(700);
+    await page.eval(`window.__motionLog.length = 0`);
+    await script([{ resolve: { conflictId: "c1", winner: "B" } }]); // the runtime sends the next comparison right after
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "showComparison" && e.conflictId === "c2")`, 5000);
+    const log = await page.eval<{ fn: string; conflictId?: string; t: number }[]>(`window.__motionLog`);
+    const resolved = log.find((e) => e.fn === "resolveComparison")!;
+    const next = log.find((e) => e.fn === "showComparison")!;
+    assert.equal(resolved.conflictId, "c1");
+    assert.ok(next.t - resolved.t >= 500, `the winner's expansion played first: ${next.t - resolved.t} ms`);
+    await sleep(700);
+    const r = await page.eval<ViewRead>(READ_VIEW);
+    assert.equal(r.topic, "What is the list called?");
+    assert.deepEqual(r.options.map((o) => o.label), ["A", "B"]);
+    assert.equal(r.placement, "corner");
+    assert.ok(r.options.every((o) => o.nodes.includes("home.done")), "the options show the first winner merged");
   });
 });

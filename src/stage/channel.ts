@@ -8,7 +8,9 @@ import type { Prototype, Change, Interaction } from "../ui/schema.ts";
 import type { ConsensusDoc } from "../consensus/doc.ts";
 import type { Mood } from "../session/mood.ts";
 
-export type Caption = { speaker: string; text: string; partial: boolean; isAgent: boolean };
+// Someone is talking: all the stage needs to animate the character. It carries no speaker or text,
+// because the stage token is handed to the bot and the stage shows no transcript (spec §10a).
+export type Caption = { partial: boolean; isAgent: boolean };
 
 export type ComparisonView = {
   conflictId: string;
@@ -17,7 +19,7 @@ export type ComparisonView = {
 };
 
 export type StageEvent =
-  | { type: "snapshot"; proto: Prototype; uiScreen: string; doc: ConsensusDoc; captions: Caption[]; mood: Mood; comparison: ComparisonView | null }
+  | { type: "snapshot"; proto: Prototype; uiScreen: string; doc: ConsensusDoc; mood: Mood; comparison: ComparisonView | null }
   | { type: "patch"; proto: Prototype; changes: Change[] }
   | { type: "doc"; doc: ConsensusDoc }
   | { type: "mood"; mood: Mood }
@@ -26,7 +28,8 @@ export type StageEvent =
   | { type: "command"; nodeId: string; interaction: Interaction }
   | { type: "comparison"; view: ComparisonView | null }
   | { type: "resolve"; conflictId: string; winner: string }
-  | { type: "speech_start"; utteranceId: string; text: string }
+  | { type: "focus_option"; conflictId: string; label: string }
+  | { type: "speech_start"; utteranceId: string }
   | { type: "speech_end"; utteranceId: string }
   | { type: "speech_stop" };
 
