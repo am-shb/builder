@@ -7,6 +7,24 @@ the component spec and the decision log.
 
 Full design: `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`.
 
+## Repository layout
+
+The working v0 engine is in `src/` and `public/`, and the rest of this README describes it. The other top-level
+folders are placeholders for the production product. Each one has a README with its scope, its open decisions and its
+first tasks.
+
+| Folder | Area |
+|---|---|
+| `src/`, `public/`, `test/`, `scripts/` | Meeting engine v0, planned to move to `services/meeting-engine/` |
+| `services/` | `api`, `auth`, `billing`, `worker`, `notifications`, `meeting-engine` |
+| `apps/` | `web` (the customer app) and `admin` (the internal console) |
+| `packages/shared/` | Types and schemas shared across services |
+| `db/`, `infra/`, `e2e/` | Database, deployment and CI, and tests that cross services |
+| `docs/` | Workstreams, ADRs, architecture, product, security, runbooks, known issues |
+
+New contributors should read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/workstreams.md](docs/workstreams.md) first.
+
 ## How a session flows
 
 1. **Join.** You paste a Meet link into the local control UI (http://localhost:3000). The backend creates
