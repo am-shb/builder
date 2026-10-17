@@ -1,0 +1,503 @@
+// Conversation loop: Builder's ears and voice (spec §7, §12). Haiku reads a rolling window of
+// the attributed transcript plus the consensus summary, and acts only through three tools:
+// speak, ui_command and update_build. Making no call is staying silent, the default; the
+// speech gate below enforces the speaking policy in code, whatever the model asks for.
+// Logs ids, counts, reasons and durations only: never transcript text, prompts or model output.
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { withCostRecording } from "./cost.ts";
+import { toolJsonSchema } from "./tool-schema.ts";
+import type { ModelPort, PortTool, RunToolsResult } from "./llm.ts";
+import { HandoffSchema } from "./handoff.ts";
+import type { Handoff } from "./handoff.ts";
+import { ADDRESS_RE, createStuckDetector } from "./stuck.ts";
+import type { StuckDetector, StuckEvent } from "./stuck.ts";
+import { findNode } from "../ui/tree.ts";
+import type { UiNode } from "../ui/schema.ts";
+import type { ConsensusDoc } from "../consensus/doc.ts";
+import type { Log, SessionRuntime } from "../session/runtime.ts";
+import type { StageEvent } from "../stage/channel.ts";
+import type { RecallClient } from "../recall-client.ts";
+import type { Store } from "../store.ts";
+
+export const WINDOW = 40;
+export const ADDRESSED_MS = 8_000;
+export const CONFIRM_MS = 10_000;
+export const FEEDBACK_MS = 5_000;
+export const MAX_SPOKEN = 300;
+const CHAT_MAX = 500;
+const SCREEN_MAX_NODES = 80;
+
+const SYSTEM = readFileSync(new URL("./prompts/conversation.md", import.meta.url), "utf8");
+
+export const SPEAK_REASONS = ["opening", "answer", "stuck", "confirm_conflict", "command_feedback"] as const;
+export type SpeakReason = (typeof SPEAK_REASONS)[number];
+
+export const SpeakInput = z.strictObject({
+  text: z.string().min(1).max(MAX_SPOKEN),
+  reason: z.enum(SPEAK_REASONS),
+});
+
+export const UiCommandInput = z.strictObject({
+  action: z.enum(["click", "navigate", "type", "toggle", "focus_option", "back"]),
+  target: z.string(),
+  value: z.string().optional(),
+});
+export type UiCommand = z.infer<typeof UiCommandInput>;
+
+/** What running a voice command did. `visible: false` means it worked but the room can't see it. */
+export type CommandOutcome =
+  | { ok: true; visible: boolean }
+  | { ok: false; reason: "ambiguous" | "not_found" | "unsupported"; candidates?: string[] };
+
+/** How Builder's lines reach the room. Chat for now; Task 13 swaps in TTS behind the same type. */
+export type Speech = {
+  say(sessionId: string, text: string): Promise<string>;
+  stop(sessionId: string): void;
+  speaking(sessionId: string): boolean;
+};
+
+const TOOLS: PortTool[] = [
+  {
+    name: "speak",
+    description:
+      "Say one short line out loud to the meeting: at most two sentences and 300 characters, with at most one " +
+      "question. Call it only when this turn's <speaking_allowed> lists the reason you give; any other call is " +
+      "discarded. Making no call means staying silent, which is the right choice on most turns.",
+    strict: true,
+    input_schema: toolJsonSchema(SpeakInput),
+    schema: SpeakInput,
+  },
+  {
+    name: "ui_command",
+    description:
+      "Operate the prototype on screen when someone tells Builder to: click a button, navigate to a screen, " +
+      "type a value into a field, toggle a switch, focus a side-by-side option (target A, B or C), or go back. " +
+      "Use the words people used for the target, matching a label on the current screen when one fits.",
+    strict: true,
+    input_schema: toolJsonSchema(UiCommandInput),
+    schema: UiCommandInput,
+  },
+  {
+    name: "update_build",
+    description:
+      "Hand the build loop a summary of the topics discussed since handed_off_through: proposals with who proposed, " +
+      "supported and objected, questions raised, a side-by-side choice the room settled, the screen being " +
+      "discussed, or a view someone asked to see. Call it whenever a proposal, agreement, objection, disagreement, " +
+      "screen change or request was heard. groundingIds lists the bracketed ids of every transcript line the " +
+      "summary draws on.",
+    strict: true,
+    input_schema: toolJsonSchema(HandoffSchema),
+    schema: HandoffSchema,
+  },
+];
+
+type Snapshot = Extract<StageEvent, { type: "snapshot" }>;
+type Line = { id: number | null; speaker: string; text: string };
+type Turn = { trigger: string; opening: boolean; stuck: StuckEvent | null };
+type CommandRecord = { at: number; cmd: UiCommand; outcome: CommandOutcome; shown: boolean; fedBack: boolean };
+
+type SessionState = {
+  port: ModelPort;
+  detector: StuckDetector;
+  lines: Line[];
+  humanIds: Set<number>;
+  present: Set<string>;
+  heard: Set<string>;
+  recording: boolean;
+  opened: boolean;
+  openingTried: boolean;
+  openingPending: boolean;
+  addressedAt: number | null;
+  answeredAt: number | null;
+  stuck: StuckEvent | null;
+  confirmed: Set<string>;
+  command: CommandRecord | null;
+  handedOffThrough: number;
+  inFlight: boolean;
+  dirty: boolean;
+};
+
+const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
+const questions = (text: string) => (text.match(/\?/g) ?? []).length;
+
+/** Meeting-chat stand-in for voice: posts the line (≤500 chars, the Meet limit) and adds an agent caption. */
+export function createChatSpeech(deps: {
+  recall: Pick<RecallClient, "sendChatMessage">;
+  runtime: (sessionId: string) => SessionRuntime;
+  store: Pick<Store, "getSession" | "addEvent">;
+  botName?: string;
+}): Speech {
+  const botName = deps.botName ?? "Builder";
+  return {
+    async say(sessionId, text) {
+      const line = text.slice(0, CHAT_MAX);
+      const botId = deps.store.getSession(sessionId)?.bot_id;
+      if (!botId) throw new Error("no bot for session");
+      await deps.recall.sendChatMessage(botId, line);
+      deps.store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
+      deps.runtime(sessionId).caption({ speaker: botName, text: line, partial: false, isAgent: true });
+      return randomUUID();
+    },
+    stop() {},
+    speaking: () => false,
+  };
+}
+
+function nodeLabel(n: UiNode): string | null {
+  for (const key of ["label", "text", "title", "placeholder"]) {
+    const v = n.props[key];
+    if (typeof v === "string" && v) return v;
+  }
+  const tabs = n.props.tabs;
+  return Array.isArray(tabs) ? tabs.join(" / ") : null;
+}
+
+function screenOutline(snap: Snapshot): string {
+  const screen = findNode(snap.proto, snap.proto.currentScreen);
+  if (!screen) return `<screen id="${snap.proto.currentScreen}"></screen>`;
+  const out: string[] = [];
+  const walk = (n: UiNode, depth: number) => {
+    if (out.length >= SCREEN_MAX_NODES) return;
+    const label = nodeLabel(n);
+    out.push(`${"  ".repeat(depth)}- ${n.type}${label ? ` ${JSON.stringify(label)}` : ""} (${n.id})`);
+    for (const c of n.children) walk(c, depth + 1);
+  };
+  for (const c of screen.children) walk(c, 0);
+  const comparison = snap.comparison
+    ? `\nside-by-side comparison open for conflict ${snap.comparison.conflictId}: ` +
+      snap.comparison.variants.map((v) => `${v.label}: ${v.summary}`).join("; ")
+    : "";
+  return `<screen id="${screen.id}" title=${JSON.stringify(nodeLabel(screen) ?? "")}>\n${out.join("\n")}${comparison}\n</screen>`;
+}
+
+function consensusSummary(doc: ConsensusDoc) {
+  const decisions = (status: "draft" | "pending" | "agreed") =>
+    doc.decisions.filter((d) => d.status === status).map((d) => ({ id: d.id, text: d.text, proposedBy: d.proposedBy, ...(d.agreedBy.length ? { agreedBy: d.agreedBy } : {}) }));
+  return {
+    phase: doc.phase,
+    app: doc.app,
+    agreed: decisions("agreed"),
+    pending: decisions("pending"),
+    drafts: decisions("draft"),
+    openQuestions: doc.openQuestions.map((q) => ({ id: q.id, text: q.text, raisedBy: q.raisedBy })),
+    openConflicts: doc.conflicts.filter((c) => c.status === "open").map((c) => ({
+      id: c.id, topic: c.topic, options: c.variants.map((v) => ({ label: v.label, summary: v.summary, backers: v.backers })),
+    })),
+    nextUp: doc.nextUp,
+  };
+}
+
+function describeCommand(c: CommandRecord, now: number): string {
+  const what = `${c.cmd.action} ${JSON.stringify(c.cmd.target)}${c.cmd.value !== undefined ? ` value ${JSON.stringify(c.cmd.value)}` : ""}`;
+  const o = c.outcome;
+  const result = o.ok
+    ? (o.visible ? "done, visible on screen" : "done, but nothing visible changed")
+    : `${o.reason}${o.candidates?.length ? `: candidates ${o.candidates.map((x) => JSON.stringify(x)).join(", ")}` : ""}`;
+  return `<last_command seconds_ago="${Math.round((now - c.at) / 1000)}">${what} -> ${result}</last_command>`;
+}
+
+export function createConversationLoop(deps: {
+  port: ModelPort;
+  runtime: (sessionId: string) => SessionRuntime;
+  buildLoop: { handoff(sessionId: string, h: Handoff): void };
+  speech: Speech;
+  store: Store;
+  clock: () => number;
+  botName?: string;
+  log?: Log;
+  uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome;
+}) {
+  const { runtime, buildLoop, speech, store, clock } = deps;
+  const botName = deps.botName ?? "Builder";
+  const log: Log = deps.log ?? (() => {});
+  // Task 12 resolves commands against the screen; until then every command is reported as unsupported.
+  const uiCommand = deps.uiCommand ?? (() => ({ ok: false, reason: "unsupported" }) as CommandOutcome);
+  const sessions = new Map<string, SessionState>();
+
+  const state = (sessionId: string, fromRecording = false): SessionState => {
+    let st = sessions.get(sessionId);
+    if (!st) {
+      // A session first seen already recording (after a restart) has had its opening.
+      const already = !fromRecording && store.getSession(sessionId)?.bot_status === "in_call_recording";
+      st = {
+        port: withCostRecording(deps.port, { store, sessionId }),
+        detector: createStuckDetector({ clock }),
+        lines: [], humanIds: new Set(), present: new Set(), heard: new Set(),
+        recording: already, opened: already, openingTried: already, openingPending: false,
+        addressedAt: null, answeredAt: null, stuck: null, confirmed: new Set(), command: null,
+        handedOffThrough: 0, inFlight: false, dirty: false,
+      };
+      sessions.set(sessionId, st);
+    }
+    return st;
+  };
+
+  const humans = (st: SessionState) => [...new Set([...st.present, ...st.heard])];
+  const view = (sessionId: string) => runtime(sessionId).snapshot() as Snapshot;
+
+  // Conflicts resolved within CONFIRM_MS and not yet confirmed. A resolution records decision d-<id>.
+  function freshResolutions(st: SessionState, doc: ConsensusDoc, now: number): string[] {
+    return doc.conflicts
+      .filter((c) => c.status === "resolved" && !st.confirmed.has(c.id))
+      .filter((c) => {
+        const at = doc.decisions.find((d) => d.id === `d-${c.id}`)?.decidedAt;
+        return at !== undefined && now - at <= CONFIRM_MS;
+      })
+      .map((c) => c.id);
+  }
+
+  // The speech gate: which reasons may speak right now. The model is told, and the code enforces it.
+  function openReasons(st: SessionState, turn: Turn, doc: ConsensusDoc, now: number): SpeakReason[] {
+    const open: SpeakReason[] = [];
+    if (turn.opening && !st.opened) open.push("opening");
+    if (st.addressedAt !== null && now - st.addressedAt <= ADDRESSED_MS && st.addressedAt !== st.answeredAt) open.push("answer");
+    if (st.stuck) open.push("stuck");
+    if (freshResolutions(st, doc, now).length) open.push("confirm_conflict");
+    const c = st.command;
+    if (c && !c.fedBack && now - c.at <= FEEDBACK_MS && !(c.outcome.ok && c.outcome.visible)) open.push("command_feedback");
+    return open;
+  }
+
+  function markAddressed(sessionId: string, st: SessionState, inputs: { lastSpeechWasQuestion?: boolean } = {}) {
+    const now = clock();
+    st.addressedAt = now;
+    runtime(sessionId).updateMoodInputs({ ...inputs, addressedUntil: now + ADDRESSED_MS });
+  }
+
+  function pushLine(st: SessionState, line: Line) {
+    st.lines.push(line);
+    if (st.lines.length > WINDOW) st.lines.splice(0, st.lines.length - WINDOW);
+  }
+
+  function maybeOpen(sessionId: string, st: SessionState) {
+    if (!st.recording || st.openingTried || humans(st).length === 0) return;
+    st.openingTried = true;
+    st.openingPending = true;
+    schedule(sessionId, st);
+  }
+
+  function schedule(sessionId: string, st: SessionState) {
+    if (st.inFlight) {
+      st.dirty = true;
+      return;
+    }
+    run(sessionId, st).catch((err) => log("conversation.turn_failed", { session_id: sessionId, error: errorName(err) }));
+  }
+
+  function userTurn(st: SessionState, snap: Snapshot, turn: Turn, open: SpeakReason[], now: number): string {
+    const transcript = st.lines
+      .map((l) => (l.id === null ? `[${botName}, you] ${l.text}` : `[${l.id}] ${l.speaker}: ${l.text}`))
+      .join("\n");
+    const people = humans(st);
+    return [
+      `<trigger>${turn.trigger}</trigger>`,
+      `<speaking_allowed>${open.length ? open.join(", ") : "none"}</speaking_allowed>`,
+      `<people>${people.length ? people.join(", ") : "nobody yet"}</people>`,
+      `<consensus>\n${JSON.stringify(consensusSummary(snap.doc))}\n</consensus>`,
+      screenOutline(snap),
+      ...(st.command ? [describeCommand(st.command, now)] : []),
+      `<transcript handed_off_through="${st.handedOffThrough}">\n${transcript}\n</transcript>`,
+    ].join("\n\n");
+  }
+
+  function forwardHandoff(sessionId: string, st: SessionState, input: unknown): boolean {
+    const parsed = HandoffSchema.safeParse(input);
+    if (!parsed.success) {
+      log("conversation.handoff_invalid", { session_id: sessionId, issues: parsed.error.issues.length });
+      return false;
+    }
+    const ids = [...new Set(parsed.data.groundingIds)].filter((id) => st.humanIds.has(id));
+    if (!ids.length) {
+      log("handoff.ungrounded", { session_id: sessionId, given: parsed.data.groundingIds.length });
+      return false;
+    }
+    buildLoop.handoff(sessionId, { ...parsed.data, groundingIds: ids });
+    st.handedOffThrough = Math.max(st.handedOffThrough, ...ids);
+    return true;
+  }
+
+  function runCommand(sessionId: string, st: SessionState, input: unknown): boolean {
+    const parsed = UiCommandInput.safeParse(input);
+    if (!parsed.success) {
+      log("conversation.command_invalid", { session_id: sessionId });
+      return false;
+    }
+    let outcome: CommandOutcome;
+    try {
+      outcome = uiCommand(sessionId, parsed.data);
+    } catch (err) {
+      log("conversation.command_failed", { session_id: sessionId, error: errorName(err) });
+      outcome = { ok: false, reason: "unsupported" };
+    }
+    st.command = { at: clock(), cmd: parsed.data, outcome, shown: false, fedBack: false };
+    log("conversation.command", { session_id: sessionId, action: parsed.data.action, ok: outcome.ok, ...(outcome.ok ? { visible: outcome.visible } : { reason: outcome.reason }) });
+    // A failed or invisible command is shown to the model in a follow-up turn, so it can say so.
+    if (!(outcome.ok && outcome.visible)) st.dirty = true;
+    return true;
+  }
+
+  async function trySpeak(sessionId: string, st: SessionState, turn: Turn, input: unknown, first: boolean): Promise<SpeakReason | null> {
+    const parsed = SpeakInput.safeParse(input);
+    if (!parsed.success) {
+      log("speak.blocked", { session_id: sessionId, reason: null, why: "invalid_input" });
+      return null;
+    }
+    const { text, reason } = parsed.data;
+    const now = clock();
+    const doc = view(sessionId).doc;
+    const why = !first ? "one_per_turn"
+      : !openReasons(st, turn, doc, now).includes(reason) ? "reason_not_open"
+      : questions(text) > 1 ? "too_many_questions"
+      : speech.speaking(sessionId) ? "already_speaking"
+      : null;
+    if (why) {
+      log("speak.blocked", { session_id: sessionId, reason, why });
+      return null;
+    }
+
+    // Consume what allowed this line before it goes out, so a later turn can't repeat it.
+    const addressedAt = st.addressedAt;
+    if (reason === "opening") st.opened = true;
+    if (reason === "answer") st.answeredAt = addressedAt;
+    if (reason === "stuck") st.stuck = null;
+    if (reason === "confirm_conflict") for (const id of freshResolutions(st, doc, now)) st.confirmed.add(id);
+    if (reason === "command_feedback" && st.command) st.command.fedBack = true;
+
+    try {
+      await speech.say(sessionId, text);
+    } catch (err) {
+      log("speak.failed", { session_id: sessionId, reason, error: errorName(err) });
+      return null;
+    }
+    pushLine(st, { id: null, speaker: botName, text });
+    const asked = text.trim().endsWith("?");
+    if (asked) st.detector.onAgentQuestion();
+    const inputs: { lastSpeechWasQuestion: boolean; addressedUntil?: number } = { lastSpeechWasQuestion: asked };
+    // Answered: stop "thinking", unless someone addressed Builder again meanwhile.
+    if (reason === "answer" && st.addressedAt === addressedAt) inputs.addressedUntil = 0;
+    runtime(sessionId).updateMoodInputs(inputs);
+    log("speak", { session_id: sessionId, reason, chars: text.length, question: asked });
+    return reason;
+  }
+
+  async function apply(sessionId: string, st: SessionState, turn: Turn, result: RunToolsResult) {
+    const counts = { handoffs: 0, commands: 0, spoke: null as SpeakReason | null };
+    // Hand-offs first (a settled choice resolves synchronously, which confirm_conflict depends on),
+    // then commands, then at most one line of speech.
+    for (const call of result.toolCalls) if (call.name === "update_build" && forwardHandoff(sessionId, st, call.input)) counts.handoffs++;
+    for (const call of result.toolCalls) if (call.name === "ui_command" && runCommand(sessionId, st, call.input)) counts.commands++;
+    let first = true;
+    for (const call of result.toolCalls) {
+      if (call.name !== "speak") continue;
+      const spoke = await trySpeak(sessionId, st, turn, call.input, first);
+      first = false;
+      counts.spoke ??= spoke;
+    }
+    return counts;
+  }
+
+  async function run(sessionId: string, st: SessionState) {
+    st.inFlight = true;
+    st.dirty = false;
+    const now = clock();
+    const fresh = st.command && !st.command.shown ? st.command : null;
+    const turn: Turn = {
+      trigger: st.openingPending ? "opening" : st.stuck ? `stuck: ${st.stuck.reason}` : fresh ? "command_result" : "utterance",
+      opening: st.openingPending,
+      stuck: st.stuck,
+    };
+    if (fresh) fresh.shown = true;
+    try {
+      const snap = view(sessionId);
+      const open = openReasons(st, turn, snap.doc, now);
+      const result = await st.port.runTools({
+        loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
+        messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],
+      });
+      const counts = await apply(sessionId, st, turn, result);
+      log("conversation.turn", {
+        session_id: sessionId, trigger: turn.trigger.split(":")[0], stop_reason: result.stopReason,
+        tool_calls: result.toolCalls.length, dropped: result.dropped, ms: Math.round(result.ms),
+        lines: st.lines.length, handoffs: counts.handoffs, commands: counts.commands, spoke: counts.spoke,
+      });
+    } catch (err) {
+      log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorName(err) });
+    } finally {
+      if (turn.opening) {
+        st.openingPending = false;
+        if (!st.opened) log("conversation.opening_missed", { session_id: sessionId });
+      }
+      if (turn.stuck && st.stuck === turn.stuck) st.stuck = null;
+      st.inFlight = false;
+      if (st.dirty) schedule(sessionId, st);
+    }
+  }
+
+  return {
+    onUtterance(sessionId: string, u: { id: number; speaker: string | null; text: string | null }): void {
+      if (u.speaker === botName || !u.text) return;
+      const st = state(sessionId);
+      const speaker = u.speaker ?? "Unknown";
+      pushLine(st, { id: u.id, speaker, text: u.text });
+      st.humanIds.add(u.id);
+      if (u.speaker) st.heard.add(u.speaker);
+      st.detector.onHumanUtterance(u.text, u.speaker);
+      try {
+        if (ADDRESS_RE.test(u.text)) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
+        else runtime(sessionId).updateMoodInputs({ lastSpeechWasQuestion: false });
+      } catch (err) {
+        log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
+      }
+      maybeOpen(sessionId, st);
+      schedule(sessionId, st);
+    },
+
+    // Partials only make the character react: being addressed shows at once, before any model call.
+    onPartial(sessionId: string, p: { speaker: string | null; text: string | null }): void {
+      if (p.speaker === botName || !p.text || !ADDRESS_RE.test(p.text)) return;
+      try {
+        markAddressed(sessionId, state(sessionId));
+      } catch (err) {
+        log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
+      }
+    },
+
+    onParticipant(sessionId: string, e: { kind: "join" | "leave"; name: string | null }): void {
+      if (!e.name || e.name === botName) return;
+      const st = state(sessionId);
+      if (e.kind === "join") st.present.add(e.name);
+      else {
+        st.present.delete(e.name);
+        st.heard.delete(e.name);
+      }
+      maybeOpen(sessionId, st);
+    },
+
+    onBotRecording(sessionId: string): void {
+      const st = state(sessionId, true);
+      st.recording = true;
+      maybeOpen(sessionId, st);
+    },
+
+    // Called about once a second: feeds the stuck detector and runs a turn when the room is stuck.
+    poll(now: number): void {
+      for (const [sessionId, st] of sessions) {
+        if (!st.recording) continue;
+        try {
+          st.detector.onDoc(view(sessionId).doc);
+          const ev = st.detector.poll(now);
+          if (!ev) continue;
+          st.stuck = ev;
+          log("conversation.stuck", { session_id: sessionId, reason: ev.reason });
+          schedule(sessionId, st);
+        } catch (err) {
+          log("conversation.poll_failed", { session_id: sessionId, error: errorName(err) });
+        }
+      }
+    },
+  };
+}
+
+export type ConversationLoop = ReturnType<typeof createConversationLoop>;

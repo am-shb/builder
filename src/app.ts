@@ -16,6 +16,10 @@ import type { SessionRuntime } from "./session/runtime.ts";
 import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
 import { buildHandoffHtml, buildExportHtml } from "./handoff/export.ts";
+import { createBuildLoop } from "./agent/build-loop.ts";
+import { createChatSpeech, createConversationLoop } from "./agent/conversation-loop.ts";
+import type { Speech } from "./agent/conversation-loop.ts";
+import type { ModelPort } from "./agent/llm.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -37,12 +41,21 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime }) {
+// Agent deps are injected (server.ts builds the real ones when OPENROUTER_API_KEY is set); without
+// them the app is listen-only. Speech defaults to meeting chat until voice lands.
+export type AgentDeps = { port: ModelPort; speech?: Speech };
+
+export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
   const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
+  const conversation = deps.agent ? createConversationLoop({
+    port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log,
+    buildLoop: createBuildLoop({ port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log }),
+    speech: deps.agent.speech ?? createChatSpeech({ recall, runtime, store, botName: BOT_NAME }),
+  }) : null;
   const rendererDir = new URL("../public/renderer/", import.meta.url);
   const stageUrl = (s: Session) =>
     `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
@@ -107,6 +120,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
           store.updateBotStatus(s.id, last.code, last.sub_code);
           log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
           publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
+          if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
         }
       } catch (err) {
         log("bot.poll_failed", { session_id: s.id, error: err instanceof RecallApiError ? err.status : "network" });
@@ -134,6 +148,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       latestPartial.set(session.id, { speaker: parsed.speaker, text: parsed.text });
       runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: true, isAgent: false });
       publish(session.id, "partial", { speaker: parsed.speaker, text: parsed.text });
+      conversation?.onPartial(session.id, { speaker: parsed.speaker, text: parsed.text });
       return;
     }
     if (parsed.kind === "utterance") latestPartial.delete(session.id);
@@ -147,6 +162,8 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: false, isAgent: false });
     }
     publish(session.id, "event", stored);
+    if (parsed.kind === "utterance") conversation?.onUtterance(session.id, { id: stored.id, speaker: parsed.speaker, text: parsed.text });
+    else if (parsed.kind === "join" || parsed.kind === "leave") conversation?.onParticipant(session.id, { kind: parsed.kind, name: parsed.speaker });
   }
 
   // ---- HTTP plumbing ----
@@ -348,5 +365,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       });
     },
     pollOnce,
+    // Stuck detection; server.ts calls it about once a second.
+    tickAgent: () => conversation?.poll(Date.now()),
   };
 }

@@ -9,6 +9,7 @@ import { openStore } from "./store.ts";
 import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
 import { createRuntime } from "./session/runtime.ts";
 import { createStageChannel } from "./stage/channel.ts";
+import { createOpenRouterPort } from "./agent/llm.ts";
 import { signForTest } from "./verify.ts";
 
 async function main() {
@@ -30,10 +31,12 @@ async function main() {
     log,
   );
   runtime = createRuntime({ store, channel, log });
-  const app = createApp({ config, recall, store, runtime, log });
+  const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }) } : undefined;
+  const app = createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 
   setInterval(() => void app.pollOnce(), 4000).unref();
+  if (agent) setInterval(() => app.tickAgent(), 1000).unref();
   server.listen(config.port, () => {
     console.log(`Listening on http://localhost:${config.port}`);
     console.log(`Recall realtime endpoint: ${config.publicBaseUrl}${REALTIME_PATH} (region ${config.region})`);
