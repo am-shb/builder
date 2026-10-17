@@ -8,6 +8,16 @@ import type { Store } from "../store.ts";
 import type { Caption, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "./mood.ts";
 import type { Mood, MoodInputs } from "./mood.ts";
+import { initialUiState, reduceInteraction } from "../../public/renderer/interact.js";
+
+/** The stage's interaction state, mirrored here: screen, toggles, open, lists, values (keyed by node id). */
+export type UiState = {
+  screen: string;
+  toggles: Record<string, boolean>;
+  open: Record<string, boolean>;
+  lists: Record<string, string[]>;
+  values: Record<string, string>;
+};
 
 export type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
@@ -36,6 +46,12 @@ export function buildComparisonView(proto: Prototype, conflict: Conflict): Compa
   return variants.length >= 2 ? { conflictId: conflict.id, topic: conflict.topic, variants } : null;
 }
 
+/** Messages the stage sends up its WebSocket. Only `{ type: "ui_screen", screen }` is understood. */
+export function handleStageMessage(runtime: (sessionId: string) => SessionRuntime, sessionId: string, msg: unknown) {
+  const m = msg as { type?: unknown; screen?: unknown } | null;
+  if (m && typeof m === "object" && m.type === "ui_screen" && typeof m.screen === "string") runtime(sessionId).setUiScreen(m.screen);
+}
+
 export function createRuntime(deps: { store: Store; channel: StageSink; clock?: () => number; log?: Log }) {
   const clock = deps.clock ?? Date.now;
   const log: Log = deps.log ?? (() => {});
@@ -58,6 +74,9 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
   let finals: Caption[] = [];
   let partial: Caption | null = null;
   let moodInputs: MoodInputs = { ...NEUTRAL_MOOD_INPUTS };
+  // What the room sees. Starts at the prototype's screen, then follows the stage's own reports
+  // and the commands run here.
+  let uiState: UiState = initialUiState(proto);
   let lastMood: Mood = deriveMood(moodInputs, clock());
 
   // Re-derive against the clock, push only on change, and wake up at the next
@@ -84,7 +103,7 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
   return {
     snapshot(): StageEvent {
       return {
-        type: "snapshot", proto, uiScreen: proto.currentScreen, doc,
+        type: "snapshot", proto, uiScreen: uiState.screen, doc,
         captions: partial ? [...finals, partial] : [...finals],
         mood: deriveMood(moodInputs, clock()), comparison,
       };
@@ -127,7 +146,18 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
       send({ type: "pending_region", parentId });
     },
 
+    uiState(): UiState {
+      return uiState;
+    },
+
+    // The screen the stage reports it is showing. Unknown screens are ignored.
+    setUiScreen(screen: string) {
+      if (findNode(proto, screen)?.type !== "Screen" || screen === uiState.screen) return;
+      uiState = { ...uiState, screen };
+    },
+
     command(nodeId: string, interaction: Interaction) {
+      uiState = reduceInteraction(uiState, interaction, proto);
       send({ type: "command", nodeId, interaction });
     },
 

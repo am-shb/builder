@@ -204,6 +204,13 @@ let ui = null;
 let nodes = new Map();
 let built = false;
 
+// The server resolves voice commands against the screen shown here, so it is told whenever it changes.
+let reportedScreen = null;
+function reportScreen(force) {
+  if (!ui || (!force && ui.screen === reportedScreen)) return;
+  if (window.stage?.send({ type: "ui_screen", screen: ui.screen })) reportedScreen = ui.screen;
+}
+
 // `changes` animates the redraw: a patch's changes, or [] for a local interaction.
 function draw(changes) {
   if (!proto) return;
@@ -215,6 +222,7 @@ function draw(changes) {
   built = screens.some((sc) => sc.children.length);
   document.getElementById("placeholder").hidden = built;
   placeCharacter();
+  reportScreen(false);
 }
 
 // ---------- comparison: options side by side across the whole frame ----------
@@ -461,6 +469,7 @@ function onEvent(ev) {
       if (first) ui = { ...initialUiState(proto), screen: ev.uiScreen ?? proto.currentScreen };
       else if (ui && ui.screen !== proto.currentScreen) ui = { ...ui, screen: proto.currentScreen };
       draw();
+      reportScreen(true); // every (re)connect starts with a snapshot
       if (ev.doc) renderDoc(ev.doc);
       if (ev.mood) character.setMood(ev.mood);
       presentComparison(ev.comparison ?? null);

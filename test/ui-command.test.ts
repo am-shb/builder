@@ -1,0 +1,166 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { openStore } from "../src/store.ts";
+import { createRuntime, handleStageMessage } from "../src/session/runtime.ts";
+import { resolveCommand, createUiCommandRunner } from "../src/agent/ui-command.ts";
+import { emptyDoc } from "../src/consensus/doc.ts";
+import { initialUiState } from "../public/renderer/interact.js";
+import type { Prototype } from "../src/ui/schema.ts";
+import type { StageEvent } from "../src/stage/channel.ts";
+import { withStage } from "./helpers/stage.ts";
+
+const todo = (): Prototype => JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
+
+// Two screens: home (Add button, a list titled "Add", a Settings button) and settings (a dark mode switch).
+function twoScreens(): Prototype {
+  const p = todo();
+  p.root.children[0].children.push({ id: "home.addlist", type: "List", props: { title: "Add" }, status: "draft", children: [] });
+  p.root.children[0].children.push({
+    id: "home.settings", type: "Button", props: { label: "Settings" }, status: "draft",
+    on: { click: [{ kind: "navigate", screen: "settings" }] }, children: [],
+  });
+  p.root.children.push({
+    id: "settings", type: "Screen", props: { title: "Settings" }, status: "draft", children: [
+      { id: "settings.dark", type: "Toggle", props: { label: "Dark mode" }, status: "draft", children: [] },
+      { id: "settings.back", type: "Button", props: { label: "Back" }, status: "draft", on: { click: [{ kind: "navigate", screen: "home" }] }, children: [] },
+    ],
+  });
+  return p;
+}
+const without = (p: Prototype, id: string): Prototype => {
+  const q = structuredClone(p);
+  q.root.children[0].children = q.root.children[0].children.filter((c) => c.id !== id);
+  return q;
+};
+
+test("click by label on current screen", () => {
+  const p = without(twoScreens(), "home.addlist");
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "add" });
+  assert.deepEqual(r, { ok: true, nodeId: "home.add", interaction: { kind: "append", list: "home.list", fromInput: "home.input" } });
+});
+
+test("ambiguous 'Add' with Add button and Add list -> candidates", () => {
+  const p = twoScreens();
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "Add" });
+  assert.ok(!r.ok && r.reason === "ambiguous");
+  assert.equal(r.candidates.length, 2);
+  assert.ok(r.candidates.some((c) => c.includes("Button")) && r.candidates.some((c) => c.includes("List")));
+});
+
+test("exact match beats contains; contains and word matches resolve; unknown is not_found", () => {
+  const p = without(twoScreens(), "home.addlist");
+  p.root.children[0].children.push({ id: "home.addall", type: "Button", props: { label: "Add all" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] });
+  const ui = initialUiState(p);
+  assert.equal((resolveCommand(p, ui, { action: "click", target: "Add" }) as any).nodeId, "home.add");
+  assert.equal((resolveCommand(p, ui, { action: "click", target: "add all" }) as any).nodeId, "home.addall");
+  assert.equal((resolveCommand(p, ui, { action: "type", target: "the task box", value: "x" }) as any).nodeId, "home.input");
+  assert.deepEqual(resolveCommand(p, ui, { action: "click", target: "Delete" }), { ok: false, reason: "not_found" });
+  // a label on another screen is not on the current screen
+  assert.deepEqual(resolveCommand(p, ui, { action: "toggle", target: "dark mode" }), { ok: false, reason: "not_found" });
+});
+
+test("navigate, back, toggle, type and focus_option map to interactions", () => {
+  const p = twoScreens();
+  const ui = initialUiState(p);
+  assert.deepEqual(resolveCommand(p, ui, { action: "navigate", target: "settings" }), {
+    ok: true, nodeId: "home.settings", interaction: { kind: "navigate", screen: "settings" },
+  });
+  const onSettings = { ...ui, screen: "settings" };
+  assert.deepEqual(resolveCommand(p, onSettings, { action: "toggle", target: "dark mode" }), {
+    ok: true, nodeId: "settings.dark", interaction: { kind: "toggle", target: "settings.dark" },
+  });
+  assert.deepEqual(resolveCommand(p, onSettings, { action: "back", target: "" }), {
+    ok: true, nodeId: "settings.back", interaction: { kind: "navigate", screen: "home" },
+  });
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "add a task", value: "buy milk" }), {
+    ok: true, nodeId: "home.input", interaction: { kind: "setValue", target: "home.input", value: "buy milk" },
+  });
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "add a task" }), { ok: false, reason: "not_found" });
+  const view = { conflictId: "c1", topic: "t", variants: [{ label: "A" }, { label: "B" }] } as any;
+  assert.equal(resolveCommand(p, ui, { action: "focus_option", target: "option b" }, view).ok, true);
+  assert.deepEqual(resolveCommand(p, ui, { action: "focus_option", target: "C" }, view), { ok: false, reason: "not_found" });
+  assert.deepEqual(resolveCommand(p, ui, { action: "focus_option", target: "A" }, null), { ok: false, reason: "not_found" });
+});
+
+function setup() {
+  const store = openStore(":memory:");
+  const id = randomUUID();
+  store.createIntent(id, "https://meet.google.com/abc-defg-hij");
+  store.saveConsensus(id, emptyDoc(), twoScreens());
+  let t = 1_700_000_000_000;
+  const sent: StageEvent[] = [];
+  const runtime = createRuntime({ store, clock: () => t, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } });
+  const run = createUiCommandRunner({ runtime, clock: () => t });
+  const snap = () => runtime(id).snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  return { id, runtime, run, sent, snap, advance: (ms: number) => { t += ms; } };
+}
+
+test("command resolves against the screen the stage reports, not proto.currentScreen", () => {
+  const { id, runtime, run, sent, snap } = setup();
+  assert.equal(snap().proto.currentScreen, "home");
+  handleStageMessage(runtime, id, { type: "ui_screen", screen: "settings" });
+  assert.equal(snap().uiScreen, "settings");
+  assert.deepEqual(run(id, { action: "toggle", target: "dark mode" }), { ok: true, visible: true });
+  assert.deepEqual(sent.filter((e) => e.type === "command"), [{ type: "command", nodeId: "settings.dark", interaction: { kind: "toggle", target: "settings.dark" } }]);
+  // "Add" exists only on the proto's own current screen
+  assert.deepEqual(run(id, { action: "click", target: "Add" }), { ok: false, reason: "not_found" });
+});
+
+test("stage messages that are not a ui_screen for a known screen are ignored", () => {
+  const { id, runtime, snap } = setup();
+  handleStageMessage(runtime, id, { type: "ui_screen", screen: "nope" });
+  handleStageMessage(runtime, id, { type: "ui_screen", screen: 5 });
+  handleStageMessage(runtime, id, "junk");
+  assert.equal(snap().uiScreen, "home");
+});
+
+test("ambiguous and not_found make Builder look unsure for 3 s; success does not", () => {
+  const { id, run, snap, advance } = setup();
+  assert.equal(run(id, { action: "click", target: "Add" }).ok, false);
+  assert.equal(snap().mood, "unsure");
+  advance(3001);
+  assert.equal(snap().mood, "listening");
+  assert.equal(run(id, { action: "click", target: "Delete" }).ok, false);
+  assert.equal(snap().mood, "unsure");
+  advance(3001);
+  assert.deepEqual(run(id, { action: "click", target: "Settings" }), { ok: true, visible: true });
+  assert.equal(snap().mood, "listening");
+});
+
+test("navigate updates server uiState screen and stage receives command", async (t) => {
+  await withStage(t, async ({ page, runtime, sessionId, script }) => {
+    const p = twoScreens();
+    await script([{ batch: { label: "Build", ops: [
+      { op: "add", parentId: "app", node: p.root.children[1] },
+      ...p.root.children[0].children.map((node) => ({ op: "add", parentId: "home", node })),
+    ] } }]);
+    await page.waitFor(`!!document.querySelector('[data-node-id="home.settings"]')`);
+    const run = createUiCommandRunner({ runtime, clock: Date.now });
+    assert.deepEqual(run(sessionId, { action: "navigate", target: "Settings" }), { ok: true, visible: true });
+    assert.equal(runtime(sessionId).uiState().screen, "settings");
+    await page.waitFor(`!!document.querySelector('[data-node-id="settings.dark"]')`);
+    // the stage reports its own screen back when a click in the room changes it
+    await page.eval(`document.querySelector('[data-node-id="settings.back"]').click()`);
+    const deadline = Date.now() + 3000;
+    while (runtime(sessionId).uiState().screen !== "home" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(runtime(sessionId).uiState().screen, "home");
+  });
+});
+
+test("type sets value then click Add appends", async (t) => {
+  await withStage(t, async ({ page, runtime, sessionId, script }) => {
+    const p = without(twoScreens(), "home.addlist");
+    await script([{ batch: { label: "Build", ops: p.root.children[0].children.map((node) => ({ op: "add", parentId: "home", node })) } }]);
+    await page.waitFor(`!!document.querySelector('[data-node-id="home.add"]')`);
+    const run = createUiCommandRunner({ runtime, clock: Date.now });
+    assert.deepEqual(run(sessionId, { action: "type", target: "task box", value: "buy milk" }), { ok: true, visible: true });
+    await page.waitFor(`document.querySelector('[data-node-id="home.input"]').value === "buy milk" || document.querySelector('[data-node-id="home.input"] input')?.value === "buy milk"`);
+    assert.deepEqual(run(sessionId, { action: "click", target: "Add" }), { ok: true, visible: true });
+    await page.waitFor(`document.querySelector('[data-node-id="home.list"]')?.textContent.includes("buy milk")`);
+    const st = runtime(sessionId).uiState();
+    assert.deepEqual(st.lists["home.list"], ["buy milk"]);
+    assert.equal(st.values["home.input"], "");
+  });
+});

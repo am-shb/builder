@@ -17,6 +17,7 @@ import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
 import { buildHandoffHtml, buildExportHtml } from "./handoff/export.ts";
 import { createBuildLoop } from "./agent/build-loop.ts";
+import { createUiCommandRunner } from "./agent/ui-command.ts";
 import { createChatSpeech, createConversationLoop } from "./agent/conversation-loop.ts";
 import type { Speech } from "./agent/conversation-loop.ts";
 import type { ModelPort } from "./agent/llm.ts";
@@ -54,6 +55,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   const conversation = deps.agent ? createConversationLoop({
     port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log,
     buildLoop: createBuildLoop({ port: deps.agent.port, runtime, store, clock: Date.now, botName: BOT_NAME, log }),
+    uiCommand: createUiCommandRunner({ runtime, clock: Date.now }),
     speech: deps.agent.speech ?? createChatSpeech({ recall, runtime, store, botName: BOT_NAME }),
   }) : null;
   const rendererDir = new URL("../public/renderer/", import.meta.url);

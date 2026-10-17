@@ -8,10 +8,10 @@ import { loadConfig } from "../../src/config.ts";
 import { createRecallClient } from "../../src/recall-client.ts";
 import { openStore } from "../../src/store.ts";
 import { createApp, tokenMatches } from "../../src/app.ts";
-import { createRuntime } from "../../src/session/runtime.ts";
+import { createRuntime, handleStageMessage } from "../../src/session/runtime.ts";
 import { createStageChannel } from "../../src/stage/channel.ts";
 
-export type Stage = { page: Page; script(steps: unknown[]): Promise<void> };
+export type Stage = { page: Page; script(steps: unknown[]): Promise<void>; runtime: ReturnType<typeof createRuntime>; sessionId: string };
 
 export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) => Promise<void>) {
   await withChrome(t, async (page) => {
@@ -27,7 +27,7 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
     const channel = createStageChannel(
       server,
       (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
-      () => {},
+      (id, msg) => handleStageMessage(runtime, id, msg),
       (id) => runtime(id).snapshot(),
     );
     runtime = createRuntime({ store, channel, log: () => {} });
@@ -48,7 +48,7 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
         const body = (await r.json()) as any;
         for (const res of body.results ?? []) assert.equal(res.ok, true, `script step ${res.index}: ${res.error}`);
       };
-      await fn({ page, script });
+      await fn({ page, script, runtime, sessionId: session.id });
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     } finally {
       server.closeAllConnections();

@@ -217,7 +217,7 @@ export function createConversationLoop(deps: {
   const { runtime, buildLoop, speech, store, clock } = deps;
   const botName = deps.botName ?? "Builder";
   const log: Log = deps.log ?? (() => {});
-  // Task 12 resolves commands against the screen; until then every command is reported as unsupported.
+  // Without a runner (tests, listen-only wiring) every command is reported as unsupported.
   const uiCommand = deps.uiCommand ?? (() => ({ ok: false, reason: "unsupported" }) as CommandOutcome);
   const sessions = new Map<string, SessionState>();
 

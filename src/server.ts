@@ -7,7 +7,7 @@ import { loadConfig } from "./config.ts";
 import { createRecallClient } from "./recall-client.ts";
 import { openStore } from "./store.ts";
 import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
-import { createRuntime } from "./session/runtime.ts";
+import { createRuntime, handleStageMessage } from "./session/runtime.ts";
 import { createStageChannel } from "./stage/channel.ts";
 import { createOpenRouterPort } from "./agent/llm.ts";
 import { signForTest } from "./verify.ts";
@@ -26,7 +26,7 @@ async function main() {
   const channel = createStageChannel(
     server,
     (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
-    () => {},
+    (id, msg) => handleStageMessage(runtime, id, msg),
     (id) => runtime(id).snapshot(),
     log,
   );
