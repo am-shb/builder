@@ -241,6 +241,18 @@ test("onToolCall never receives invalid or unknown tool calls", async () => {
   assert.equal(logs.filter((m) => m === "llm_tool_dropped").length, 2);
 });
 
+test("an error thrown by onToolCall rejects runTools with that same error", async () => {
+  const ev = twoBlockEvents({ name: "emit", json: '{"n":1}' }, { name: "emit", json: '{"n":2}' });
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: (async () => sse([...ev.head, ...ev.second, ...ev.tail])) as typeof fetch, log: () => {} });
+  const boom = new Error("boom");
+  let calls = 0;
+  await assert.rejects(
+    port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium", onToolCall: () => { calls++; throw boom; } }),
+    (e) => e === boom,
+  );
+  assert.equal(calls, 1);
+});
+
 test("fake port reports scripted calls through onToolCall before resolving", async () => {
   const a = { name: "a", input: { x: 1 } };
   const b = { name: "b", input: {} };

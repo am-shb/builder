@@ -102,6 +102,9 @@ export function createOpenRouterPort(
       let stopReason: string | null = null;
       let messageId: string | null = null;
       let started = false;
+      // The SDK wraps an error thrown inside the stream listener and the catch below would take it
+      // for a truncated stream, so keep the first one and rethrow it once the stream is done.
+      let callbackError: { err: unknown } | null = null;
       // Validates and logs one block, once; the outcome is kept on the block.
       const settle = (block: Block): Outcome => {
         if (block.outcome) return block.outcome;
@@ -155,7 +158,9 @@ export function createOpenRouterPort(
             if (b) {
               b.closed = true;
               const outcome = settle(b);
-              if (outcome.ok) req.onToolCall?.(outcome.call);
+              if (outcome.ok && !callbackError) {
+                try { req.onToolCall?.(outcome.call); } catch (err) { callbackError = { err }; }
+              }
             }
           }
         });
@@ -167,6 +172,8 @@ export function createOpenRouterPort(
         if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
         log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
       }
+
+      if (callbackError) throw (callbackError as { err: unknown }).err;
 
       const toolCalls: ToolCall[] = [];
       let dropped = 0;
