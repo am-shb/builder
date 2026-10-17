@@ -139,7 +139,8 @@ async function tick() {
     if (r.ok) {
       const s = await r.json();
       renderStage(s.html);
-      renderCaptions(s.captions || [], s.partial);
+      const caps = s.captions || [];
+      renderCaptions(caps.filter((c) => !c.partial), caps.find((c) => c.partial));
     }
   } catch {}
   setTimeout(tick, 1000);

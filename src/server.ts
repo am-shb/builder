@@ -6,7 +6,9 @@ import { existsSync } from "node:fs";
 import { loadConfig } from "./config.ts";
 import { createRecallClient } from "./recall-client.ts";
 import { openStore } from "./store.ts";
-import { createApp, REALTIME_PATH } from "./app.ts";
+import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
+import { createRuntime } from "./session/runtime.ts";
+import { createStageChannel } from "./stage/channel.ts";
 import { signForTest } from "./verify.ts";
 
 async function main() {
@@ -16,10 +18,21 @@ async function main() {
   const config = loadConfig(process.env);
   const store = openStore(config.dbPath);
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey });
-  const app = createApp({ config, recall, store });
+  const server = http.createServer();
+  let runtime!: ReturnType<typeof createRuntime>;
+  const channel = createStageChannel(
+    server,
+    (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
+    () => {},
+    (id) => runtime(id).snapshot(),
+  );
+  const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
+  runtime = createRuntime({ store, channel, log });
+  const app = createApp({ config, recall, store, runtime, log });
+  server.on("request", app.handler);
 
   setInterval(() => void app.pollOnce(), 4000).unref();
-  http.createServer(app.handler).listen(config.port, () => {
+  server.listen(config.port, () => {
     console.log(`Listening on http://localhost:${config.port}`);
     console.log(`Recall realtime endpoint: ${config.publicBaseUrl}${REALTIME_PATH} (region ${config.region})`);
   });

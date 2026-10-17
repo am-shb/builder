@@ -1,0 +1,31 @@
+{
+  "steps": [
+    { "caption": { "speaker": "Ada", "text": "Let's build a team to-do app.", "partial": false, "isAgent": false } },
+    { "wait": 50, "mood": "thinking" },
+    { "wait": 50, "batch": { "label": "Heading and input", "by": "Builder", "ops": [
+      { "op": "add", "parentId": "home", "node": { "id": "home.heading", "type": "Heading", "props": { "text": "Team To-Do" }, "status": "draft", "children": [] } },
+      { "op": "add", "parentId": "home", "node": { "id": "home.input", "type": "Input", "props": { "placeholder": "Add a task" }, "status": "draft", "children": [] } }
+    ] } },
+    { "wait": 50, "doc": {
+      "phase": "converge", "app": { "name": "Team To-Do" }, "decisions": [], "openQuestions": [], "nextUp": [],
+      "conflicts": [ { "id": "c1", "topic": "Where do tasks go?", "status": "open", "openedAt": 1, "variants": [
+        { "label": "A", "summary": "Tasks in a list below the input", "backers": ["Ada"], "batch": { "label": "List", "ops": [
+          { "op": "add", "parentId": "home", "node": { "id": "home.list", "type": "List", "props": {}, "status": "draft", "children": [] } } ] } },
+        { "label": "B", "summary": "Tasks in a table", "backers": ["Bo"], "batch": { "label": "Table", "ops": [
+          { "op": "add", "parentId": "home", "node": { "id": "home.table", "type": "Table", "props": {}, "status": "draft", "children": [] } } ] } }
+      ] } ]
+    } },
+    { "wait": 50, "comparison": { "conflictId": "c1", "topic": "Where do tasks go?", "variants": [
+      { "label": "A", "summary": "Tasks in a list below the input", "backers": ["Ada"], "focusIds": ["home.list"],
+        "proto": { "currentScreen": "home", "root": { "id": "app", "type": "App", "props": { "title": "Team To-Do" }, "status": "draft", "children": [
+          { "id": "home", "type": "Screen", "props": { "title": "Home" }, "status": "draft", "children": [
+            { "id": "home.list", "type": "List", "props": {}, "status": "draft", "children": [] } ] } ] } } },
+      { "label": "B", "summary": "Tasks in a table", "backers": ["Bo"], "focusIds": ["home.table"],
+        "proto": { "currentScreen": "home", "root": { "id": "app", "type": "App", "props": { "title": "Team To-Do" }, "status": "draft", "children": [
+          { "id": "home", "type": "Screen", "props": { "title": "Home" }, "status": "draft", "children": [
+            { "id": "home.table", "type": "Table", "props": {}, "status": "draft", "children": [] } ] } ] } } }
+    ] } },
+    { "wait": 50, "resolve": { "conflictId": "c1", "winner": "A" } },
+    { "wait": 50, "mood": "pleased" }
+  ]
+}

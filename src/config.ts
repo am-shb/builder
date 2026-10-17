@@ -8,7 +8,7 @@ export type Config = {
   publicBaseUrl: string;
   port: number;
   dbPath: string;
-  // Optional larger bot for smoother Output Media (costs more per hour).
+  // Larger bot for smoother Output Media (costs more per hour); null = plain web bot.
   botVariant: "web_4_core" | "web_gpu" | null;
 };
 
@@ -41,10 +41,12 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new Error("PUBLIC_API_BASE_URL must be publicly reachable, not localhost/private");
   }
 
-  const botVariant = env.BOT_VARIANT?.trim() || null;
-  if (botVariant && botVariant !== "web_4_core" && botVariant !== "web_gpu") {
-    throw new Error("BOT_VARIANT must be web_4_core, web_gpu, or empty");
+  // Default is the 4-core bot; BOT_VARIANT=web opts into Recall's plain web bot.
+  const rawVariant = env.BOT_VARIANT?.trim() || "web_4_core";
+  if (rawVariant !== "web_4_core" && rawVariant !== "web_gpu" && rawVariant !== "web") {
+    throw new Error("BOT_VARIANT must be web_4_core, web_gpu, web, or empty");
   }
+  const botVariant = rawVariant === "web" ? null : rawVariant;
 
   return {
     region,
@@ -53,6 +55,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     publicBaseUrl,
     port: Number(env.PORT ?? 3000),
     dbPath: env.DB_PATH ?? "data/app.db",
-    botVariant: botVariant as Config["botVariant"],
+    botVariant,
   };
 }

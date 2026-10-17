@@ -11,9 +11,13 @@ import type { Store, Session } from "./store.ts";
 import { isTerminal } from "./store.ts";
 import { verifyRequestFromRecall } from "./verify.ts";
 import { parseRealtimeEvent } from "./realtime.ts";
+import { createRuntime } from "./session/runtime.ts";
+import type { SessionRuntime } from "./session/runtime.ts";
+import { runScript, Script } from "./session/script.ts";
+import { noopStageSink } from "./stage/channel.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
-const BOT_NAME = "Meet2Build Agent";
+const BOT_NAME = "Builder";
 const MAX_BODY = 1_000_000;
 const MEETING_HOSTS = /^(meet\.google\.com|([a-z0-9-]+\.)?zoom\.us|teams\.microsoft\.com|teams\.live\.com)$/i;
 
@@ -26,17 +30,19 @@ type Log = (msg: string, fields?: Record<string, unknown>) => void;
 const viaProxy = (req: http.IncomingMessage) =>
   Boolean(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.headers["x-forwarded-host"]);
 
-const tokenMatches = (given: string | null, expected: string | null) => {
+export const tokenMatches = (given: string | null, expected: string | null) => {
   if (!given || !expected) return false;
   const a = Buffer.from(given), b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string }) {
+export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
+  const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
+  const rendererDir = new URL("../public/renderer/", import.meta.url);
   const stageUrl = (s: Session) =>
     `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
 
@@ -123,6 +129,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     }
     if (parsed.kind === "partial") {
       latestPartial.set(session.id, { speaker: parsed.speaker, text: parsed.text });
+      runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: true, isAgent: false });
       publish(session.id, "partial", { speaker: parsed.speaker, text: parsed.text });
       return;
     }
@@ -133,6 +140,9 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return;
     }
     log("realtime.processed", { session_id: session.id, kind: parsed.kind });
+    if (parsed.kind === "utterance") {
+      runtime(session.id).caption({ speaker: parsed.speaker ?? "Unknown", text: parsed.text ?? "", partial: false, isAgent: false });
+    }
     publish(session.id, "event", stored);
   }
 
@@ -146,6 +156,13 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       chunks.push(chunk);
     }
     return Buffer.concat(chunks).toString("utf8");
+  }
+  async function readJson(req: http.IncomingMessage): Promise<unknown> {
+    try {
+      return JSON.parse(await readBody(req));
+    } catch {
+      return null;
+    }
   }
   function json(res: http.ServerResponse, status: number, body: unknown) {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -179,14 +196,23 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       if (stage[2] === "/stream") return openStream(req, res, s);
       // The stage polls this: quick-tunnel proxies buffer text/event-stream.
       if (stage[2] === "/state") {
-        return json(res, 200, {
-          html: s.stage_html,
-          captions: store.recentUtterances(s.id, 3),
-          partial: latestPartial.get(s.id) ?? null,
-        });
+        return json(res, 200, { ...runtime(s.id).snapshot(), html: s.stage_html });
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(stageHtml);
+    }
+
+    // Static renderer assets: public, no secrets.
+    const asset = path.match(/^\/renderer\/([A-Za-z0-9._-]+\.(js|css))$/);
+    if (req.method === "GET" && asset) {
+      let body: Buffer;
+      try {
+        body = readFileSync(new URL(asset[1], rendererDir));
+      } catch {
+        return json(res, 404, { error: "not found" });
+      }
+      res.writeHead(200, { "Content-Type": asset[2] === "js" ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8", "Cache-Control": "no-cache" });
+      return res.end(body);
     }
 
     if (req.method === "POST" && (path === REALTIME_PATH || path === REALTIME_PATH.slice(0, -1))) {
@@ -229,7 +255,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return json(res, result.status, result.body);
     }
 
-    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/chat|\/leave|\/screenshare|\/stage)?$/);
+    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/chat|\/leave|\/screenshare|\/stage|\/script)?$/);
     if (m) {
       const session = store.getSession(m[1]);
       if (!session) return json(res, 404, { error: "not found" });
@@ -247,6 +273,15 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
         publish(session.id, "stage", { html });
         log("stage.updated", { session_id: session.id, bytes: html.length });
         return json(res, 200, { ok: true });
+      }
+
+      // Visual-QA script driver (local only: this block is behind the viaProxy gate).
+      if (req.method === "POST" && sub === "/script") {
+        const parsed = Script.safeParse(await readJson(req));
+        if (!parsed.success) return json(res, 400, { error: "invalid script" });
+        const results = await runScript(runtime(session.id), parsed.data);
+        log("script.ran", { session_id: session.id, steps: results.length, failed: results.filter((r) => !r.ok).length });
+        return json(res, 200, { results });
       }
 
       if (sub === "/screenshare" && (req.method === "POST" || req.method === "DELETE")) {

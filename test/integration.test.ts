@@ -289,15 +289,15 @@ test("stage state carries rolling captions and the in-progress partial (stage po
   await new Promise((r) => setTimeout(r, 30));
 
   const state = (await (await fetch(`${ctx.base}/stage/${session.id}/state?token=${token}`)).json()) as any;
-  assert.deepEqual(state.captions.map((c: any) => c.text), ["line9", "line10", "line11"], "latest finalized utterances");
-  assert.deepEqual(state.partial, { speaker: "Ada", text: "typing now" });
+  assert.deepEqual(state.captions.filter((c: any) => !c.partial).map((c: any) => c.text), ["line9", "line10", "line11"], "latest finalized utterances");
+  assert.deepEqual(state.captions.filter((c: any) => c.partial).map((c: any) => [c.speaker, c.text]), [["Ada", "typing now"]]);
 
   // A finalized utterance clears the stale partial.
   const fin = transcriptPayload(session.id, "bot-6", ["typing", "now", "done"]);
   await post(`${ctx.base}${REALTIME_PATH}`, fin, signForTest(SECRET, fin, "u-fin"));
   await new Promise((r) => setTimeout(r, 30));
   const after = (await (await fetch(`${ctx.base}/stage/${session.id}/state?token=${token}`)).json()) as any;
-  assert.equal(after.partial, null);
+  assert.equal(after.captions.some((c: any) => c.partial), false);
   assert.equal(after.captions.at(-1).text, "typing now done");
   await ctx.close();
 });
@@ -308,15 +308,16 @@ test("stage page hides the placeholder for real and does not depend on SSE", () 
   assert.doesNotMatch(html, /new EventSource\(/, "Cloudflare quick tunnels buffer text/event-stream; stage must poll");
 });
 
-test("BOT_VARIANT opts new bots into a larger instance; default sends no variant", async () => {
+test("BOT_VARIANT defaults to web_4_core; BOT_VARIANT=web means no variant", async () => {
   assert.throws(() => loadConfig({ ...ENV, BOT_VARIANT: "huge" }), /BOT_VARIANT/);
-  assert.equal(loadConfig(ENV).botVariant, null);
+  assert.equal(loadConfig(ENV).botVariant, "web_4_core");
+  assert.equal(loadConfig({ ...ENV, BOT_VARIANT: "web" }).botVariant, null);
   const bodies: any[] = [];
   const fake = (async (_u: string, init: RequestInit) => { bodies.push(JSON.parse(init.body as string)); return Response.json({ id: "b" }); }) as any;
   const recall = createRecallClient({ region: "us-west-2", apiKey: "k", fetch: fake });
   const base = { meetingUrl: "https://meet.google.com/x", botName: "A", realtimeWebhookUrl: "https://a/", metadata: {} };
   await recall.createBot(base);
-  await recall.createBot({ ...base, variant: loadConfig({ ...ENV, BOT_VARIANT: "web_4_core" }).botVariant });
+  await recall.createBot({ ...base, variant: loadConfig(ENV).botVariant });
   assert.equal(bodies[0].variant, undefined);
   assert.equal(bodies[1].variant.google_meet, "web_4_core");
 });
