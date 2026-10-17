@@ -52,6 +52,8 @@ export async function withChrome(t: TestCtx, fn: (page: Page) => Promise<void>, 
   const dir = mkdtempSync(path.join(tmpdir(), "chrome-test-"));
   const proc: ChildProcess = spawn(bin, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+    // The bot's browser plays page audio without a gesture; so does this one.
+    "--autoplay-policy=no-user-gesture-required",
     `--user-data-dir=${dir}`, `--window-size=${width},${height}`, `--remote-debugging-port=${port}`, "about:blank",
   ], { stdio: "ignore" });
   let ws: WebSocket | undefined;

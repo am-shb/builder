@@ -195,6 +195,7 @@ import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
 import { showComparison, resolveComparison } from "@renderer/comparison.js";
+import { createAudioPlayer } from "@renderer/audio.js";
 
 const EASE = "ease-out";
 const protoEl = document.getElementById("proto");
@@ -301,6 +302,15 @@ onFrame((now) => {
 });
 
 let commands = Promise.resolve(); // voice commands run in order, each after its pointer cue
+
+// ---------- Builder's voice: streamed PCM, played here; its loudness drives the mouth ----------
+const voice = createAudioPlayer();
+let voiceId = null; // the utterance playing; audio for any other is dropped (e.g. after a stop)
+function onAudio(utteranceId, pcm) {
+  if (utteranceId === voiceId) voice.push(pcm);
+}
+// From a line's start until it is stopped (or the next one starts), the mouth follows the voice.
+onFrame(() => { if (voiceId !== null) character.setMouth(voice.level()); });
 
 // ---------- right panel: phase, Agreed / Pending / Open questions ----------
 const PENDING_MS = 30_000; // NO_OBJECTION_MS (src/consensus/doc.ts): a pending item auto-agrees then
@@ -514,8 +524,19 @@ function onEvent(ev) {
       if (done) uncover(done);
       break;
     }
+    case "speech_start":
+      voiceId = ev.utteranceId;
+      break;
+    case "speech_end":
+      if (ev.utteranceId === voiceId) voice.end();
+      break;
+    case "speech_stop":
+      voiceId = null;
+      voice.stop();
+      character.setMouth(0);
+      break;
     default:
-      break; // speech: a later task
+      break;
   }
 }
 
@@ -525,8 +546,9 @@ startClock();
 window.stageEvent = onEvent; // test hooks
 window.stageProto = () => proto;
 window.stageCharacter = character;
+window.stageVoice = voice;
 const token = new URLSearchParams(location.search).get("token") ?? "";
-window.stage = connectStage({ sessionPath: location.pathname, token, onEvent });
+window.stage = connectStage({ sessionPath: location.pathname, token, onEvent, onAudio });
 </script>
 </body>
 </html>

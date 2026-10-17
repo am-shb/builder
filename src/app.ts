@@ -43,7 +43,8 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
 };
 
 // Agent deps are injected (server.ts builds the real ones when OPENROUTER_API_KEY is set); without
-// them the app is listen-only. Speech defaults to meeting chat until voice lands.
+// them the app is listen-only. Speech is Builder's voice (src/voice/speech.ts) when server.ts has a
+// TTS voice configured, and meeting chat otherwise.
 export type AgentDeps = { port: ModelPort; speech?: Speech };
 
 export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {

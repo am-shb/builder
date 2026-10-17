@@ -10,6 +10,8 @@ import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
 import { createRuntime, handleStageMessage } from "./session/runtime.ts";
 import { createStageChannel } from "./stage/channel.ts";
 import { createOpenRouterPort } from "./agent/llm.ts";
+import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tts.ts";
+import { createSpeech } from "./voice/speech.ts";
 import { signForTest } from "./verify.ts";
 
 async function main() {
@@ -31,7 +33,17 @@ async function main() {
     log,
   );
   runtime = createRuntime({ store, channel, log });
-  const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }) } : undefined;
+  // Builder speaks through the stage when a voice is configured; otherwise its lines go to meeting chat.
+  if (config.agentEnabled && !config.ttsVoice) console.warn("TTS_VOICE is not set: Builder's lines go to meeting chat instead of voice.");
+  const agent = config.agentEnabled ? {
+    port: createOpenRouterPort(config, { log }),
+    ...(config.ttsVoice ? {
+      speech: createSpeech({
+        tts: createOpenRouterTts({ apiKey: config.openrouterApiKey!, voice: config.ttsVoice, model: OPENROUTER_TTS_MODEL }),
+        runtime, recall, store, channel, log,
+      }),
+    } : {}),
+  } : undefined;
   const app = createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 

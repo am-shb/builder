@@ -102,6 +102,7 @@ export function createStageChannel(
 
   return {
     send: (sessionId, ev) => broadcast(sessionId, JSON.stringify(ev)),
+    // Frame: [36-byte utteranceId, ascii][pcm16le mono at PCM_SAMPLE_RATE (src/voice/tts.ts), whole samples].
     sendAudio(sessionId, utteranceId, pcm) {
       if (!/^[\x20-\x7e]{36}$/.test(utteranceId)) throw new Error("utteranceId must be 36 ascii characters");
       broadcast(sessionId, Buffer.concat([Buffer.from(utteranceId, "ascii"), pcm]));

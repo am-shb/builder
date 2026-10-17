@@ -13,7 +13,8 @@ export type Config = {
   // OpenRouter key for all model access (LLM + TTS). Absent = listen-only.
   openrouterApiKey: string | null;
   agentEnabled: boolean;
-  // ElevenLabs voice id from the elevenlabs/eleven-v4-turbo model page.
+  // ElevenLabs voice for elevenlabs/eleven-v4-turbo, e.g. "george" (test/fixtures/openrouter-tts.md).
+  // Absent = Builder's lines go to meeting chat.
   ttsVoice: string | null;
 };
 

@@ -55,7 +55,11 @@ export type CommandOutcome =
   | { ok: true; visible: boolean }
   | { ok: false; reason: "ambiguous" | "not_found" | "unsupported"; candidates?: string[] };
 
-/** How Builder's lines reach the room. Chat for now; Task 13 swaps in TTS behind the same type. */
+/**
+ * How Builder's lines reach the room: its voice (createSpeech in src/voice/speech.ts) or meeting chat
+ * (createChatSpeech). `say` resolves to the utterance id once the line is out; `speaking` stays true
+ * while the stage is still playing it.
+ */
 export type Speech = {
   say(sessionId: string, text: string): Promise<string>;
   stop(sessionId: string): void;

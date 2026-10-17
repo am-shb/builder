@@ -10,8 +10,13 @@ import { openStore } from "../../src/store.ts";
 import { createApp, tokenMatches } from "../../src/app.ts";
 import { createRuntime, handleStageMessage } from "../../src/session/runtime.ts";
 import { createStageChannel } from "../../src/stage/channel.ts";
+import type { StageSink } from "../../src/stage/channel.ts";
+import type { Store } from "../../src/store.ts";
 
-export type Stage = { page: Page; script(steps: unknown[]): Promise<void>; runtime: ReturnType<typeof createRuntime>; sessionId: string };
+export type Stage = {
+  page: Page; script(steps: unknown[]): Promise<void>; runtime: ReturnType<typeof createRuntime>; sessionId: string;
+  channel: StageSink; store: Store;
+};
 
 export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) => Promise<void>) {
   await withChrome(t, async (page) => {
@@ -48,7 +53,7 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
         const body = (await r.json()) as any;
         for (const res of body.results ?? []) assert.equal(res.ok, true, `script step ${res.index}: ${res.error}`);
       };
-      await fn({ page, script, runtime, sessionId: session.id });
+      await fn({ page, script, runtime, sessionId: session.id, channel, store });
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     } finally {
       server.closeAllConnections();

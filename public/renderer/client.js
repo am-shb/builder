@@ -4,8 +4,12 @@
 const POLL_MS = 1000;
 const RETRY_MS = 5000;
 const OPEN_TIMEOUT_MS = 4000;
+// Binary frames are Builder's voice: [36-byte utterance id, ascii][pcm16le mono] (src/stage/channel.ts).
+const ID_BYTES = 36;
+const ascii = new TextDecoder("ascii");
 
-export function connectStage({ sessionPath, token, onEvent }) {
+/** onEvent(ev) gets every JSON StageEvent; onAudio(utteranceId, pcm: ArrayBuffer) gets each audio frame. */
+export function connectStage({ sessionPath, token, onEvent, onAudio = () => {} }) {
   const q = `?token=${encodeURIComponent(token)}`;
   const wsUrl = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${sessionPath}/ws${q}`;
   const stateUrl = `${sessionPath}/state${q}`;
@@ -61,7 +65,10 @@ export function connectStage({ sessionPath, token, onEvent }) {
       stopPolling(); // the server sends a fresh snapshot on every connect
     };
     sock.onmessage = (e) => {
-      if (typeof e.data !== "string") return void onEvent({ type: "audio", data: e.data });
+      if (typeof e.data !== "string") {
+        if (e.data.byteLength > ID_BYTES) onAudio(ascii.decode(new Uint8Array(e.data, 0, ID_BYTES)), e.data.slice(ID_BYTES));
+        return;
+      }
       try {
         onEvent(JSON.parse(e.data));
       } catch {
