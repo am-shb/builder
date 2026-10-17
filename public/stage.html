@@ -139,6 +139,7 @@ function onEvent(ev) {
       const first = !proto;
       proto = ev.proto;
       if (first) ui = { ...initialUiState(proto), screen: ev.uiScreen ?? proto.currentScreen };
+      else if (ui && ui.screen !== proto.currentScreen) ui = { ...ui, screen: proto.currentScreen };
       captions = (ev.captions ?? []).filter((c) => !c.partial);
       partial = (ev.captions ?? []).find((c) => c.partial) ?? null;
       draw();
@@ -177,6 +178,8 @@ setInterval(() => {
   }
 }, 1000 / 15);
 
+window.stageEvent = onEvent; // test hook
+window.stageProto = () => proto;
 const token = new URLSearchParams(location.search).get("token") ?? "";
 window.stage = connectStage({ sessionPath: location.pathname, token, onEvent });
 </script>

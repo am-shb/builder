@@ -16,12 +16,19 @@ export function findNode(proto, id) {
 }
 
 /** Returns a new state; never mutates the input. */
-export function reduceInteraction(state, interaction, _proto) {
+export function reduceInteraction(state, interaction, proto) {
   switch (interaction.kind) {
     case "navigate":
       return { ...state, screen: interaction.screen };
-    case "toggle":
-      return { ...state, toggles: { ...state.toggles, [interaction.target]: !state.toggles[interaction.target] } };
+    case "toggle": {
+      // Until first toggled, the displayed value comes from the node's own props.
+      let current = state.toggles[interaction.target];
+      if (current === undefined) {
+        const p = (proto && findNode(proto, interaction.target))?.props ?? {};
+        current = (p.on ?? p.checked) === true;
+      }
+      return { ...state, toggles: { ...state.toggles, [interaction.target]: !current } };
+    }
     case "open":
       return { ...state, open: { ...state.open, [interaction.target]: true } };
     case "close":

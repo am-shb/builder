@@ -26,6 +26,26 @@ test("reduceInteraction navigate/toggle/open/close/append/setValue", () => {
   assert.equal(v.values["home.input"], "milk");
 });
 
+test("toggle on an initially-on node turns it off", () => {
+  const p: Prototype = {
+    currentScreen: "home",
+    root: { id: "app", type: "App", props: {}, status: "agreed", children: [
+      { id: "home", type: "Screen", props: {}, status: "agreed", children: [
+        { id: "sw", type: "Toggle", props: { on: true }, status: "agreed", children: [] },
+        { id: "cb", type: "Checkbox", props: { checked: true }, status: "agreed", children: [] },
+        { id: "off", type: "Toggle", props: {}, status: "agreed", children: [] },
+      ] },
+    ] },
+  };
+  let s = initialUiState(p);
+  s = reduceInteraction(s, { kind: "toggle", target: "sw" }, p);
+  s = reduceInteraction(s, { kind: "toggle", target: "cb" }, p);
+  s = reduceInteraction(s, { kind: "toggle", target: "off" }, p);
+  assert.deepEqual([s.toggles.sw, s.toggles.cb, s.toggles.off], [false, false, true]);
+  s = reduceInteraction(s, { kind: "toggle", target: "sw" }, p);
+  assert.equal(s.toggles.sw, true);
+});
+
 test("append moves the input value into the list and clears the input", () => {
   let s = initialUiState(proto);
   s = reduceInteraction(s, { kind: "setValue", target: "home.input", value: "  buy milk " }, proto);

@@ -176,6 +176,18 @@ test("stage page renders the scripted to-do prototype over the websocket", async
       assert.equal(run.status, 200);
       await page.waitFor(`document.querySelector('[data-node-id="home.heading"]')`);
 
+      // A snapshot (e.g. after reconnect) whose currentScreen differs switches the visible screen.
+      const snap = await page.eval<{ homeShown: boolean; otherShown: boolean; blank: boolean }>(`(() => {
+        const p = JSON.parse(JSON.stringify(window.stageProto()));
+        p.root.children.push({ id: "other", type: "Screen", props: {}, status: "agreed", children: [
+          { id: "other.t", type: "Text", props: { text: "Other" }, status: "agreed", children: [] } ] });
+        p.currentScreen = "other";
+        window.stageEvent({ type: "snapshot", proto: p, uiScreen: "other", doc: null, captions: [], mood: null, comparison: null });
+        const shown = (id) => document.querySelector('[data-node-id="' + id + '"]').offsetParent !== null;
+        return { homeShown: shown("home"), otherShown: shown("other"), blank: document.getElementById("proto").children.length === 0 };
+      })()`);
+      assert.deepEqual(snap, { homeShown: false, otherShown: true, blank: false });
+
       const draft = await page.eval<string>(`getComputedStyle(document.querySelector('[data-node-id="home.input"]')).outlineStyle`);
       assert.equal(draft, "dashed");
       assert.equal(await page.eval(`document.getElementById("placeholder").hidden`), true);
