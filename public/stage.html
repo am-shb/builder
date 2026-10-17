@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=1280, height=720">
+<script type="importmap">{"imports":{"@renderer/":"/renderer/"}}</script>
+<link rel="stylesheet" href="/renderer/theme.css">
 <title>Meet2Build Stage</title>
 <style>
   /* Rendered by the Recall bot at 1280x720 and screenshared into the meeting.
@@ -19,7 +21,7 @@
   .dot { width:12px; height:12px; border-radius:50%; background:var(--live); }
   header .muted { color:var(--muted); font-weight:400; }
   #canvas { position:absolute; top:48px; left:20px; right:20px; bottom:132px; border-radius:12px; background:#fff; overflow:hidden; }
-  #canvas iframe { width:100%; height:100%; border:0; background:#fff; }
+  #proto { position:absolute; inset:0; overflow:hidden; }
 
   /* ---------- waiting state: a little builder bot ---------- */
   #placeholder { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px;
@@ -72,7 +74,7 @@
 <body>
 <header><span class="dot"></span>Meet2Build Agent <span class="muted">· listening · shared prototype</span></header>
 <div id="canvas">
-  <iframe id="frame" sandbox="allow-scripts allow-forms" title="Prototype"></iframe>
+  <div id="proto"></div>
   <div id="placeholder">
     <div class="buddy" id="buddy">
       <div class="ring"></div><div class="ring two"></div>
@@ -89,21 +91,31 @@
   </div>
 </div>
 <footer id="captions"></footer>
-<script>
-// Polls state instead of using EventSource: tunnels/proxies (e.g. Cloudflare
-// quick tunnels) buffer text/event-stream, which froze the shared screen.
-const statePath = `${location.pathname}/state${location.search}`;
-let lastHtml;
+<script type="module">
+import { connectStage } from "@renderer/client.js";
+import { renderTree } from "@renderer/render.js";
+import { initialUiState, reduceInteraction, bindInteractions, findNode } from "@renderer/interact.js";
 
-function renderStage(html) {
-  if (html === lastHtml) return;
-  lastHtml = html;
-  document.getElementById("placeholder").hidden = !!html;
-  document.getElementById("frame").srcdoc = html || "";
+const protoEl = document.getElementById("proto");
+let proto = null;
+let ui = null;
+
+function draw() {
+  if (!proto) return;
+  if (!ui) ui = initialUiState(proto);
+  if (!findNode(proto, ui.screen)) ui = { ...ui, screen: proto.currentScreen };
+  renderTree(protoEl, proto, ui);
+  // The waiting bot shows until the first real content exists.
+  const screens = proto.root.children.filter((c) => c.type === "Screen");
+  document.getElementById("placeholder").hidden = screens.some((sc) => sc.children.length);
 }
 
+bindInteractions(protoEl, () => proto, () => ui, (next) => { ui = next; draw(); });
+
+let captions = [];
+let partial = null;
 let lastCaptionKey;
-function renderCaptions(captions, partial) {
+function renderCaptions() {
   const key = JSON.stringify([captions, partial]);
   if (key === lastCaptionKey) return;
   lastCaptionKey = key;
@@ -112,13 +124,45 @@ function renderCaptions(captions, partial) {
   document.getElementById("captions").replaceChildren(...nodes.slice(-3));
   document.getElementById("buddy").classList.toggle("hearing", !!(partial && partial.text));
 }
-function cap(speaker, text, partial) {
+function cap(speaker, text, isPartial) {
   const d = document.createElement("div");
-  d.className = "cap" + (partial ? " partial" : "");
+  d.className = "cap" + (isPartial ? " partial" : "");
   const b = document.createElement("b");
-  b.textContent = speaker || "…";
+  b.textContent = speaker || "\u2026";
   d.append(b, document.createTextNode(text || ""));
   return d;
+}
+
+function onEvent(ev) {
+  switch (ev.type) {
+    case "snapshot": {
+      const first = !proto;
+      proto = ev.proto;
+      if (first) ui = { ...initialUiState(proto), screen: ev.uiScreen ?? proto.currentScreen };
+      captions = (ev.captions ?? []).filter((c) => !c.partial);
+      partial = (ev.captions ?? []).find((c) => c.partial) ?? null;
+      draw();
+      renderCaptions();
+      break;
+    }
+    case "patch": {
+      const moved = proto && proto.currentScreen !== ev.proto.currentScreen;
+      proto = ev.proto;
+      if (moved && ui) ui = { ...ui, screen: proto.currentScreen };
+      draw();
+      break;
+    }
+    case "command":
+      if (proto && ui) { ui = reduceInteraction(ui, ev.interaction, proto); draw(); }
+      break;
+    case "caption":
+      if (ev.caption.partial) partial = ev.caption;
+      else { partial = null; captions = [...captions, ev.caption].slice(-3); }
+      renderCaptions();
+      break;
+    default:
+      break; // mood, doc, comparison, speech: later tasks
+  }
 }
 
 // Meet only receives 15 fps from the bot, so step every CSS animation on a
@@ -133,19 +177,8 @@ setInterval(() => {
   }
 }, 1000 / 15);
 
-async function tick() {
-  try {
-    const r = await fetch(statePath, { cache: "no-store" });
-    if (r.ok) {
-      const s = await r.json();
-      renderStage(s.html);
-      const caps = s.captions || [];
-      renderCaptions(caps.filter((c) => !c.partial), caps.find((c) => c.partial));
-    }
-  } catch {}
-  setTimeout(tick, 1000);
-}
-tick();
+const token = new URLSearchParams(location.search).get("token") ?? "";
+window.stage = connectStage({ sessionPath: location.pathname, token, onEvent });
 </script>
 </body>
 </html>
