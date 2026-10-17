@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { emptyPrototype, applyBatch, findNode } from "../src/ui/tree.ts";
+import { emptyPrototype, applyBatch, findNode, fromToolBatch } from "../src/ui/tree.ts";
 import { Prototype, patchBatchJsonSchema } from "../src/ui/schema.ts";
 import type { UiNode, PatchOp } from "../src/ui/schema.ts";
 
@@ -102,19 +102,47 @@ test("fixture is a valid prototype", () => {
   assert.ok(applyBatch(proto, batch([{ op: "update", id: "home.add", status: "agreed" }])).ok);
 });
 
-test("patchBatchJsonSchema is strict (additionalProperties false at every object)", () => {
+test("patchBatchJsonSchema is strict (additionalProperties false at every object, no $ref)", () => {
   const schema = patchBatchJsonSchema();
+  assert.ok(!JSON.stringify(schema).includes('"$ref"'), "no $ref");
   let objects = 0;
   const walk = (s: unknown, path: string) => {
     if (Array.isArray(s)) return s.forEach((v, i) => walk(v, `${path}[${i}]`));
     if (!s || typeof s !== "object") return;
     const o = s as Record<string, unknown>;
-    if (o.type === "object" && o.properties) {
+    if (o.type === "object" || o.properties) {
       objects++;
       assert.equal(o.additionalProperties, false, `${path} must set additionalProperties:false`);
     }
     for (const [k, v] of Object.entries(o)) walk(v, `${path}.${k}`);
   };
   walk(schema, "$");
-  assert.ok(objects > 5, "walked the object schemas");
+  assert.ok(objects > 8, "walked the object schemas");
+});
+
+test("fromToolBatch converts props pairs to a record and the result applies via applyBatch", () => {
+  const batch = fromToolBatch({ label: "Added: form", by: "Amir", ops: [
+    { op: "add", parentId: "app", node: { id: "form", type: "Screen", props: [{ key: "title", value: "Form" }], status: "draft" } },
+    { op: "add", parentId: "form", node: { id: "form.name", type: "Input", props: [{ key: "placeholder", value: "Name" }, { key: "tags", value: ["a", "b"] }], status: "draft" } },
+    { op: "update", id: "form.name", props: [{ key: "required", value: true }] },
+  ] });
+  const add = batch.ops[1]!;
+  assert.ok(add.op === "add");
+  assert.deepEqual(add.node.props, { placeholder: "Name", tags: ["a", "b"] });
+  assert.deepEqual(add.node.children, []);
+  const r = applyBatch(emptyPrototype("X"), batch);
+  assert.ok(r.ok);
+  assert.deepEqual(findNode(r.proto, "form.name")!.props, { placeholder: "Name", tags: ["a", "b"], required: true });
+});
+
+test("fromToolBatch drops __proto__/constructor/prototype keys", () => {
+  const batch = fromToolBatch({ label: "x", ops: [
+    { op: "add", parentId: "home", node: { id: "t", type: "Text", status: "draft", props: [
+      { key: "__proto__", value: "x" }, { key: "constructor", value: "x" }, { key: "prototype", value: "x" }, { key: "ok", value: 1 },
+    ] } },
+  ] });
+  const add = batch.ops[0]!;
+  assert.ok(add.op === "add");
+  assert.deepEqual(Object.keys(add.node.props), ["ok"]);
+  assert.equal(Object.getPrototypeOf(add.node.props), Object.prototype);
 });

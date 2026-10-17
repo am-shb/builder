@@ -81,7 +81,47 @@ export type Change = {
   by?: string;
 };
 
-/** JSON Schema for strict tool use. The free-form `props` map is the one object without a closed key set. */
+/**
+ * Model-facing shapes. Strict tool schemas need closed objects and no recursion, so props are
+ * key/value pairs and nodes carry no children (deeper structure comes from later `add` ops).
+ * `fromToolBatch` in tree.ts converts these to the internal PatchBatch.
+ */
+export const ToolProp = z.strictObject({ key: z.string(), value: PropValue });
+export type ToolProp = z.infer<typeof ToolProp>;
+
+export const ToolNode = z.strictObject({
+  id: NodeId,
+  type: z.enum(COMPONENT_TYPES),
+  props: z.array(ToolProp),
+  on: z.strictObject({
+    click: z.array(Interaction).optional(),
+    change: z.array(Interaction).optional(),
+  }).optional(),
+  status: NodeStatus,
+  decisionId: z.string().optional(),
+});
+export type ToolNode = z.infer<typeof ToolNode>;
+
+export const ToolPatchOp = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("add"), parentId: NodeId, index: z.number().int().min(0).optional(), node: ToolNode }),
+  z.strictObject({
+    op: z.literal("update"), id: NodeId, props: z.array(ToolProp).optional(),
+    status: NodeStatus.optional(), decisionId: z.string().optional(),
+  }),
+  z.strictObject({ op: z.literal("remove"), id: NodeId }),
+  z.strictObject({ op: z.literal("move"), id: NodeId, parentId: NodeId, index: z.number().int().min(0) }),
+  z.strictObject({ op: z.literal("set_screen"), screenId: NodeId }),
+]);
+export type ToolPatchOp = z.infer<typeof ToolPatchOp>;
+
+export const ToolPatchBatch = z.strictObject({
+  ops: z.array(ToolPatchOp),
+  label: z.string().max(60),
+  by: z.string().optional(),
+});
+export type ToolPatchBatch = z.infer<typeof ToolPatchBatch>;
+
+/** JSON Schema of the model-facing batch: every object closed, no $ref. */
 export function patchBatchJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(PatchBatch, { target: "draft-7" }) as Record<string, unknown>;
+  return z.toJSONSchema(ToolPatchBatch, { target: "draft-7" }) as Record<string, unknown>;
 }

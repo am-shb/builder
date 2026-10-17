@@ -1,5 +1,5 @@
 import { MAX_DEPTH, MAX_NODES, PatchBatch, Prototype } from "./schema.ts";
-import type { Change, UiNode } from "./schema.ts";
+import type { Change, PatchOp, ToolPatchBatch, ToolProp, UiNode } from "./schema.ts";
 
 export type ApplyResult =
   | { ok: true; proto: Prototype; changes: Change[] }
@@ -129,4 +129,30 @@ export function applyBatch(input: Prototype, batchInput: PatchBatch): ApplyResul
   const error = validateTree(proto);
   if (error) return { ok: false, error };
   return { ok: true, proto, changes };
+}
+
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function propsToRecord(props: ToolProp[]): UiNode["props"] {
+  const out: UiNode["props"] = {};
+  for (const { key, value } of props) if (!UNSAFE_KEYS.has(key)) out[key] = value;
+  return out;
+}
+
+/** Pure conversion from the model-facing batch (props as pairs, childless nodes) to the internal PatchBatch. */
+export function fromToolBatch(t: ToolPatchBatch): PatchBatch {
+  const ops = t.ops.map((op): PatchOp => {
+    if (op.op === "add") {
+      const { props, ...rest } = op.node;
+      return { ...op, node: { ...rest, props: propsToRecord(props), children: [] } };
+    }
+    if (op.op === "update") {
+      const { props, ...rest } = op;
+      return props ? { ...rest, props: propsToRecord(props) } : rest;
+    }
+    return op;
+  });
+  const out: PatchBatch = { ops, label: t.label };
+  if (t.by !== undefined) out.by = t.by;
+  return out;
 }
