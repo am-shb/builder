@@ -1,5 +1,9 @@
 # Plan: the api's first slice (Clerk auth, sessions, engine client, Postgres)
 
+> **2026-10-18:** the database is now SurrealDB, not Postgres ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 writes
+> the schema in SurrealQL, in database `api`, with `@surrealdb/node` in memory for tests. That also settles "Postgres
+> or SQLite for the hackathon": neither. The Drizzle, PGlite and `engine/postgres` notes below are out of date.
+
 - **Status:** agreed by the api owner on 2026-10-17, except D5 (open, for the repo owner) and the engine and
   contracts items, which need their owners. No code yet.
 - **Date:** 2026-10-17

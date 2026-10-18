@@ -1,5 +1,9 @@
 # Plan: repo reorg, engine move, Postgres, Render deploy
 
+> **2026-10-18:** Tasks 1 and 2 are on `main`. Tasks 3 and 4 (Postgres, Render) were not merged: the database is now
+> SurrealDB ([ADR 0011](../../adr/0011-surrealdb.md)), and the work is redone in
+> [2026-10-18-surrealdb-render.md](2026-10-18-surrealdb-render.md).
+
 **Spec:** the accepted direction in `docs/adr/0004` to `0009` (proposed, approved by Amir on 2026-10-17). Behavior of
 the engine is set by `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md` and must not change.
 

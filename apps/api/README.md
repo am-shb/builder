@@ -15,7 +15,7 @@ Created when they have code, under `src/`:
 |---|---|
 | `routes/` | HTTP routes, such as `POST /v1/sessions` and `POST /internal/engine-events` |
 | `auth/` | Checking the sign-in token and the org role ([ADR 0006](../../docs/adr/0006-identity-and-tenancy.md)) |
-| `db/` | The Postgres schema and migrations ([ADR 0007](../../docs/adr/0007-database.md)) |
+| `db/` | The SurrealDB schema and migrations, in database `api` ([ADR 0011](../../docs/adr/0011-surrealdb.md)) |
 | `billing/` | Plans, usage metering, entitlements and payments ([ADR 0009](../../docs/adr/0009-pricing-model.md)) |
 | `notifications/` | Email, such as "your handoff is ready" and failed payments |
 | `jobs/` | Background work: calendar sync, retention, usage sync |
@@ -32,7 +32,7 @@ Created when they have code, under `src/`:
 - Pages customers see. Those belong in `apps/web`.
 
 ## Depends on / provides
-- Depends on: `@builder/contracts`, Postgres, Clerk
+- Depends on: `@builder/contracts`, SurrealDB, Clerk
 - Provides: the API that `apps/web` builds against, and the receiving end of the engine's events
 
 ## Open decisions
@@ -42,6 +42,6 @@ Created when they have code, under `src/`:
 
 ## First tasks
 - [ ] Parse and verify the Clerk token ([ADR 0006](../../docs/adr/0006-identity-and-tenancy.md))
-- [ ] The first Postgres migration: orgs, users, sessions, usage
+- [ ] The first SurrealDB schema: orgs, users, sessions, usage
 - [ ] `POST /v1/sessions` and `POST /internal/engine-events`, built against fakes with `@builder/contracts`
 - [ ] A cost model per meeting hour (Recall, models, TTS)

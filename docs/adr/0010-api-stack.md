@@ -33,7 +33,8 @@ Option 1, with these rules:
   network call, and with `authorizedParties` set to the web app's origins. The org and role come from the v2 token's
   `o` claim. A token with no active org gets 403 `no_active_org`. The org id always comes from the verified token,
   never from a body or query. Tests sign their own tokens with a key pair made at test time.
-- **Data.** Postgres and Drizzle in the `api` schema, as ADR 0007 decides, with PGlite in tests. Whether the api
+- **Data.** Postgres and Drizzle in the `api` schema, as ADR 0007 decides, with PGlite in tests. (Superseded by
+  [ADR 0011](0011-surrealdb.md): SurrealDB, database `api`, with the in-process engine in tests.) Whether the api
   uses `node:sqlite` until the hackathon submission is open with the repo owner. Either way, every db function takes
   `orgId` as its first argument, and only `src/db/` knows which database is underneath.
 - **Ids.** Session ids are UUIDs from `randomUUID()`, because the engine's stage and hand-off routes only match UUIDs.
