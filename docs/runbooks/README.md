@@ -41,6 +41,22 @@ Live tests cost money (Recall bot minutes, models, TTS). Run one only when the m
    `OPENROUTER_API_KEY` (listen-only).
 4. Nothing caps spend automatically yet. The api will enforce limits per session and per org ([ADR 0008](../adr/0008-api-engine-boundary.md)).
 
+## Database
+
+The engine keeps its data in Postgres, in the `engine` schema ([ADR 0007](../adr/0007-database.md)). It connects
+with whatever role `DATABASE_URL` carries.
+
+- **Migrations:** `npm run migrate -w @builder/engine` applies the committed migrations in `apps/engine/drizzle/`
+  to the database in `DATABASE_URL`. It is safe to run again. On Render it is the pre-deploy command. It needs only
+  production dependencies. It logs `db.migrated`, or `db.migrate_failed` with a Postgres error code.
+- **Without `DATABASE_URL`:** the engine runs PGlite in the process and migrates it on start. `npm start` keeps it in
+  `apps/engine/data/pg`, and `npm run local` in `apps/engine/data/local-pg`. To start fresh, stop the engine and
+  delete that folder.
+- **Changing the schema:** edit `apps/engine/src/db/schema.ts`, run `npx drizzle-kit generate` in `apps/engine`, and
+  commit the new migration with the change.
+- **Logs:** database failures log an error name or Postgres code, never values. Look for `store.pool_error`,
+  `runtime.persist_failed`, `realtime.process_failed` and `bot.status_save_failed`.
+
 ## Rotating secrets
 
 Never paste a secret into an issue, a PR, a log or a chat. Edit `apps/engine/.env` (or the host's secret store) and restart.

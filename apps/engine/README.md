@@ -16,7 +16,7 @@ The v0 engine moved here from the repo root in a PR that only moved files and fi
 | `src/session/`, `src/stage/` | The per-session runtime and the stage WebSocket channel |
 | `src/voice/` | ElevenLabs TTS through OpenRouter, speech, and barge-in |
 | `src/handoff/` | The handoff page and its self-contained export |
-| `src/store.ts` | SQLite storage |
+| `src/store.ts`, `src/db/`, `drizzle/` | Storage in Postgres ([ADR 0007](../../docs/adr/0007-database.md)): the async store, the Drizzle schema (in the `engine` schema), the connection, and the committed migrations. With `DATABASE_URL` it uses that Postgres. Without it, PGlite runs in the process: in memory for tests and smoke, in `data/pg` for `npm start` and `data/local-pg` for `npm run local`. |
 | `public/` | The stage (the screenshared page), its renderer, the handoff page, and the v0 operator page |
 | `test/`, `scripts/` | Tests, the replay harness, and live probes |
 
@@ -31,7 +31,7 @@ agreement-correctness items I2 and I3, and the minor and visual items were fixed
 ruling, a move of an agreed node, and the live checks.
 
 ## Open decisions
-- Scaling. Session state lives in memory and storage is SQLite, so each session is tied to one process. This is
+- Scaling. Session state lives in memory, so each session is tied to one process. Storage is Postgres now. This is
   tracked by [ADR 0005](../../docs/adr/0005-hosting-on-render.md) (hosting) and
   [ADR 0007](../../docs/adr/0007-database.md) (database).
 - Usage events reach billing through the api, not a worker. Settled in
