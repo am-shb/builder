@@ -26,7 +26,7 @@ Settle these first, as ADRs in `docs/adr/`:
 3. Identity provider and tenancy model. This blocks the API, the apps and billing. Proposed in
    [ADR 0006](adr/0006-identity-and-tenancy.md) (Clerk, org as tenant).
 4. Database engine. This blocks the API, billing and the worker. Proposed in [ADR 0011](adr/0011-surrealdb.md)
-   (SurrealDB on Render for both apps, one database each), which replaced [ADR 0007](adr/0007-database.md) (Postgres).
+   (SurrealDB Cloud for both apps, one database each), which replaced [ADR 0007](adr/0007-database.md) (Postgres).
 5. The boundary between the API and the meeting engine. This blocks the API and the engine's move. Proposed in
    [ADR 0008](adr/0008-api-engine-boundary.md).
 6. Pricing model. This blocks billing. Proposed in [ADR 0009](adr/0009-pricing-model.md) (per meeting hour).

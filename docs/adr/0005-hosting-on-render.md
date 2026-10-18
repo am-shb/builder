@@ -29,14 +29,15 @@ Option 1, defined in a `render.yaml` Blueprint at the repo root. Prices are from
 | `engine` | Web service, 1 instance | 0.5 CPU / 512 MB, $7 | Public: Recall and the stage need it. WebSockets for the stage. Grow to 1 CPU / 2 GB ($25) with concurrent meetings |
 | `api` | Web service | 0.5 CPU / 512 MB, $7 | Webhooks from Clerk and Stripe. Can scale out |
 | `web` | Static site, or web service if server-rendered | $0, or $7 | Depends on the web framework ADR |
-| `db` | Private service running SurrealDB, with a disk | 0.5 CPU / 512 MB, $7, plus $0.25 per GB of disk | [ADR 0011](0011-surrealdb.md) (it replaced Render Postgres, ADR 0007). One instance. No public URL |
+| `db` | Not on Render: SurrealDB Cloud | Free instance at launch, about $15 for a small one | [ADR 0011](0011-surrealdb.md) (it replaced Render Postgres, ADR 0007). Reached over TLS, credentials in Render secrets |
 
 - **Workspace: Pro ($25 a month).** Hobby allows one seat. Pro includes 25 GB of bandwidth, then $0.15 per GB.
 - **Nothing runs on a free plan.** Free web services spin down after 15 idle minutes, lose their filesystem, and
   can't receive private network traffic. Free Postgres expires after 30 days and has no backups.
 - **One region** for everything, because the private network only connects services in the same region. Choose
   the one nearest to Recall's region.
-- The api and the engine call each other over the private network (ADR 0008). SurrealDB is reached by its private-network host name.
+- The api and the engine call each other over the private network (ADR 0008). SurrealDB Cloud is reached over the
+  internet with TLS (ADR 0011).
 - **Monorepo:** don't set `rootDir`. Render doesn't make files outside it available, so `contracts/` would be missing.
   Build from the repo root with a workspace-scoped install. Use `buildFilter` so each service deploys only when its
   app or `contracts/**` changes.
