@@ -8,23 +8,33 @@ import { createHandler } from "./router.ts";
 import type { Log } from "./router.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { meRoutes } from "./routes/me.ts";
-import { sessionReadRoutes } from "./routes/sessions.ts";
+import { sessionCreateRoutes, sessionReadRoutes } from "./routes/sessions.ts";
 import { createClerkAuth } from "./auth/clerk.ts";
 import type { Authenticator } from "./auth/clerk.ts";
+import { createEngineClient } from "./engine/client.ts";
+import type { EngineClient } from "./engine/client.ts";
 import { openDb } from "./db/index.ts";
 import type { Db } from "./db/index.ts";
 import { errorCode } from "./error-code.ts";
 
-// Everything the server needs is passed in, so tests can use fakes. A later step adds the engine client.
-// `auth` defaults to Clerk with the config's key. Without `db`, the session routes answer 503 db_unavailable.
-export type Deps = { config: Config; log?: Log; auth?: Authenticator; db?: Db | null };
+// Everything the server needs is passed in, so tests can use fakes. `auth` defaults to Clerk with the config's key,
+// and `engine` to the engine client when ENGINE_INTERNAL_URL and ENGINE_INTERNAL_TOKEN are set. Without `db` or
+// `engine`, the routes that need them answer 503.
+export type Deps = { config: Config; log?: Log; auth?: Authenticator; db?: Db | null; engine?: EngineClient | null };
 
 export const jsonLog: Log = (msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
 
 export function createServer(deps: Deps): Server {
   const log = deps.log ?? jsonLog;
   const auth = deps.auth ?? createClerkAuth(deps.config.clerk, { log });
-  const handle = createHandler([...healthRoutes, ...meRoutes(auth), ...sessionReadRoutes(auth, deps.db ?? null)], log);
+  const db = deps.db ?? null;
+  const engine = deps.engine !== undefined ? deps.engine : deps.config.engine ? createEngineClient({ config: deps.config.engine, log }) : null;
+  const handle = createHandler([
+    ...healthRoutes,
+    ...meRoutes(auth),
+    ...sessionReadRoutes(auth, db),
+    ...sessionCreateRoutes({ auth, db, engine, limits: deps.config.defaultLimits, log }),
+  ], log);
   return createHttpServer((req, res) => void handle(req, res));
 }
 

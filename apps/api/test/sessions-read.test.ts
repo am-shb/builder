@@ -172,10 +172,10 @@ test("reads log no meeting URL, stage URL or token", async () => {
   });
 });
 
-test("POST /v1/sessions isn't there yet (step 6): 405 with Allow: GET", async () => {
+test("other methods on /v1/sessions answer 405 with Allow: GET, POST", async () => {
   await withApi(null, async (base) => {
-    const res = await fetch(`${base}/v1/sessions`, { method: "POST" });
+    const res = await fetch(`${base}/v1/sessions`, { method: "DELETE" });
     assert.equal(res.status, 405);
-    assert.equal(res.headers.get("allow"), "GET");
+    assert.equal(res.headers.get("allow"), "GET, POST");
   });
 });
