@@ -42,8 +42,11 @@ Option 1, defined in a `render.yaml` Blueprint at the repo root. Prices are from
   Build from the repo root with a workspace-scoped install. Use `buildFilter` so each service deploys only when its
   app or `contracts/**` changes.
 - **Node version:** Render reads `.nvmrc`, so every service runs the same Node as CI.
-- **Environments:** `staging` and `production` from the same Blueprint, on the smallest plans for staging (about $20 a
-  month). `main` deploys to staging automatically. Production deploys by hand from a commit that passed staging.
+- **Environments:** production only for now (repo owner, 2026-10-18). `main` deploys to production automatically once
+  CI passes on the commit (`autoDeployTrigger: checksPass`). Add `staging` to the same Blueprint (about $14 a month)
+  when we need to try changes on real infrastructure first; then `main` deploys to staging and production by hand.
+- **Builds:** each app has a Dockerfile, used both by `docker compose` on a laptop and by Render, so both run the same
+  image.
 - **Secrets:** environment groups in the Render dashboard (`sync: false` in the Blueprint). Never in `render.yaml`.
 
 ## Consequences

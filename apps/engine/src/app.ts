@@ -12,7 +12,7 @@ import { isTerminal } from "./store.ts";
 import { verifyRequestFromRecall } from "./verify.ts";
 import { parseRealtimeEvent } from "./realtime.ts";
 import { createRuntime } from "./session/runtime.ts";
-import type { SessionRuntime } from "./session/runtime.ts";
+import type { RuntimeLookup, SessionRuntime } from "./session/runtime.ts";
 import { runScript, Script } from "./session/script.ts";
 import { noopStageSink } from "./stage/channel.ts";
 import { emptyDoc } from "./consensus/doc.ts";
@@ -26,6 +26,7 @@ import type { Speech } from "./agent/conversation-loop.ts";
 import type { ModelPort } from "./agent/llm.ts";
 import type { RealtimeEvent } from "./realtime.ts";
 import { z } from "zod";
+import { errorCode } from "./error-code.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -43,8 +44,19 @@ const LocalSpeech = z.object({
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
-// Error names only: messages can carry request bodies (V8's JSON.parse quotes its input).
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
+
+// Runs tasks with the same key one after another, in the order they were queued. Tasks with different keys
+// run side by side. Each call's promise settles with its own task.
+function createSerialQueue() {
+  const tails = new Map<string, Promise<unknown>>();
+  return <T>(key: string, task: () => Promise<T>): Promise<T> => {
+    const result = (tails.get(key) ?? Promise.resolve()).then(task);
+    const tail = result.catch(() => {});
+    tails.set(key, tail);
+    void tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
+    return result;
+  };
+}
 
 // Requests that arrived through the public tunnel carry proxy headers; direct
 // localhost requests don't. Only Recall-facing routes are reachable publicly.
@@ -63,13 +75,18 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
 // `clock` and `timers` default to real time; replays and tests inject virtual ones.
 export type AgentDeps = { port: ModelPort; speech?: Speech; clock?: () => number; timers?: Timers };
 
-export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {
+// Async because a restart reloads the calls still going from the database before any request is served.
+export async function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: RuntimeLookup; agent?: AgentDeps }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
   const localHtml = config.local ? deps.localHtml ?? readFileSync(new URL("../public/local.html", import.meta.url), "utf8") : null;
   const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
+  // A session's runtime starts from its saved consensus, which is read from the database. Every way in from
+  // outside (an event, the stage, a restart) loads it first; the loops then use runtime(id) as before.
+  const loadRuntime = (sessionId: string): Promise<SessionRuntime> =>
+    runtime.load ? runtime.load(sessionId) : Promise.resolve().then(() => runtime(sessionId));
   const clock = deps.agent?.clock ?? Date.now;
   const buildLoop = deps.agent
     ? createBuildLoop({ port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, ...(deps.agent.timers ? { timers: deps.agent.timers } : {}) })
@@ -81,16 +98,25 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   }) : null;
   // After a restart, pick up the calls still going (known issue M2): the conversation loop reloads
   // its transcript window, and the build loop restarts the no-objection timer.
-  for (const s of buildLoop ? store.listActiveSessions() : []) {
-    if (s.bot_status === "in_call_recording") conversation?.resume(s.id);
+  for (const s of buildLoop ? await store.listActiveSessions() : []) {
+    await loadRuntime(s.id);
+    if (s.bot_status === "in_call_recording") await conversation?.resume(s.id);
     buildLoop?.resume(s.id);
   }
   const rendererDir = new URL("../public/renderer/", import.meta.url);
-  const stageUrl = (s: Session) =>
-    `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(store.ensureStageToken(s.id))}`;
+  const stageUrl = async (s: Session) =>
+    `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(s.stage_token ?? await store.ensureStageToken(s.id))}`;
 
   // The handoff has its own read-only token: the stage token also opens the stage socket (known issue I7).
-  const handoffPath = (s: Session) => `/handoff/${s.id}?token=${encodeURIComponent(store.ensureHandoffToken(s.id))}`;
+  const handoffPath = async (s: Session) =>
+    `/handoff/${s.id}?token=${encodeURIComponent(s.handoff_token ?? await store.ensureHandoffToken(s.id))}`;
+
+  // Realtime events (and local-mode speech) for one session are handled one at a time, in arrival order, as
+  // the synchronous store did: event ids, the transcript window and the agent all follow that order.
+  const perSession = createSerialQueue();
+  // Finding an unfinished session for a meeting and writing a new intent happen together, so two requests
+  // for the same meeting at once can't both send a bot. In this process; the engine runs as one instance.
+  const perMeeting = createSerialQueue();
 
   // ---- live fan-out to browsers (SSE) ----
   const subscribers = new Map<string, Set<http.ServerResponse>>();
@@ -102,7 +128,11 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
 
   // ---- session creation: intent first, then Recall ----
   async function createSession(meetingUrl: string): Promise<{ status: number; body: unknown }> {
-    const existing = store.findActiveForMeeting(meetingUrl);
+    const claim = await perMeeting(meetingUrl, async () => {
+      const existing = await store.findActiveForMeeting(meetingUrl);
+      return existing ? { existing } : { session: await store.createIntent(randomUUID(), meetingUrl) };
+    });
+    const { existing } = claim;
     if (existing) {
       if (existing.state === "intent") {
         // A previous create never resolved (crash / ambiguous network failure).
@@ -112,48 +142,62 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return { status: 200, body: { session: existing, reused: true } };
     }
 
-    const session = store.createIntent(randomUUID(), meetingUrl);
+    const session = claim.session!;
     try {
       const bot = await recall.createBot({
         meetingUrl,
         botName: BOT_NAME,
         realtimeWebhookUrl: `${config.publicBaseUrl}${REALTIME_PATH}`,
-        screenshareUrl: stageUrl(session),
+        screenshareUrl: await stageUrl(session),
         variant: config.botVariant,
         metadata: { session_id: session.id, app: "meet2build-live-agent-poc" },
       });
-      store.markCreated(session.id, bot.id);
+      await store.markCreated(session.id, bot.id);
       log("bot.created", { session_id: session.id, bot_id: bot.id });
-      return { status: 201, body: { session: store.getSession(session.id) } };
+      return { status: 201, body: { session: await store.getSession(session.id) } };
     } catch (err) {
       if (err instanceof RecallApiError) {
         // Definite rejection from Recall: no bot exists.
-        store.markCreateFailed(session.id, err.message);
+        await store.markCreateFailed(session.id, err.message);
         log("bot.create_failed", { session_id: session.id, status: err.status });
-        return { status: 502, body: { error: err.message, session: store.getSession(session.id) } };
+        return { status: 502, body: { error: err.message, session: await store.getSession(session.id) } };
       }
       // Network-level failure: outcome unknown. Leave the intent row in place.
       log("bot.create_ambiguous", { session_id: session.id });
-      return { status: 504, body: { error: "Recall request outcome unknown; not retrying automatically.", session: store.getSession(session.id) } };
+      return { status: 504, body: { error: "Recall request outcome unknown; not retrying automatically.", session: await store.getSession(session.id) } };
     }
   }
 
   // ---- lifecycle polling (feasibility shortcut; production uses dashboard webhooks) ----
+  // Never rejects: it runs on a timer. Failures are logged with a status or error name.
   async function pollOnce() {
-    for (const s of store.listActiveSessions()) {
+    let active: Session[];
+    try {
+      active = await store.listActiveSessions();
+    } catch (err) {
+      log("bot.poll_failed", { error: errorCode(err) });
+      return;
+    }
+    for (const s of active) {
+      let last;
       try {
         const bot = await recall.getBot(s.bot_id!);
-        const last = bot.status_changes?.at(-1);
-        if (last && (last.code !== s.bot_status || last.sub_code !== s.bot_sub_code)) {
-          store.updateBotStatus(s.id, last.code, last.sub_code);
-          log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
-          publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
-          if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
-          if (isTerminal(last.code)) endSession(s.id, last.code);
-        }
+        last = bot.status_changes?.at(-1);
       } catch (err) {
         log("bot.poll_failed", { session_id: s.id, error: err instanceof RecallApiError ? err.status : "network" });
+        continue;
       }
+      if (!last || (last.code === s.bot_status && last.sub_code === s.bot_sub_code)) continue;
+      try {
+        await store.updateBotStatus(s.id, last.code, last.sub_code);
+      } catch (err) {
+        log("bot.status_save_failed", { session_id: s.id, error: errorCode(err) });
+        continue;
+      }
+      log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
+      publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
+      if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
+      if (isTerminal(last.code)) endSession(s.id, last.code);
     }
   }
 
@@ -165,13 +209,14 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       buildLoop?.end(sessionId);
       log("session.ended", { session_id: sessionId, status });
     } catch (err) {
-      log("session.end_failed", { session_id: sessionId, error: errorName(err) });
+      log("session.end_failed", { session_id: sessionId, error: errorCode(err) });
     }
   }
 
   // ---- verified realtime events ----
-  function processRealtime(rawBody: string, msgId: string | null) {
-    let parsed;
+  // Queued per session (Recall puts our session id in the bot's metadata; the bot id stands in without it).
+  async function processRealtime(rawBody: string, msgId: string | null) {
+    let parsed: RealtimeEvent | null;
     try {
       parsed = parseRealtimeEvent(JSON.parse(rawBody));
     } catch {
@@ -179,32 +224,37 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return;
     }
     if (!parsed) return;
-    const session = (parsed.sessionId && store.getSession(parsed.sessionId)) ||
-      (parsed.botId && store.getSessionByBotId(parsed.botId)) || undefined;
-    if (!session) {
-      log("realtime.unknown_session", { kind: parsed.kind });
-      return;
-    }
-    handleEvent(session, parsed, msgId);
+    const event = parsed;
+    await perSession(event.sessionId ?? `bot:${event.botId ?? ""}`, async () => {
+      const session = (event.sessionId && await store.getSession(event.sessionId)) ||
+        (event.botId && await store.getSessionByBotId(event.botId)) || undefined;
+      if (!session) {
+        log("realtime.unknown_session", { kind: event.kind });
+        return;
+      }
+      await handleEvent(session, event, msgId);
+    });
   }
 
   // A transcript or participant event for a session, from Recall or (in local mode) the operator's mic.
-  function handleEvent(session: Session, parsed: RealtimeEvent, msgId: string | null) {
+  async function handleEvent(session: Session, parsed: RealtimeEvent, msgId: string | null) {
     // Late events after the call ended are stored, but the agent no longer acts on them.
     const agent = isTerminal(session.bot_status) ? null : conversation;
     if (parsed.kind === "partial") {
-      runtime(session.id).caption({ partial: true, isAgent: false });
+      (await loadRuntime(session.id)).caption({ partial: true, isAgent: false });
       publish(session.id, "partial", { speaker: parsed.speaker, text: parsed.text });
       agent?.onPartial(session.id, { speaker: parsed.speaker, text: parsed.text });
       return;
     }
-    const stored = store.addEvent({ sessionId: session.id, recallMsgId: msgId, kind: parsed.kind, speaker: parsed.speaker, text: parsed.text });
+    // One statement, unique on Recall's message id: a redelivery reads as a duplicate however it overlaps.
+    const stored = await store.addEvent({ sessionId: session.id, recallMsgId: msgId, kind: parsed.kind, speaker: parsed.speaker, text: parsed.text });
     if (!stored) {
       log("realtime.duplicate", { kind: parsed.kind });
       return;
     }
     log("realtime.processed", { session_id: session.id, kind: parsed.kind });
-    if (parsed.kind === "utterance") runtime(session.id).caption({ partial: false, isAgent: false });
+    const rt = await loadRuntime(session.id);
+    if (parsed.kind === "utterance") rt.caption({ partial: false, isAgent: false });
     publish(session.id, "event", stored);
     if (parsed.kind === "utterance") agent?.onUtterance(session.id, { id: stored.id, speaker: parsed.speaker, text: parsed.text });
     else if (parsed.kind === "join" || parsed.kind === "leave") agent?.onParticipant(session.id, { kind: parsed.kind, name: parsed.speaker });
@@ -232,8 +282,9 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   }
-  function sessionView(s: Session) {
-    return { ...s, stage_url: stageUrl(s), handoff_url: `${config.publicBaseUrl}${handoffPath(s)}`, cost_usd: store.sessionCost(s.id), events: store.listEvents(s.id) };
+  async function sessionView(s: Session) {
+    const [stage_url, handoff, cost_usd, events] = await Promise.all([stageUrl(s), handoffPath(s), store.sessionCost(s.id), store.listEvents(s.id)]);
+    return { ...s, stage_url, handoff_url: `${config.publicBaseUrl}${handoff}`, cost_usd, events };
   }
   function openStream(req: http.IncomingMessage, res: http.ServerResponse, s: Session) {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -256,11 +307,11 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     // No transcript is served here: the operator's live stream is /api/sessions/<id>/stream (local only).
     const stage = path.match(/^\/stage\/([0-9a-f-]{36})(\/state)?$/);
     if (req.method === "GET" && stage) {
-      const s = store.getSession(stage[1]);
+      const s = await store.getSession(stage[1]);
       if (!s || !tokenMatches(url.searchParams.get("token"), s.stage_token)) return json(res, 404, { error: "not found" });
       // The stage polls this: quick-tunnel proxies buffer text/event-stream.
       if (stage[2] === "/state") {
-        return json(res, 200, { ...runtime(s.id).snapshot(), html: s.stage_html });
+        return json(res, 200, { ...(await loadRuntime(s.id)).snapshot(), html: s.stage_html });
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(stageHtml);
@@ -269,10 +320,10 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     // ---- handoff: read by engineers after the meeting (public, gated by its own read-only token) ----
     const handoff = path.match(/^\/handoff\/([0-9a-f-]{36})(\/export)?$/);
     if (req.method === "GET" && handoff) {
-      const s = store.getSession(handoff[1]);
+      const s = await store.getSession(handoff[1]);
       if (!s || !tokenMatches(url.searchParams.get("token"), s.handoff_token)) return json(res, 404, { error: "not found" });
       // Before anything is drawn or decided, the handoff is empty rather than missing (known issue M8).
-      const consensus = store.getConsensus(s.id) ?? { doc: emptyDoc(), proto: emptyPrototype(UNTITLED_APP) };
+      const consensus = await store.getConsensus(s.id) ?? { doc: emptyDoc(), proto: emptyPrototype(UNTITLED_APP) };
       const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" };
       let body: string;
       if (handoff[2]) {
@@ -313,11 +364,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       // Runs outside the request: an error here would otherwise take the whole process down,
       // and again on every later event for the session (known issue I6).
       setImmediate(() => {
-        try {
-          processRealtime(raw, msgId);
-        } catch (err) {
-          log("realtime.process_failed", { error: errorName(err) });
-        }
+        processRealtime(raw, msgId).catch((err) => log("realtime.process_failed", { error: errorCode(err) }));
       });
       return;
     }
@@ -331,7 +378,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(indexHtml);
     }
-    if (req.method === "GET" && path === "/api/sessions") return json(res, 200, { sessions: store.listSessions() });
+    if (req.method === "GET" && path === "/api/sessions") return json(res, 200, { sessions: await store.listSessions() });
 
     // ---- local mode: the operator's own mic stands in for the meeting ----
     if (localHtml !== null && req.method === "GET" && path === "/local") {
@@ -343,8 +390,8 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       // The stand-in bot is in the call already: pick that up now rather than at the next poll.
       await pollOnce();
       const id = (result.body as { session?: Session }).session?.id;
-      const s = id ? store.getSession(id) : undefined;
-      return json(res, result.status, s ? { session: sessionView(s) } : result.body);
+      const s = id ? await store.getSession(id) : undefined;
+      return json(res, result.status, s ? { session: await sessionView(s) } : result.body);
     }
 
     if (req.method === "POST" && path === "/api/sessions") {
@@ -363,21 +410,21 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
 
     const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/cost|\/chat|\/leave|\/screenshare|\/stage|\/script|\/speech)?$/);
     if (m) {
-      const session = store.getSession(m[1]);
+      const session = await store.getSession(m[1]);
       if (!session) return json(res, 404, { error: "not found" });
       const sub = m[2];
 
-      if (req.method === "GET" && !sub) return json(res, 200, { session: sessionView(session) });
+      if (req.method === "GET" && !sub) return json(res, 200, { session: await sessionView(session) });
       if (req.method === "GET" && sub === "/stream") return openStream(req, res, session);
       // The operator page's running total, polled every few seconds: one sum, not every stored event (known issue M7).
-      if (req.method === "GET" && sub === "/cost") return json(res, 200, { cost_usd: store.sessionCost(session.id) });
+      if (req.method === "GET" && sub === "/cost") return json(res, 200, { cost_usd: await store.sessionCost(session.id) });
 
       // Content shown on the shared screen. Later, the LLM agent writes here.
       if (req.method === "POST" && sub === "/stage") {
         const raw = await readBody(req);
         const html = String(JSON.parse(raw).html ?? "");
         if (html.length > MAX_STAGE_HTML) return json(res, 413, { error: "stage html too large" });
-        store.setStageHtml(session.id, html);
+        await store.setStageHtml(session.id, html);
         publish(session.id, "stage", { html });
         log("stage.updated", { session_id: session.id, bytes: html.length });
         return json(res, 200, { ok: true });
@@ -392,11 +439,8 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
         if ((kind === "partial" || kind === "utterance") && !text) return json(res, 400, { error: "text is required" });
         json(res, 200, { ok: true });
         setImmediate(() => {
-          try {
-            handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null);
-          } catch (err) {
-            log("local.speech_failed", { error: errorName(err) });
-          }
+          perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null))
+            .catch((err) => log("local.speech_failed", { error: errorCode(err) }));
         });
         return;
       }
@@ -405,7 +449,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       if (req.method === "POST" && sub === "/script") {
         const parsed = Script.safeParse(await readJson(req));
         if (!parsed.success) return json(res, 400, { error: "invalid script" });
-        const results = await runScript(runtime(session.id), parsed.data);
+        const results = await runScript(await loadRuntime(session.id), parsed.data);
         log("script.ran", { session_id: session.id, steps: results.length, failed: results.filter((r) => !r.ok).length });
         return json(res, 200, { results });
       }
@@ -413,7 +457,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       if (sub === "/screenshare" && (req.method === "POST" || req.method === "DELETE")) {
         if (!session.bot_id || isTerminal(session.bot_status)) return json(res, 409, { error: "bot is not in the call" });
         try {
-          if (req.method === "POST") await recall.startScreenshare(session.bot_id, stageUrl(session));
+          if (req.method === "POST") await recall.startScreenshare(session.bot_id, await stageUrl(session));
           else await recall.stopScreenshare(session.bot_id);
           log(req.method === "POST" ? "screenshare.started" : "screenshare.stopped", { session_id: session.id });
           return json(res, 200, { ok: true });
@@ -429,7 +473,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
             const message = String(JSON.parse(await readBody(req)).message ?? "").trim();
             if (!message || message.length > 500) return json(res, 400, { error: "message must be 1-500 chars (Google Meet limit)" });
             await recall.sendChatMessage(session.bot_id, message);
-            store.addEvent({ sessionId: session.id, recallMsgId: null, kind: "bot_chat", speaker: BOT_NAME, text: message });
+            await store.addEvent({ sessionId: session.id, recallMsgId: null, kind: "bot_chat", speaker: BOT_NAME, text: message });
           } else {
             await recall.leaveCall(session.bot_id);
           }
@@ -446,7 +490,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
   return {
     handler: (req: http.IncomingMessage, res: http.ServerResponse) => {
       handle(req, res).catch((err) => {
-        log("http.error", { error: errorName(err) });
+        log("http.error", { error: errorCode(err) });
         if (!res.headersSent) json(res, 500, { error: "internal error" });
       });
     },

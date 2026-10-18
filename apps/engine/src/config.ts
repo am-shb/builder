@@ -8,7 +8,9 @@ export type Config = {
   verificationSecret: string;
   publicBaseUrl: string;
   port: number;
-  dbPath: string;
+  // SurrealDB (docs/adr/0011-surrealdb.md). A server URL (SurrealDB Cloud, wss://) with its credentials, or null
+  // for SurrealDB in this process, kept in the SurrealKV folder `surreal.path`.
+  surreal: SurrealSettings;
   // Larger bot for smoother Output Media (costs more per hour); null = plain web bot.
   botVariant: "web_4_core" | "web_gpu" | null;
   // OpenRouter key for all model access (LLM + TTS). Absent = listen-only.
@@ -63,7 +65,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     verificationSecret,
     publicBaseUrl,
     port: Number(env.PORT ?? 3000),
-    dbPath: env.DB_PATH ?? "data/app.db",
+    surreal: surrealSettings(env),
     botVariant,
     ...agentSettings(env),
     local: false,
@@ -73,7 +75,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 /**
  * Local mode: no Recall setting is read or needed. The stage is served from localhost, the
  * realtime webhook accepts nothing (its secret is random and never shared), and sessions go in
- * their own database so they don't mix with real calls.
+ * their own database so they don't mix with real calls: always SurrealDB in this process, in its own folder,
+ * even when SURREAL_URL is set.
  */
 export function loadLocalConfig(env: Record<string, string | undefined>): Config {
   const port = Number(env.PORT ?? 3000);
@@ -83,11 +86,38 @@ export function loadLocalConfig(env: Record<string, string | undefined>): Config
     verificationSecret: "whsec_" + randomBytes(24).toString("base64"),
     publicBaseUrl: `http://localhost:${port}`,
     port,
-    dbPath: env.DB_PATH ?? "data/local.db",
+    surreal: { url: null, user: null, pass: null, auth: "database", path: env.SURREAL_PATH?.trim() || "data/local-surreal" },
     botVariant: null,
     ...agentSettings(env),
     local: true,
   };
+}
+
+export type SurrealSettings = {
+  url: string | null;
+  user: string | null;
+  pass: string | null;
+  auth: "database" | "root";
+  path: string;
+};
+
+/**
+ * SURREAL_URL set: that server, signed in as SURREAL_USER with SURREAL_PASS. SURREAL_AUTH says what kind of user:
+ * `database` (the default) is a user defined on namespace builder, database engine, which is how SurrealDB Cloud is
+ * set up; `root` is a root user, as on a local `surreal start`. Unset: SurrealDB in this process, in SURREAL_PATH.
+ */
+export function surrealSettings(env: Record<string, string | undefined>): SurrealSettings {
+  const url = env.SURREAL_URL?.trim() || null;
+  const auth = env.SURREAL_AUTH?.trim() || "database";
+  if (auth !== "database" && auth !== "root") throw new Error("SURREAL_AUTH must be database, root, or empty");
+  const user = env.SURREAL_USER?.trim() || null;
+  const pass = env.SURREAL_PASS || null;
+  if (url) {
+    const protocol = URL.canParse(url) ? new URL(url).protocol : "";
+    if (protocol !== "ws:" && protocol !== "wss:") throw new Error("SURREAL_URL must be a ws:// or wss:// URL");
+    if (!user || !pass) throw new Error("SURREAL_USER and SURREAL_PASS are required with SURREAL_URL");
+  }
+  return { url, user, pass, auth, path: env.SURREAL_PATH?.trim() || "data/surreal" };
 }
 
 function agentSettings(env: Record<string, string | undefined>) {

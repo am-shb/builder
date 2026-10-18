@@ -7,7 +7,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { settle, testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { noopStageSink } from "../src/stage/channel.ts";
@@ -17,7 +17,7 @@ import { findNode } from "../src/ui/tree.ts";
 import { replay } from "../scripts/replay.ts";
 import type { Fixture } from "../scripts/replay.ts";
 
-const flush = async () => { for (let i = 0; i < 30; i++) await new Promise<void>((r) => setImmediate(r)); };
+const flush = () => settle(30);
 const fixture: Fixture = JSON.parse(readFileSync(new URL("./fixtures/sessions/todo-app.json", import.meta.url), "utf8"));
 const servers = new Set<http.Server>();
 after(() => { for (const s of servers) { s.closeAllConnections(); s.close(); } });
@@ -61,13 +61,13 @@ test("todo-app session replays end to end", async () => {
     if (u.endsWith("/bot/")) return Response.json({ id: "bot-e2e-1" }, { status: 201 });
     return Response.json({ id: "bot-e2e-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = openStore(":memory:");
+  const store = await testStore();
   const time = virtualTime();
   const runtime = createRuntime({ store, clock: time.now, channel: noopStageSink });
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const said: string[] = [];
   const speech: Speech = { say: async (_s, text) => { said.push(text); return `u${said.length}`; }, stop() {}, speaking: () => false };
-  const app = createApp({
+  const app = await createApp({
     config, store, runtime, log: (msg, fields) => logs.push({ msg, fields }),
     recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall, sleep: async () => {} }),
     agent: { port: createRoutedFakePort(fixture.fakeModel!), speech, clock: time.now, timers: time },
@@ -100,7 +100,8 @@ test("todo-app session replays end to end", async () => {
   assert.equal(logs.filter((l) => l.msg === "speak.blocked").length, 0);
 
   // Consensus: three decisions agreed by support or silence, and the conflict resolved with B.
-  const { doc, proto } = store.getConsensus(session.id)!;
+  await runtime(session.id).saved();
+  const { doc, proto } = (await store.getConsensus(session.id))!;
   const agreed = (id: string) => doc.decisions.find((d) => d.id === id);
   assert.equal(agreed("d-quick-add")?.status, "agreed");
   assert.deepEqual(agreed("d-quick-add")?.agreedBy, ["Bo"]);
@@ -123,13 +124,13 @@ test("todo-app session replays end to end", async () => {
   assert.ok(logs.some((l) => l.msg === "conversation.command" && l.fields!.ok === true && l.fields!.visible === true));
 
   // Cost: every scripted call was recorded, 12 conversation and 7 build.
-  const calls = store.listModelCalls(session.id);
+  const calls = await store.listModelCalls(session.id);
   assert.equal(calls.filter((c) => c.loop === "conversation").length, 12);
   assert.equal(calls.filter((c) => c.loop === "build").length, 7);
-  assert.ok(store.sessionCost(session.id) > 0);
+  assert.ok(await store.sessionCost(session.id) > 0);
 
   // Handoff page lists the decisions; the export is self-contained.
-  const token = store.getSession(session.id)!.handoff_token!;
+  const token = (await store.getSession(session.id))!.handoff_token!;
   const page = await (await fetch(`${base}/handoff/${session.id}?token=${token}`)).text();
   for (const d of doc.decisions.filter((x) => x.status === "agreed")) assert.ok(page.includes(d.text), `handoff lists ${d.id}`);
   const exported = await (await fetch(`${base}/handoff/${session.id}/export?token=${token}`)).text();

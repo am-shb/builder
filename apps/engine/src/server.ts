@@ -7,6 +7,7 @@ import { loadConfig, loadLocalConfig } from "./config.ts";
 import { createRecallClient } from "./recall-client.ts";
 import { createLocalRecall } from "./local-recall.ts";
 import { openStore } from "./store.ts";
+import { errorCode } from "./error-code.ts";
 import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
 import { createRuntime, handleStageMessage } from "./session/runtime.ts";
 import { createStageChannel } from "./stage/channel.ts";
@@ -15,12 +16,22 @@ import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tt
 import { createSpeech } from "./voice/speech.ts";
 import { signForTest } from "./verify.ts";
 
+// The settings errors name the variable that is wrong, never its value, so they are shown as they are.
+function loadSettings() {
+  try {
+    return process.argv.includes("--local") ? loadLocalConfig(process.env) : loadConfig(process.env);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+}
+
 async function main() {
   if (process.argv.includes("--smoke")) return smoke();
 
   if (existsSync(".env")) process.loadEnvFile(".env");
   // --local: no Recall and no meeting. You talk into your own mic on /local (docs/adr/0003-local-mode.md).
-  const config = process.argv.includes("--local") ? loadLocalConfig(process.env) : loadConfig(process.env);
+  const config = loadSettings();
   if (!config.agentEnabled) console.warn("OPENROUTER_API_KEY is not set: running listen-only (no agent replies or prototype building).");
   const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   // Last resort. Logs the error's name and stack frames, never its message (which can quote meeting
@@ -31,14 +42,25 @@ async function main() {
     log("process.uncaught", { error: e?.name ?? "unknown", frames });
     process.exit(1);
   });
-  const store = openStore(config.dbPath, { log });
+  // The SurrealDB server in SURREAL_URL (migrated by `npm run migrate`), otherwise SurrealDB in this process, in
+  // the SurrealKV folder config.surreal.path. A server that can't be reached, or refuses the sign-in, stops the
+  // start with its code (SURREAL_UNREACHABLE, NotAllowed.Auth, ...).
+  const store = await openStore(config.surreal.url ? { ...config.surreal, log } : { path: config.surreal.path, log }).catch((err) => {
+    log("store.connect_failed", { error: errorCode(err) });
+    process.exit(1);
+  });
   const recall = config.local ? createLocalRecall() : createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();
   let runtime!: ReturnType<typeof createRuntime>;
   let voice: { stop(sessionId: string): void } | undefined; // Builder's voice, once configured
   const channel = createStageChannel(
     server,
-    (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
+    // Loads the session's runtime before the socket opens, so the first thing the stage gets is its snapshot.
+    async (id, token) => {
+      if (!tokenMatches(token, (await store.getSession(id))?.stage_token ?? null)) return false;
+      await runtime.load(id);
+      return true;
+    },
     (id, msg) => handleStageMessage(runtime, id, msg, (sid) => {
       log("barge_in", { session_id: sid, source: "stage" });
       voice?.stop(sid);
@@ -55,11 +77,20 @@ async function main() {
   }) : undefined;
   voice = speech;
   const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }), ...(speech ? { speech } : {}) } : undefined;
-  const app = createApp({ config, recall, store, runtime, log, agent });
+  const app = await createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 
   setInterval(() => void app.pollOnce(), 4000).unref();
   if (agent) setInterval(() => app.tickAgent(), 1000).unref();
+  // Shut the database down cleanly on Ctrl-C or a platform stop, so an in-process SurrealKV folder is left whole.
+  // A pending write gets a few seconds; after that the process exits anyway.
+  const shutdown = () => {
+    setTimeout(() => process.exit(0), 5000).unref();
+    server.close();
+    store.close().catch((err) => log("store.close_failed", { error: errorCode(err) })).finally(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
   server.listen(config.port, () => {
     console.log(`Listening on http://localhost:${config.port}`);
     if (config.local) console.log(`Local mode, no Recall: open http://localhost:${config.port}/local in Chrome`);
@@ -80,8 +111,8 @@ async function smoke() {
     if (u.endsWith("/bot/")) return Response.json({ id: "bot-smoke-1" }, { status: 201 });
     return Response.json({ id: "bot-smoke-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = openStore(":memory:");
-  const app = createApp({ config, store, recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall }), log: () => {} });
+  const store = await openStore();
+  const app = await createApp({ config, store, recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall }), log: () => {} });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -100,6 +131,7 @@ async function smoke() {
   await app.pollOnce();
   const view = (await (await fetch(`${base}/api/sessions/${session.id}`)).json()) as any;
   server.close();
+  await store.close();
 
   const ok = bad.status === 401 && good.status === 200 &&
     view.session.events[0]?.text === "hello world" && view.session.bot_status === "in_call_recording";
@@ -107,7 +139,9 @@ async function smoke() {
   process.exit(ok ? 0 : 1);
 }
 
+// A startup failure past the settings (a database read while the app loads, say) is logged by code only: its
+// message can quote stored values. Settings errors are reported by loadSettings() with their message.
 main().catch((err) => {
-  console.error((err as Error).message);
+  console.error(JSON.stringify({ t: new Date().toISOString(), msg: "process.start_failed", error: errorCode(err) }));
   process.exit(1);
 });

@@ -85,11 +85,11 @@ export function createSpeech(deps: {
   }
 
   async function toChat(sessionId: string, text: string) {
-    const botId = store.getSession(sessionId)?.bot_id;
+    const botId = (await store.getSession(sessionId))?.bot_id;
     if (!botId) throw new Error("no bot for session");
     const line = text.slice(0, CHAT_MAX);
     await recall.sendChatMessage(botId, line);
-    store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
+    await store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
   }
 
   async function say(sessionId: string, text: string): Promise<string> {

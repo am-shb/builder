@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime, handleStageMessage } from "../src/session/runtime.ts";
 import { resolveCommand, createUiCommandRunner } from "../src/agent/ui-command.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
@@ -115,21 +115,22 @@ test("navigate, back, toggle, type and focus_option map to interactions", () => 
   assert.deepEqual(resolveCommand(p, ui, { action: "focus_option", target: "A" }, null), { ok: false, reason: "not_found" });
 });
 
-function setup() {
-  const store = openStore(":memory:");
+async function setup() {
+  const store = await testStore();
   const id = randomUUID();
-  store.createIntent(id, "https://meet.google.com/abc-defg-hij");
-  store.saveConsensus(id, emptyDoc(), twoScreens());
+  await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
+  await store.saveConsensus(id, emptyDoc(), twoScreens());
   let t = 1_700_000_000_000;
   const sent: StageEvent[] = [];
   const runtime = createRuntime({ store, clock: () => t, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } });
+  await runtime.load(id);
   const run = createUiCommandRunner({ runtime, clock: () => t });
   const snap = () => runtime(id).snapshot() as Extract<StageEvent, { type: "snapshot" }>;
   return { id, runtime, run, sent, snap, advance: (ms: number) => { t += ms; } };
 }
 
-test("command resolves against the screen the stage reports, not proto.currentScreen", () => {
-  const { id, runtime, run, sent, snap } = setup();
+test("command resolves against the screen the stage reports, not proto.currentScreen", async () => {
+  const { id, runtime, run, sent, snap } = await setup();
   assert.equal(snap().proto.currentScreen, "home");
   handleStageMessage(runtime, id, { type: "ui_screen", screen: "settings" });
   assert.equal(snap().uiScreen, "settings");
@@ -139,16 +140,16 @@ test("command resolves against the screen the stage reports, not proto.currentSc
   assert.deepEqual(run(id, { action: "click", target: "Add" }), { ok: false, reason: "not_found" });
 });
 
-test("stage messages that are not a ui_screen for a known screen are ignored", () => {
-  const { id, runtime, snap } = setup();
+test("stage messages that are not a ui_screen for a known screen are ignored", async () => {
+  const { id, runtime, snap } = await setup();
   handleStageMessage(runtime, id, { type: "ui_screen", screen: "nope" });
   handleStageMessage(runtime, id, { type: "ui_screen", screen: 5 });
   handleStageMessage(runtime, id, "junk");
   assert.equal(snap().uiScreen, "home");
 });
 
-test("ambiguous and not_found make Builder look unsure for 3 s; success does not", () => {
-  const { id, run, snap, advance } = setup();
+test("ambiguous and not_found make Builder look unsure for 3 s; success does not", async () => {
+  const { id, run, snap, advance } = await setup();
   assert.equal(run(id, { action: "click", target: "Delete" }).ok, false);
   assert.equal(snap().mood, "unsure");
   advance(3001);
@@ -160,8 +161,8 @@ test("ambiguous and not_found make Builder look unsure for 3 s; success does not
   assert.equal(snap().mood, "listening");
 });
 
-test("show option B points the stage at that option; with no such option shown it is not found", () => {
-  const { id, runtime, run, sent } = setup();
+test("show option B points the stage at that option; with no such option shown it is not found", async () => {
+  const { id, runtime, run, sent } = await setup();
   assert.deepEqual(run(id, { action: "focus_option", target: "option B" }), { ok: false, reason: "not_found" });
   const variant = (label: string) => ({ label, summary: label, backers: [], proto: twoScreens(), focusIds: [] });
   runtime(id).showComparison({ conflictId: "c1", topic: "t", variants: [variant("A"), variant("B")] });

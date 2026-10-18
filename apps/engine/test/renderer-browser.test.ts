@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { withChrome } from "./helpers/chrome.ts";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp, tokenMatches } from "../src/app.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createStageChannel } from "../src/stage/channel.ts";
@@ -149,18 +149,22 @@ test("stage page renders the scripted to-do prototype over the websocket", async
       RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("unit-test-secret").toString("base64"),
       PUBLIC_API_BASE_URL: "https://agent.example.com/",
     });
-    const store = openStore(":memory:");
+    const store = await testStore();
     const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-1" }, { status: 201 })) as any, sleep: async () => {} });
     const server = http.createServer();
     let runtime!: ReturnType<typeof createRuntime>;
     const channel = createStageChannel(
       server,
-      (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
+      async (id, token) => {
+        if (!tokenMatches(token, (await store.getSession(id))?.stage_token ?? null)) return false;
+        await runtime.load(id);
+        return true;
+      },
       () => {},
       (id) => runtime(id).snapshot(),
     );
     runtime = createRuntime({ store, channel, log: () => {} });
-    const app = createApp({ config, recall, store, runtime, log: () => {} });
+    const app = await createApp({ config, recall, store, runtime, log: () => {} });
     server.on("request", app.handler);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     try {
