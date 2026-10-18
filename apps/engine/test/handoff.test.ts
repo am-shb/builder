@@ -37,17 +37,17 @@ async function start() {
     RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("unit-test-secret").toString("base64"),
     PUBLIC_API_BASE_URL: "https://agent.example.com/",
   });
-  const store = openStore(":memory:");
+  const store = await openStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({})) as any, sleep: async () => {} });
-  const app = createApp({ config, recall, store, log: () => {} });
+  const app = await createApp({ config, recall, store, log: () => {} });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   openServers.add(server);
   const id = randomUUID();
-  store.createIntent(id, "https://meet.google.com/abc-defg-hij");
-  store.saveConsensus(id, doc, proto);
-  const token = store.ensureHandoffToken(id);
-  const stageToken = store.ensureStageToken(id);
+  await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
+  await store.saveConsensus(id, doc, proto);
+  const token = await store.ensureHandoffToken(id);
+  const stageToken = await store.ensureStageToken(id);
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
   return { base, id, token, stageToken, store, close: () => { openServers.delete(server); server.closeAllConnections(); server.close(); } };
 }
@@ -84,8 +84,8 @@ test("before anything is saved the handoff is empty, not missing (known issue M8
   const h = await start();
   try {
     const id = randomUUID();
-    h.store.createIntent(id, "https://meet.google.com/new-sess-ion");
-    const token = h.store.ensureHandoffToken(id);
+    await h.store.createIntent(id, "https://meet.google.com/new-sess-ion");
+    const token = await h.store.ensureHandoffToken(id);
     for (const path of [`/handoff/${id}`, `/handoff/${id}/export`]) {
       const res = await fetch(`${h.base}${path}?token=${token}`, { headers: tunnel });
       assert.equal(res.status, 200, path);

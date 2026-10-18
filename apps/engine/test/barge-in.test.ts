@@ -14,8 +14,8 @@ import { createSpeech } from "../src/voice/speech.ts";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.UTC(2026, 0, 1);
 
-function loopWith(speaking: boolean) {
-  const store = openStore(":memory:");
+async function loopWith(speaking: boolean) {
+  const store = await openStore();
   const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
   const stops: string[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
@@ -26,27 +26,27 @@ function loopWith(speaking: boolean) {
   return { loop, stops, logs, sid: randomUUID() };
 }
 
-test("human partial during speech stops speech (server fallback)", () => {
-  const s = loopWith(true);
+test("human partial during speech stops speech (server fallback)", async () => {
+  const s = await loopWith(true);
   s.loop.onPartial(s.sid, { speaker: "Sara", text: "wait" });
   assert.deepEqual(s.stops, [s.sid]);
   assert.ok(s.logs.some((l) => l.msg === "barge_in" && l.fields?.session_id === s.sid));
   assert.ok(!JSON.stringify(s.logs).includes("wait"), "no transcript text in logs");
 });
 
-test("Builder's own partial, an empty partial, or a quiet room does not stop speech", () => {
-  const s = loopWith(true);
+test("Builder's own partial, an empty partial, or a quiet room does not stop speech", async () => {
+  const s = await loopWith(true);
   s.loop.onPartial(s.sid, { speaker: "Builder", text: "so the sidebar" });
   s.loop.onPartial(s.sid, { speaker: "Sara", text: "" });
   s.loop.onPartial(s.sid, { speaker: "Sara", text: null });
   assert.deepEqual(s.stops, []);
-  const quiet = loopWith(false);
+  const quiet = await loopWith(false);
   quiet.loop.onPartial(quiet.sid, { speaker: "Sara", text: "hello" });
   assert.deepEqual(quiet.stops, []);
 });
 
-test("a barge_in stage message calls the barge-in handler; malformed ones do not", () => {
-  const store = openStore(":memory:");
+test("a barge_in stage message calls the barge-in handler; malformed ones do not", async () => {
+  const store = await openStore();
   const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
   const got: string[] = [];
   handleStageMessage(runtime, "s1", { type: "barge_in" }, (id) => got.push(id));

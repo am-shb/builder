@@ -1,13 +1,17 @@
-// Durable local state: scheduling intents (written BEFORE calling Recall),
-// returned bot IDs, lifecycle status, and verified realtime events.
-import { DatabaseSync } from "node:sqlite";
+// Durable state: scheduling intents (written BEFORE calling Recall), returned bot IDs, lifecycle status,
+// verified realtime events, the consensus and model calls. Postgres (docs/adr/0007-database.md), through
+// src/db/connect.ts. Every method is async. Guarantees that the old synchronous store got for free are kept
+// by the database: a redelivered Recall event is dropped by its unique id (ON CONFLICT DO NOTHING), and a
+// missing token is issued with a conditional UPDATE, never by reading and then writing.
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { ConsensusDocSchema } from "./consensus/doc.ts";
 import type { ConsensusDoc } from "./consensus/doc.ts";
 import { Prototype as PrototypeSchema } from "./ui/schema.ts";
 import type { Prototype } from "./ui/schema.ts";
+import { connect } from "./db/connect.ts";
+import type { DbTarget } from "./db/connect.ts";
+import { consensus, events, modelCalls, sessions } from "./db/schema.ts";
 
 export type Session = {
   id: string;
@@ -53,145 +57,107 @@ export const isTerminal = (status: string | null) => !!status && TERMINAL.has(st
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
-export function openStore(path: string, opts: { log?: Log } = {}) {
+// Timestamps are timestamptz in the database and ISO strings everywhere else, as before.
+const iso = (d: Date) => d.toISOString();
+const toSession = (r: typeof sessions.$inferSelect): Session =>
+  ({ ...r, state: r.state as Session["state"], created_at: iso(r.created_at), updated_at: iso(r.updated_at) });
+const eventCols = {
+  id: events.id, session_id: events.session_id, kind: events.kind, speaker: events.speaker, text: events.text, created_at: events.created_at,
+};
+const toEvent = (r: { created_at: Date } & Omit<StoredEvent, "created_at">): StoredEvent => ({ ...r, created_at: iso(r.created_at) });
+
+/**
+ * Opens the store. `databaseUrl` set: Postgres, already migrated by `npm run migrate`. Otherwise PGlite, in
+ * `dataDir` or in memory when that is absent too (tests, smoke).
+ */
+export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   const log: Log = opts.log ?? (() => {});
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      meeting_url TEXT NOT NULL,
-      state TEXT NOT NULL,
-      bot_id TEXT UNIQUE,
-      bot_status TEXT,
-      bot_sub_code TEXT,
-      error TEXT,
-      stage_token TEXT,
-      handoff_token TEXT,
-      stage_html TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id),
-      recall_msg_id TEXT UNIQUE,
-      kind TEXT NOT NULL,
-      speaker TEXT,
-      text TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS consensus (
-      session_id TEXT PRIMARY KEY,
-      doc_json TEXT,
-      proto_json TEXT,
-      updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS model_calls (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      loop TEXT NOT NULL,
-      model TEXT NOT NULL,
-      input_tokens INTEGER NOT NULL,
-      output_tokens INTEGER NOT NULL,
-      cache_read_tokens INTEGER NOT NULL,
-      cache_write_tokens INTEGER NOT NULL,
-      usd REAL NOT NULL,
-      ms INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS model_calls_session ON model_calls(session_id);
-  `);
-  // Additive migration for databases created before the stage and handoff columns existed.
-  const cols = new Set((db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name));
-  for (const col of ["stage_token", "stage_html", "handoff_token"]) {
-    if (!cols.has(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
-  }
-  const now = () => new Date().toISOString();
+  const { db, close } = await connect(opts, log);
+  const now = () => new Date();
   const newToken = () => randomBytes(24).toString("base64url");
 
+  async function getSession(id: string): Promise<Session | undefined> {
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, id));
+    return row && toSession(row);
+  }
+
+  // Issues the token only while the column is empty, so two callers racing get the same one.
+  async function ensureToken(id: string, column: "stage_token" | "handoff_token"): Promise<string> {
+    const [issued] = await db.update(sessions).set({ [column]: newToken(), updated_at: now() })
+      .where(and(eq(sessions.id, id), isNull(sessions[column]))).returning({ token: sessions[column] });
+    if (issued?.token) return issued.token;
+    const s = await getSession(id);
+    if (!s?.[column]) throw new Error("session not found");
+    return s[column];
+  }
+
   return {
-    createIntent(id: string, meetingUrl: string): Session {
+    async createIntent(id: string, meetingUrl: string): Promise<Session> {
       const t = now();
-      db.prepare(`INSERT INTO sessions (id, meeting_url, state, stage_token, handoff_token, created_at, updated_at) VALUES (?, ?, 'intent', ?, ?, ?, ?)`)
-        .run(id, meetingUrl, newToken(), newToken(), t, t);
-      return this.getSession(id)!;
+      const [row] = await db.insert(sessions).values({
+        id, meeting_url: meetingUrl, state: "intent", stage_token: newToken(), handoff_token: newToken(), created_at: t, updated_at: t,
+      }).returning();
+      return toSession(row);
     },
     // An unfinished session for the same meeting means a bot is (or may be) already there.
-    findActiveForMeeting(meetingUrl: string): Session | undefined {
-      const rows = db.prepare(`SELECT * FROM sessions WHERE meeting_url = ? AND state != 'create_failed' ORDER BY created_at DESC`)
-        .all(meetingUrl) as Session[];
-      return rows.find((s) => !isTerminal(s.bot_status));
+    async findActiveForMeeting(meetingUrl: string): Promise<Session | undefined> {
+      const rows = await db.select().from(sessions)
+        .where(and(eq(sessions.meeting_url, meetingUrl), ne(sessions.state, "create_failed")))
+        .orderBy(desc(sessions.created_at));
+      return rows.map(toSession).find((s) => !isTerminal(s.bot_status));
     },
-    markCreated(id: string, botId: string) {
-      db.prepare(`UPDATE sessions SET state = 'created', bot_id = ?, bot_status = 'ready', updated_at = ? WHERE id = ?`)
-        .run(botId, now(), id);
+    async markCreated(id: string, botId: string): Promise<void> {
+      await db.update(sessions).set({ state: "created", bot_id: botId, bot_status: "ready", updated_at: now() }).where(eq(sessions.id, id));
     },
-    markCreateFailed(id: string, error: string) {
-      db.prepare(`UPDATE sessions SET state = 'create_failed', error = ?, updated_at = ? WHERE id = ?`)
-        .run(error, now(), id);
+    async markCreateFailed(id: string, error: string): Promise<void> {
+      await db.update(sessions).set({ state: "create_failed", error, updated_at: now() }).where(eq(sessions.id, id));
     },
-    updateBotStatus(id: string, status: string, subCode: string | null) {
-      db.prepare(`UPDATE sessions SET bot_status = ?, bot_sub_code = ?, updated_at = ? WHERE id = ?`)
-        .run(status, subCode, now(), id);
+    async updateBotStatus(id: string, status: string, subCode: string | null): Promise<void> {
+      await db.update(sessions).set({ bot_status: status, bot_sub_code: subCode, updated_at: now() }).where(eq(sessions.id, id));
     },
-    // Sessions created before stages existed get a token on first use.
-    ensureStageToken(id: string): string {
-      const s = this.getSession(id)!;
-      if (s.stage_token) return s.stage_token;
-      const token = newToken();
-      db.prepare(`UPDATE sessions SET stage_token = ?, updated_at = ? WHERE id = ?`).run(token, now(), id);
-      return token;
+    // Sessions created without a stage token get one on first use.
+    ensureStageToken: (id: string): Promise<string> => ensureToken(id, "stage_token"),
+    // Sessions created without a handoff token get one on first use.
+    ensureHandoffToken: (id: string): Promise<string> => ensureToken(id, "handoff_token"),
+    async setStageHtml(id: string, html: string): Promise<void> {
+      await db.update(sessions).set({ stage_html: html, updated_at: now() }).where(eq(sessions.id, id));
     },
-    // Sessions created before handoff tokens existed get one on first use.
-    ensureHandoffToken(id: string): string {
-      const s = this.getSession(id)!;
-      if (s.handoff_token) return s.handoff_token;
-      const token = newToken();
-      db.prepare(`UPDATE sessions SET handoff_token = ?, updated_at = ? WHERE id = ?`).run(token, now(), id);
-      return token;
+    getSession,
+    async getSessionByBotId(botId: string): Promise<Session | undefined> {
+      const [row] = await db.select().from(sessions).where(eq(sessions.bot_id, botId));
+      return row && toSession(row);
     },
-    setStageHtml(id: string, html: string) {
-      db.prepare(`UPDATE sessions SET stage_html = ?, updated_at = ? WHERE id = ?`).run(html, now(), id);
+    async listSessions(): Promise<Session[]> {
+      return (await db.select().from(sessions).orderBy(desc(sessions.created_at)).limit(50)).map(toSession);
     },
-    getSession(id: string): Session | undefined {
-      return db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as Session | undefined;
+    async listActiveSessions(): Promise<Session[]> {
+      return (await db.select().from(sessions).where(eq(sessions.state, "created")))
+        .map(toSession).filter((s) => !isTerminal(s.bot_status));
     },
-    getSessionByBotId(botId: string): Session | undefined {
-      return db.prepare(`SELECT * FROM sessions WHERE bot_id = ?`).get(botId) as Session | undefined;
+    // Returns the stored row, or null when this Recall message was already processed. One statement, so two
+    // deliveries of the same message racing each other still store it once.
+    async addEvent(e: { sessionId: string; recallMsgId: string | null; kind: string; speaker: string | null; text: string | null }): Promise<StoredEvent | null> {
+      const [row] = await db.insert(events)
+        .values({ session_id: e.sessionId, recall_msg_id: e.recallMsgId, kind: e.kind, speaker: e.speaker, text: e.text, created_at: now() })
+        .onConflictDoNothing({ target: events.recall_msg_id })
+        .returning(eventCols);
+      return row ? toEvent(row) : null;
     },
-    listSessions(): Session[] {
-      return db.prepare(`SELECT * FROM sessions ORDER BY created_at DESC LIMIT 50`).all() as Session[];
-    },
-    listActiveSessions(): Session[] {
-      return (db.prepare(`SELECT * FROM sessions WHERE state = 'created'`).all() as Session[])
-        .filter((s) => !isTerminal(s.bot_status));
-    },
-    // Returns the stored row, or null when this Recall message was already processed.
-    addEvent(e: { sessionId: string; recallMsgId: string | null; kind: string; speaker: string | null; text: string | null }): StoredEvent | null {
-      const res = db.prepare(`INSERT OR IGNORE INTO events (session_id, recall_msg_id, kind, speaker, text, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(e.sessionId, e.recallMsgId, e.kind, e.speaker, e.text, now());
-      if (res.changes === 0) return null;
-      return db.prepare(`SELECT id, session_id, kind, speaker, text, created_at FROM events WHERE id = ?`)
-        .get(res.lastInsertRowid) as StoredEvent;
-    },
-    recentUtterances(sessionId: string, limit: number): { speaker: string | null; text: string | null }[] {
-      const rows = db.prepare(`SELECT speaker, text FROM events WHERE session_id = ? AND kind = 'utterance' ORDER BY id DESC LIMIT ?`)
-        .all(sessionId, limit) as { speaker: string | null; text: string | null }[];
+    async recentUtterances(sessionId: string, limit: number): Promise<{ speaker: string | null; text: string | null }[]> {
+      const rows = await db.select({ speaker: events.speaker, text: events.text }).from(events)
+        .where(and(eq(events.session_id, sessionId), eq(events.kind, "utterance"))).orderBy(desc(events.id)).limit(limit);
       return rows.reverse();
     },
-    listEvents(sessionId: string): StoredEvent[] {
-      return db.prepare(`SELECT id, session_id, kind, speaker, text, created_at FROM events WHERE session_id = ? ORDER BY id`)
-        .all(sessionId) as StoredEvent[];
+    async listEvents(sessionId: string): Promise<StoredEvent[]> {
+      return (await db.select(eventCols).from(events).where(eq(events.session_id, sessionId)).orderBy(asc(events.id))).map(toEvent);
     },
     // A row that no longer parses (written by older code, say) reads as absent, so the session starts
     // from a fresh doc instead of throwing on every later event.
-    getConsensus(sessionId: string): { doc: ConsensusDoc; proto: Prototype } | undefined {
-      const row = db.prepare(`SELECT doc_json, proto_json FROM consensus WHERE session_id = ?`)
-        .get(sessionId) as { doc_json: string; proto_json: string } | undefined;
+    async getConsensus(sessionId: string): Promise<{ doc: ConsensusDoc; proto: Prototype } | undefined> {
+      const [row] = await db.select({ doc_json: consensus.doc_json, proto_json: consensus.proto_json }).from(consensus)
+        .where(eq(consensus.session_id, sessionId));
       if (!row) return undefined;
-      const json = (text: string): unknown => { try { return JSON.parse(text); } catch { return undefined; } };
+      const json = (text: string | null): unknown => { try { return JSON.parse(text ?? ""); } catch { return undefined; } };
       const doc = ConsensusDocSchema.safeParse(json(row.doc_json));
       const proto = PrototypeSchema.safeParse(json(row.proto_json));
       if (!doc.success || !proto.success) {
@@ -200,26 +166,30 @@ export function openStore(path: string, opts: { log?: Log } = {}) {
       }
       return { doc: doc.data, proto: proto.data };
     },
-    saveConsensus(sessionId: string, doc: ConsensusDoc, proto: Prototype): void {
-      db.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET doc_json = excluded.doc_json, proto_json = excluded.proto_json, updated_at = excluded.updated_at`)
-        .run(sessionId, JSON.stringify(doc), JSON.stringify(proto), now());
+    async saveConsensus(sessionId: string, doc: ConsensusDoc, proto: Prototype): Promise<void> {
+      const row = { doc_json: JSON.stringify(doc), proto_json: JSON.stringify(proto), updated_at: now() };
+      await db.insert(consensus).values({ session_id: sessionId, ...row })
+        .onConflictDoUpdate({ target: consensus.session_id, set: row });
     },
-    addModelCall(c: { sessionId: string; loop: string; model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; usd: number; ms: number }): void {
-      db.prepare(`INSERT INTO model_calls (session_id, loop, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, usd, ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(c.sessionId, c.loop, c.model, c.inputTokens, c.outputTokens, c.cacheReadTokens, c.cacheWriteTokens, c.usd, Math.round(c.ms), now());
+    async addModelCall(c: { sessionId: string; loop: string; model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; usd: number; ms: number }): Promise<void> {
+      await db.insert(modelCalls).values({
+        session_id: c.sessionId, loop: c.loop, model: c.model, input_tokens: c.inputTokens, output_tokens: c.outputTokens,
+        cache_read_tokens: c.cacheReadTokens, cache_write_tokens: c.cacheWriteTokens, usd: c.usd, ms: Math.round(c.ms), created_at: now(),
+      });
     },
-    listModelCalls(sessionId: string): ModelCall[] {
-      return db.prepare(`SELECT * FROM model_calls WHERE session_id = ? ORDER BY id`).all(sessionId) as ModelCall[];
+    async listModelCalls(sessionId: string): Promise<ModelCall[]> {
+      const rows = await db.select().from(modelCalls).where(eq(modelCalls.session_id, sessionId)).orderBy(asc(modelCalls.id));
+      return rows.map((r) => ({ ...r, created_at: iso(r.created_at) }));
     },
-    sessionCost(sessionId: string): number {
-      const row = db.prepare(`SELECT COALESCE(SUM(usd), 0) AS total FROM model_calls WHERE session_id = ?`).get(sessionId) as { total: number };
+    async sessionCost(sessionId: string): Promise<number> {
+      const [row] = await db.select({ total: sql<number>`COALESCE(SUM(${modelCalls.usd}), 0)`.mapWith(Number) }).from(modelCalls)
+        .where(eq(modelCalls.session_id, sessionId));
       return row.total;
     },
-    close() {
-      db.close();
+    close(): Promise<void> {
+      return close();
     },
   };
 }
 
-export type Store = ReturnType<typeof openStore>;
+export type Store = Awaited<ReturnType<typeof openStore>>;

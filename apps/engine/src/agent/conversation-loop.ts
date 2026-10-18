@@ -152,10 +152,10 @@ export function createChatSpeech(deps: {
   return {
     async say(sessionId, text) {
       const line = text.slice(0, CHAT_MAX);
-      const botId = deps.store.getSession(sessionId)?.bot_id;
+      const botId = (await deps.store.getSession(sessionId))?.bot_id;
       if (!botId) throw new Error("no bot for session");
       await deps.recall.sendChatMessage(botId, line);
-      deps.store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
+      await deps.store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
       deps.runtime(sessionId).caption({ partial: false, isAgent: true });
       return randomUUID();
     },
@@ -237,11 +237,12 @@ export function createConversationLoop(deps: {
   // Sessions whose call is over: no more turns, speech or stuck checks (known issue I5).
   const ended = new Set<string>();
 
-  const state = (sessionId: string, fromRecording = false): SessionState => {
+  // `already`: the session was recording before a restart, so it has had its opening. Only resume() knows
+  // that. A session met first through an event isn't recording yet: after a restart, every call still
+  // recording is resumed before the app serves anything.
+  const state = (sessionId: string, already = false): SessionState => {
     let st = sessions.get(sessionId);
     if (!st) {
-      // A session first seen already recording (after a restart) has had its opening.
-      const already = !fromRecording && store.getSession(sessionId)?.bot_status === "in_call_recording";
       st = {
         port: withCostRecording(deps.port, { store, sessionId }),
         detector: createStuckDetector({ clock }),
@@ -600,7 +601,7 @@ export function createConversationLoop(deps: {
     onBotRecording(sessionId: string): void {
       if (ended.has(sessionId)) return;
       guard("onBotRecording", sessionId, () => {
-        const st = state(sessionId, true);
+        const st = state(sessionId);
         st.recording = true;
         maybeOpen(sessionId, st);
       });
@@ -610,11 +611,21 @@ export function createConversationLoop(deps: {
     // transcript window and who is in the meeting are rebuilt from the stored events. The reloaded
     // lines count as handed off: the build loop had its turn at them, and handing them off again
     // could replay support for a decision reopened since.
-    resume(sessionId: string): void {
+    // Never rejects: a failure is logged like any entry point's.
+    async resume(sessionId: string): Promise<void> {
+      if (ended.has(sessionId) || sessions.has(sessionId)) return;
+      let session, stored;
+      try {
+        [session, stored] = await Promise.all([store.getSession(sessionId), store.listEvents(sessionId)]);
+      } catch (err) {
+        log("conversation.entry_failed", { session_id: sessionId, entry: "resume", error: errorName(err) });
+        return;
+      }
+      // Met in the meantime (ended, or an event came first): what is in memory wins.
       if (ended.has(sessionId) || sessions.has(sessionId)) return;
       guard("resume", sessionId, () => {
-        const st = state(sessionId);
-        for (const e of store.listEvents(sessionId)) {
+        const st = state(sessionId, session?.bot_status === "in_call_recording");
+        for (const e of stored) {
           if (e.speaker === botName) continue;
           if (e.kind === "utterance" && e.text) {
             pushLine(st, { id: e.id, speaker: e.speaker ?? "Unknown", text: e.text });

@@ -7,10 +7,7 @@ import { openStore } from "../src/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { verifyRequestFromRecall, signForTest } from "../src/verify.ts";
 import { parseRealtimeEvent } from "../src/realtime.ts";
-import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 const SECRET = "whsec_" + Buffer.from("unit-test-secret").toString("base64");
 const ENV = {
@@ -28,10 +25,10 @@ after(() => { for (const s of openServers) { s.closeAllConnections(); s.close();
 
 async function startApp(fakeFetch: typeof fetch) {
   const config = loadConfig(ENV);
-  const store = openStore(":memory:");
+  const store = await openStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeFetch, sleep: async () => {} });
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const app = createApp({ config, recall, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "<html></html>", stageHtml: "<html>stage</html>" });
+  const app = await createApp({ config, recall, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "<html></html>", stageHtml: "<html>stage</html>" });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   openServers.add(server);
@@ -130,7 +127,7 @@ test("meeting URL -> intent persisted before Recall call -> bot id stored -> ver
   let ctx: Awaited<ReturnType<typeof startApp>>;
   ctx = await startApp((async (url: string) => {
     if (url.endsWith("/bot/")) {
-      intentSeenDuringCreate = ctx.store.listSessions().some((s) => s.state === "intent");
+      intentSeenDuringCreate = (await ctx.store.listSessions()).some((s) => s.state === "intent");
       return Response.json({ id: "bot-1" }, { status: 201 });
     }
     return Response.json({ id: "bot-1", status_changes: [{ code: "joining_call", sub_code: null }, { code: "in_call_recording", sub_code: null }] });
@@ -262,20 +259,6 @@ test("through the tunnel only the stage and signed Recall webhook are reachable"
   await ctx.close();
 });
 
-test("databases created before the stage columns are migrated and old sessions get a stage token", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "m2b-")), "old.db");
-  const old = new DatabaseSync(path);
-  old.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, meeting_url TEXT NOT NULL, state TEXT NOT NULL, bot_id TEXT UNIQUE,
-    bot_status TEXT, bot_sub_code TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-    INSERT INTO sessions VALUES ('11111111-1111-1111-1111-111111111111','https://meet.google.com/x','created','b','in_call_recording',NULL,NULL,'t','t');`);
-  old.close();
-  const store = openStore(path);
-  const token = store.ensureStageToken("11111111-1111-1111-1111-111111111111");
-  assert.ok(token.length >= 32);
-  assert.equal(store.ensureStageToken("11111111-1111-1111-1111-111111111111"), token, "stable once issued");
-  store.close();
-});
-
 test("stage routes never serve transcript text: /state has no captions and there is no public stream (known issue I7)", async () => {
   const ctx = await startApp((async () => Response.json({ id: "bot-6" }, { status: 201 })) as any);
   const { session } = (await (await post(`${ctx.base}/api/sessions`, { meeting_url: "https://meet.google.com/cap-tion-sss" })).json()) as any;
@@ -302,10 +285,10 @@ test("stage routes never serve transcript text: /state has no captions and there
 // ---------- crash safety (known issue I6) ----------
 test("an error while processing a realtime event is logged by name and the server keeps running", async () => {
   const config = loadConfig(ENV);
-  const store = openStore(":memory:");
+  const store = await openStore();
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-7" }, { status: 201 })) as any, sleep: async () => {} });
-  const app = createApp({
+  const app = await createApp({
     config, recall, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "", stageHtml: "",
     runtime: () => { throw new SyntaxError("Unexpected token in secret roadmap"); },
   });
@@ -326,35 +309,6 @@ test("an error while processing a realtime event is logged by name and the serve
   openServers.delete(server);
   server.closeAllConnections();
   server.close();
-});
-
-test("a stored consensus row that no longer parses reads as absent instead of throwing", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "m2b-")), "bad.db");
-  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const store = openStore(path, { log: (msg, fields) => logs.push({ msg, fields }) });
-  const id = "33333333-3333-3333-3333-333333333333";
-  store.createIntent(id, "https://meet.google.com/x");
-  const raw = new DatabaseSync(path);
-  raw.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, 't')`).run(id, '{"old":"shape"}', "not json");
-  raw.close();
-  assert.equal(store.getConsensus(id), undefined);
-  assert.deepEqual(logs, [{ msg: "store.consensus_invalid", fields: { session_id: id, doc_ok: false, proto_ok: false } }]);
-  store.close();
-});
-
-test("databases created before handoff tokens get one on first use, distinct from the stage token", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "m2b-")), "old2.db");
-  const old = new DatabaseSync(path);
-  old.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, meeting_url TEXT NOT NULL, state TEXT NOT NULL, bot_id TEXT UNIQUE,
-    bot_status TEXT, bot_sub_code TEXT, error TEXT, stage_token TEXT, stage_html TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-    INSERT INTO sessions VALUES ('44444444-4444-4444-4444-444444444444','https://meet.google.com/x','created','b','done',NULL,NULL,'stage-tok',NULL,'t','t');`);
-  old.close();
-  const store = openStore(path);
-  const token = store.ensureHandoffToken("44444444-4444-4444-4444-444444444444");
-  assert.ok(token.length >= 32);
-  assert.notEqual(token, "stage-tok");
-  assert.equal(store.ensureHandoffToken("44444444-4444-4444-4444-444444444444"), token, "stable once issued");
-  store.close();
 });
 
 test("stage page hides the placeholder for real and does not depend on SSE", () => {

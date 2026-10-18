@@ -37,10 +37,14 @@ function heldPort() {
   return { port, calls, release };
 }
 
-function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome } = {}) {
-  const store = openStore(":memory:");
+// One database for the file: each test works in its own new session, and starting a database per test
+// would cost more than the tests themselves.
+const sharedStore = openStore();
+
+async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome } = {}) {
+  const store = await sharedStore;
   const sessionId = randomUUID();
-  store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
+  await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
   let t = T0;
   const clock = () => t;
   const sent: StageEvent[] = [];
@@ -60,8 +64,8 @@ function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sess
     ...(opts.uiCommand ? { uiCommand: opts.uiCommand } : {}),
   });
   const rt = runtime(sessionId);
-  const say = (speaker: string, text: string) => {
-    const e = store.addEvent({ sessionId, recallMsgId: null, kind: "utterance", speaker, text })!;
+  const say = async (speaker: string, text: string) => {
+    const e = (await store.addEvent({ sessionId, recallMsgId: null, kind: "utterance", speaker, text }))!;
     loop.onUtterance(sessionId, { id: e.id, speaker, text });
     return e.id;
   };
@@ -86,15 +90,15 @@ function handoff(groundingIds: number[], over: Partial<Handoff> = {}): Handoff {
 }
 
 test("own utterances are ignored", async () => {
-  const s = setup([[speak("Sure.", "answer")]]);
-  const own = s.say("Builder", "Hey Builder, I am Builder?");
+  const s = await setup([[speak("Sure.", "answer")]]);
+  const own = await s.say("Builder", "Hey Builder, I am Builder?");
   await flush();
   assert.equal(s.requests.length, 0, "Builder's own line triggers no model call");
   assert.equal(s.mood(), "listening", "and is not treated as being addressed");
   s.loop.onPartial(s.sessionId, { speaker: "Builder", text: "hey builder" });
   assert.equal(s.mood(), "listening");
 
-  s.say("Amir", "Let's start with the task list.");
+  await s.say("Amir", "Let's start with the task list.");
   await flush();
   assert.equal(s.requests.length, 1);
   assert.ok(!s.userText(0).includes(`[${own}]`), "Builder's transcribed line is not in the window");
@@ -103,13 +107,13 @@ test("own utterances are ignored", async () => {
 
 test("addressing 'hey Builder' sets thinking mood before the model responds", async () => {
   const held = heldPort();
-  const s = setup(held.port);
+  const s = await setup(held.port);
   assert.equal(s.mood(), "listening");
   s.loop.onPartial(s.sessionId, { speaker: "Sara", text: "hey builder what do" });
   assert.equal(s.mood(), "thinking", "reacts on the partial, synchronously");
   assert.equal(held.calls.length, 0, "no model call for a partial");
 
-  s.say("Sara", "Hey Builder, what do you think about a sidebar?");
+  await s.say("Sara", "Hey Builder, what do you think about a sidebar?");
   await flush();
   assert.equal(held.calls.length, 1);
   assert.equal(s.mood(), "thinking", "still thinking while the model call is in flight");
@@ -118,15 +122,15 @@ test("addressing 'hey Builder' sets thinking mood before the model responds", as
   assert.equal(s.mood(), "curious", "its line asked the room something");
 
   // A plain final with the name also reacts at once; the window is 8 s.
-  const t = setup(heldPort().port);
-  t.say("Amir", "builder, show settings");
+  const t = await setup(heldPort().port);
+  await t.say("Amir", "builder, show settings");
   assert.equal(t.mood(), "thinking");
   t.advance(ADDRESSED_MS + 1);
   assert.equal(t.mood(), "listening");
 });
 
 test("speak without valid reason is blocked (silent by default)", async () => {
-  const s = setup([
+  const s = await setup([
     [speak("Nice idea!", "answer")],
     [speak("Hello!", "opening")],
     [speak("Anyone?", "stuck")],
@@ -134,7 +138,7 @@ test("speak without valid reason is blocked (silent by default)", async () => {
     [speak("Done.", "command_feedback")],
   ]);
   for (let i = 0; i < 5; i++) {
-    s.say("Amir", `We could add tags, version ${i}.`);
+    await s.say("Amir", `We could add tags, version ${i}.`);
     await flush();
   }
   assert.equal(s.requests.length, 5);
@@ -143,8 +147,8 @@ test("speak without valid reason is blocked (silent by default)", async () => {
   for (const l of s.blocked()) assert.ok(!JSON.stringify(l).includes("Nice idea"), "no spoken text in logs");
 
   // Allowed reason but two questions in one line: blocked too.
-  const q = setup([[speak("Tabs or a sidebar? Or both?", "answer")]]);
-  q.say("Sara", "Builder, what layout?");
+  const q = await setup([[speak("Tabs or a sidebar? Or both?", "answer")]]);
+  await q.say("Sara", "Builder, what layout?");
   await flush();
   assert.deepEqual(q.said, []);
   assert.equal(q.blocked()[0].fields?.why, "too_many_questions");
@@ -152,7 +156,7 @@ test("speak without valid reason is blocked (silent by default)", async () => {
 
 test("opening speaks once after bot records with a human present", async () => {
   const opening = "I'm Builder: I'll listen and sketch, so just say my name. What's the app, and who's it for?";
-  const s = setup([[speak(opening, "opening")], [speak(opening, "opening")]]);
+  const s = await setup([[speak(opening, "opening")], [speak(opening, "opening")]]);
   s.loop.onBotRecording(s.sessionId);
   await flush();
   assert.equal(s.requests.length, 0, "no human yet: no opening");
@@ -170,7 +174,7 @@ test("opening speaks once after bot records with a human present", async () => {
   s.loop.onBotRecording(s.sessionId);
   await flush();
   assert.equal(s.requests.length, 1, "the opening turn runs once per session");
-  s.say("Amir", "So, a todo app.");
+  await s.say("Amir", "So, a todo app.");
   await flush();
   assert.deepEqual(s.said, [opening], "a second opening is blocked");
   assert.equal(s.blocked().at(-1)?.fields?.reason, "opening");
@@ -179,7 +183,7 @@ test("opening speaks once after bot records with a human present", async () => {
 const FALLBACK_OPENING = "Hi, I'm Builder. I'll listen and sketch; say my name if you need me.";
 
 test("opening falls back to the fixed line when the model throws", async () => {
-  const s = setup({ runTools: async () => { throw new Error("boom"); } });
+  const s = await setup({ runTools: async () => { throw new Error("boom"); } });
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
   s.loop.onBotRecording(s.sessionId);
   await flush();
@@ -193,12 +197,12 @@ test("opening falls back to the fixed line when the model throws", async () => {
 });
 
 test("opening falls back when the model stays silent", async () => {
-  const s = setup([[speak("Hello there!", "answer")], [speak("Hi again, I'm Builder. What's the app for?", "opening")]]);
+  const s = await setup([[speak("Hello there!", "answer")], [speak("Hi again, I'm Builder. What's the app for?", "opening")]]);
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
   s.loop.onBotRecording(s.sessionId);
   await flush();
   assert.deepEqual(s.said, [FALLBACK_OPENING], "no valid speak(opening): the fixed line is said");
-  s.say("Amir", "Okay, a todo app.");
+  await s.say("Amir", "Okay, a todo app.");
   await flush();
   assert.deepEqual(s.said, [FALLBACK_OPENING], "opened: a later opening is blocked");
 });
@@ -206,7 +210,7 @@ test("opening falls back when the model stays silent", async () => {
 test("an opening longer than about five seconds is not said; the short fixed line is", async () => {
   const long = "Hi, I'm Builder: I'll mostly listen and sketch what you describe, so say my name if you need me. What's the app for, and who will use it?";
   assert.ok(long.length > OPENING_MAX && FALLBACK_OPENING.length <= OPENING_MAX);
-  const s = setup([[speak(long, "opening")]]);
+  const s = await setup([[speak(long, "opening")]]);
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
   s.loop.onBotRecording(s.sessionId);
   await flush();
@@ -214,11 +218,12 @@ test("an opening longer than about five seconds is not said; the short fixed lin
   assert.deepEqual(s.blocked().map((l) => [l.fields?.reason, l.fields?.why]), [["opening", "too_long"]]);
 });
 
-test("a throwing store in onUtterance does not throw into the caller", async () => {
-  const store = openStore(":memory:");
-  const broken = { ...store, getSession: () => { throw new Error("db is gone"); } } as typeof store;
+test("a failing store or runtime does not throw into the caller", async () => {
+  const store = await openStore();
+  const fail = async (): Promise<never> => { throw new Error("db is gone"); };
+  const broken = { ...store, getSession: fail, listEvents: fail, addEvent: fail, addModelCall: fail } as typeof store;
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
+  const runtime = () => { throw new Error("db is gone"); };
   const loop = createConversationLoop({
     port: createFakePort([]), runtime, store: broken, clock: () => T0, log: (msg, fields) => logs.push({ msg, fields }),
     buildLoop: { handoff() {} }, speech: { say: async () => "u", stop() {}, speaking: () => false },
@@ -229,22 +234,26 @@ test("a throwing store in onUtterance does not throw into the caller", async () 
   assert.doesNotThrow(() => loop.onParticipant(sid, { kind: "join", name: "Amir" }));
   assert.doesNotThrow(() => loop.onBotRecording(sid));
   assert.doesNotThrow(() => loop.poll(T0));
+  // After a restart, a store that can't be read leaves the session to start fresh, logged.
+  await loop.resume(randomUUID());
   await flush();
   const failed = logs.filter((l) => l.msg === "conversation.entry_failed");
-  assert.deepEqual(failed.map((l) => l.fields?.entry), ["onUtterance", "onPartial", "onParticipant"]);
+  assert.ok(failed.some((l) => l.fields?.entry === "onPartial"), "the runtime's failure is caught");
+  assert.ok(failed.some((l) => l.fields?.entry === "resume"), "the store's failure is caught");
   for (const l of failed) assert.equal(l.fields?.error, "Error", "errors are logged by name only");
   assert.ok(!JSON.stringify(logs).includes("db is gone"));
+  await store.close();
 });
 
 test("failing commands stop triggering follow-up turns after 2", async () => {
-  const s = setup(fnPort(() => [{ name: "ui_command", input: { action: "click", target: "Nope" } }]), {
+  const s = await setup(fnPort(() => [{ name: "ui_command", input: { action: "click", target: "Nope" } }]), {
     uiCommand: () => ({ ok: false, reason: "not_found" }),
   });
-  s.say("Amir", "Click nope.");
+  await s.say("Amir", "Click nope.");
   await flush();
   assert.equal(s.requests.length, 3, "the utterance turn plus 2 follow-ups");
   assert.ok(s.logs.some((l) => l.msg === "conversation.command_followup_capped"));
-  s.say("Amir", "Try again, click nope.");
+  await s.say("Amir", "Try again, click nope.");
   await flush();
   assert.equal(s.requests.length, 6, "a new human utterance resets the cap");
 });
@@ -264,18 +273,20 @@ function fnPort(fn: (i: number, text: string) => ToolCall[]): ModelPort {
 
 test("update_build forwards a schema-valid handoff with grounding ids to the build loop", async () => {
   const ids: Record<string, number> = {};
-  const s = setup(fnPort((i) => {
+  const s = await setup(fnPort((i) => {
     if (i === 0) return [updateBuild(handoff([ids.amir, ids.builder, ids.foreign, 999_999]))];
     if (i === 1) return [updateBuild(handoff([ids.builder, 999_999]))];
     if (i === 2) return [updateBuild({ ...handoff([ids.amir]), mood: "bogus" } as unknown as Handoff)];
     return [];
   }));
   const other = randomUUID();
-  s.store.createIntent(other, "https://meet.google.com/xyz-abcd-efg");
-  ids.foreign = s.store.addEvent({ sessionId: other, recallMsgId: null, kind: "utterance", speaker: "Eve", text: "Agreed." })!.id;
-  ids.builder = s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Builder", text: "Sounds good." })!.id;
+  await s.store.createIntent(other, "https://meet.google.com/xyz-abcd-efg");
+  ids.foreign = (await s.store.addEvent({ sessionId: other, recallMsgId: null, kind: "utterance", speaker: "Eve", text: "Agreed." }))!.id;
+  ids.builder = (await s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Builder", text: "Sounds good." }))!.id;
   s.loop.onUtterance(s.sessionId, { id: ids.builder, speaker: "Builder", text: "Sounds good." });
-  ids.amir = s.say("Amir", "Quick-add at the top.");
+  // Stored first, then heard: the port reads ids.amir when the turn starts.
+  ids.amir = (await s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Amir", text: "Quick-add at the top." }))!.id;
+  s.loop.onUtterance(s.sessionId, { id: ids.amir, speaker: "Amir", text: "Quick-add at the top." });
   await flush();
 
   assert.equal(s.handoffs.length, 1);
@@ -285,13 +296,13 @@ test("update_build forwards a schema-valid handoff with grounding ids to the bui
   assert.equal(h.topics[0].proposals[0].proposedBy, "Amir");
 
   // The transcript marks what has already been handed off.
-  s.say("Sara", "Yes, let's do that.");
+  await s.say("Sara", "Yes, let's do that.");
   await flush();
   assert.ok(s.userText(1).includes(`handed_off_through="${ids.amir}"`));
   assert.equal(s.handoffs.length, 1, "a hand-off with no valid grounding is not forwarded");
   assert.ok(s.logs.some((l) => l.msg === "handoff.ungrounded"));
 
-  s.say("Sara", "And tags later.");
+  await s.say("Sara", "And tags later.");
   await flush();
   assert.equal(s.handoffs.length, 1, "a schema-invalid hand-off is not forwarded");
 });
@@ -314,8 +325,8 @@ function toolStream(name: string, input: unknown): typeof fetch {
 // decoding is not enforced through OpenRouter, Haiku put requestedView inside a topic, and the port
 // dropped the whole hand-off, resolvedChoice included.
 test("update_build survives the observed slips (requestedView inside a topic, an unknown key) and stays strict elsewhere", async () => {
-  const s = setup([[]]);
-  const id = s.say("Maya", "Fine, option B. Can we see settings next?");
+  const s = await setup([[]]);
+  const id = await s.say("Maya", "Fine, option B. Can we see settings next?");
   await flush();
   const tool = (s.requests[0].tools as PortTool[]).find((t) => t.name === "update_build")!;
   const run = async (input: unknown) => {
@@ -374,10 +385,10 @@ test("a topic's requestedView moves up: the hand-off's own wins, else the latest
 
 test("context window is capped at 40 utterances", async () => {
   const held = heldPort();
-  const s = setup(held.port);
-  const ids = [s.say("Amir", "line 0")];
+  const s = await setup(held.port);
+  const ids = [await s.say("Amir", "line 0")];
   await flush();
-  for (let i = 1; i < 50; i++) ids.push(s.say(i % 2 ? "Sara" : "Amir", `line ${i}`));
+  for (let i = 1; i < 50; i++) ids.push(await s.say(i % 2 ? "Sara" : "Amir", `line ${i}`));
   await held.release(0);
   assert.equal(held.calls.length, 2, "utterances during a call coalesce into one follow-up call");
   const text = (held.calls[1].req.messages as { content: string }[])[0].content;
@@ -389,8 +400,8 @@ test("context window is capped at 40 utterances", async () => {
 });
 
 test("model calls use Haiku at low effort with strict tools and are cost-recorded", async () => {
-  const s = setup([[]]);
-  s.say("Amir", "Hello everyone.");
+  const s = await setup([[]]);
+  await s.say("Amir", "Hello everyone.");
   await flush();
   const req = s.requests[0];
   assert.equal(req.loop, "conversation");
@@ -403,19 +414,19 @@ test("model calls use Haiku at low effort with strict tools and are cost-recorde
     assert.equal(t.strict, true);
     assert.equal(t.input_schema.additionalProperties, false);
   }
-  const calls = s.store.listModelCalls(s.sessionId);
+  const calls = await s.store.listModelCalls(s.sessionId);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].loop, "conversation");
   assert.equal(calls[0].model, "anthropic/claude-haiku-5.5");
 });
 
 test("an answer is spoken once per address; human speech clears the question mood", async () => {
-  const s = setup([[speak("Tabs. Want them?", "answer")], [speak("Tabs again.", "answer")]]);
-  s.say("Sara", "Builder, tabs or sidebar?");
+  const s = await setup([[speak("Tabs. Want them?", "answer")], [speak("Tabs again.", "answer")]]);
+  await s.say("Sara", "Builder, tabs or sidebar?");
   await flush();
   assert.deepEqual(s.said, ["Tabs. Want them?"]);
   assert.equal(s.mood(), "curious");
-  s.say("Amir", "Tabs it is.");
+  await s.say("Amir", "Tabs it is.");
   await flush();
   assert.deepEqual(s.said, ["Tabs. Want them?"], "the same address is not answered twice");
   assert.equal(s.mood(), "listening", "a human utterance clears lastSpeechWasQuestion");
@@ -433,7 +444,7 @@ const conflictDoc = (): ConsensusDoc => ({
 });
 
 test("confirm_conflict speaks only within 10 s of a conflict resolving", async () => {
-  const s = setup(fnPort((i, text) => {
+  const s = await setup(fnPort((i, text) => {
     const confirm = speak("So: B. Everyone OK?", "confirm_conflict");
     if (i !== 1) return [confirm];
     const ids = [...text.matchAll(/\[(\d+)\] Sara/g)].map((m) => Number(m[1]));
@@ -444,16 +455,16 @@ test("confirm_conflict speaks only within 10 s of a conflict resolving", async (
   // The fake build loop resolves the way the real one does: synchronously, inside handoff().
   s.handoffHooks.push((h) => { const c = h.topics[0]?.resolvedChoice; if (c) s.rt.resolveComparison(c.conflictId, c.winner); });
 
-  s.say("Amir", "Hmm, not sure.");
+  await s.say("Amir", "Hmm, not sure.");
   await flush();
   assert.deepEqual(s.said, [], "no resolution yet");
 
-  s.say("Sara", "Let's go with B.");
+  await s.say("Sara", "Let's go with B.");
   await flush();
   assert.deepEqual(s.said, ["So: B. Everyone OK?"], "update_build runs before speak, so the fresh resolution counts");
 
   s.advance(3_000);
-  s.say("Amir", "Fine by me.");
+  await s.say("Amir", "Fine by me.");
   await flush();
   assert.deepEqual(s.said, ["So: B. Everyone OK?"], "one confirmation per resolution");
 });
@@ -461,13 +472,13 @@ test("confirm_conflict speaks only within 10 s of a conflict resolving", async (
 test("a failed voice command gets a follow-up turn where command_feedback may speak", async () => {
   const commands: UiCommand[] = [];
   const seen: string[] = [];
-  const s = setup(fnPort((i, text) => {
+  const s = await setup(fnPort((i, text) => {
     seen.push(text);
     if (i === 0) return [{ name: "ui_command", input: { action: "click", target: "Add" } }];
     if (i === 1) return [speak("The Add button or Add list?", "command_feedback")];
     return [speak("Done.", "command_feedback")];
   }), { uiCommand: (_sid, cmd) => { commands.push(cmd); return { ok: false, reason: "ambiguous", candidates: ["Add button", "Add list"] }; } });
-  s.say("Amir", "Click Add.");
+  await s.say("Amir", "Click Add.");
   await flush();
   assert.deepEqual(commands, [{ action: "click", target: "Add" }]);
   assert.equal(s.requests.length, 2, "the result is shown to the model in a follow-up turn");
@@ -476,13 +487,13 @@ test("a failed voice command gets a follow-up turn where command_feedback may sp
   assert.deepEqual(s.said, ["The Add button or Add list?"]);
 
   s.advance(6_000);
-  s.say("Amir", "Never mind.");
+  await s.say("Amir", "Never mind.");
   await flush();
   assert.deepEqual(s.said, ["The Add button or Add list?"], "feedback only within 5 s of the command, once");
 });
 
 test("a stuck event from poll runs one turn where stuck may speak", async () => {
-  const s = setup([
+  const s = await setup([
     [], // the opening turn: the model stays silent, so the fixed opening is said
     [speak("I'd start with who uses it. Just you, or a team?", "answer")],
     [speak("Maybe start smaller: is this for one person?", "stuck")],
@@ -494,7 +505,7 @@ test("a stuck event from poll runs one turn where stuck may speak", async () => 
   assert.deepEqual(s.said, [FALLBACK_OPENING]);
   const before = s.requests.length;
   // Builder asks the room something (here while answering an address).
-  s.say("Amir", "Builder, where do we start?");
+  await s.say("Amir", "Builder, where do we start?");
   await flush();
   assert.equal(s.said.length, 2);
   const calls = s.requests.length;
@@ -516,56 +527,56 @@ test("a stuck event from poll runs one turn where stuck may speak", async () => 
 
 // ---------- being addressed (known issue M4) ----------
 test("'form builder' is not Builder's name, and a question right after Builder's line is a follow-up it may answer", async () => {
-  const s = setup([
+  const s = await setup([
     [speak("Nobody asked.", "answer")],
     [speak("Tabs keep it simple. Want tabs?", "answer")],
     [speak("Fewer taps on a phone.", "answer")],
     [speak("Sure.", "answer")],
     [speak("Dark mode can wait.", "answer")],
   ]);
-  s.say("Amir", "We need a form builder for the survey, like a page builder?");
+  await s.say("Amir", "We need a form builder for the survey, like a page builder?");
   await flush();
   assert.equal(s.mood(), "listening", "not addressed");
   assert.match(s.userText(0), /<speaking_allowed>none<\/speaking_allowed>/);
-  s.say("Sara", "Builder, tabs or a sidebar?");
+  await s.say("Sara", "Builder, tabs or a sidebar?");
   await flush();
   s.advance(5_000);
-  s.say("Sara", "Why?");
+  await s.say("Sara", "Why?");
   assert.equal(s.mood(), "thinking", "a follow-up reacts at once, like the name");
   await flush();
   assert.deepEqual(s.said, ["Tabs keep it simple. Want tabs?", "Fewer taps on a phone."]);
   // Only the first thing said after Builder's line, and only a question, is a follow-up.
-  s.say("Amir", "Okay.");
+  await s.say("Amir", "Okay.");
   await flush();
-  s.say("Amir", "And dark mode?");
+  await s.say("Amir", "And dark mode?");
   await flush();
   assert.deepEqual(s.said.length, 2);
   assert.deepEqual(s.blocked().map((l) => l.fields?.why), ["reason_not_open", "reason_not_open", "reason_not_open"]);
 
   // A question long after Builder's line is for the room.
-  const t = setup([[speak("Tabs. Want them?", "answer")], [speak("Because.", "answer")]]);
-  t.say("Sara", "Builder, which layout?");
+  const t = await setup([[speak("Tabs. Want them?", "answer")], [speak("Because.", "answer")]]);
+  await t.say("Sara", "Builder, which layout?");
   await flush();
   t.advance(FOLLOW_UP_MS + 1);
-  t.say("Sara", "Why?");
+  await t.say("Sara", "Why?");
   await flush();
   assert.deepEqual(t.said, ["Tabs. Want them?"]);
 });
 
 // ---------- after a restart (known issue M2) ----------
 test("after a restart, resume() reloads the transcript window as already handed off, and the opening stays done", async () => {
-  const s = setup([[], []]);
-  s.store.markCreated(s.sessionId, "bot-1");
-  s.store.updateBotStatus(s.sessionId, "in_call_recording", null);
-  const add = (speaker: string, text: string | null, kind = "utterance") => s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind, speaker, text })!.id;
-  add("Maya", null, "join");
-  add("Ola", null, "join");
-  const amir = add("Amir", "Quick-add at the top.");
-  add("Builder", "Got it.");
-  add("Ola", null, "leave");
-  const sara = add("Sara", "Yes, and tags later.");
-  s.loop.resume(s.sessionId);
-  s.say("Lee", "And due dates.");
+  const s = await setup([[], []]);
+  await s.store.markCreated(s.sessionId, "bot-1");
+  await s.store.updateBotStatus(s.sessionId, "in_call_recording", null);
+  const add = async (speaker: string, text: string | null, kind = "utterance") => (await s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind, speaker, text }))!.id;
+  await add("Maya", null, "join");
+  await add("Ola", null, "join");
+  const amir = await add("Amir", "Quick-add at the top.");
+  await add("Builder", "Got it.");
+  await add("Ola", null, "leave");
+  const sara = await add("Sara", "Yes, and tags later.");
+  await s.loop.resume(s.sessionId);
+  await s.say("Lee", "And due dates.");
   await flush();
   assert.equal(s.requests.length, 1, "no second opening");
   const text = s.userText(0);
@@ -580,12 +591,12 @@ test("after a restart, resume() reloads the transcript window as already handed 
 // ---------- end of the call (known issue I5) ----------
 test("after the bot leaves, Builder stops talking and nothing it hears, no stuck check and no late result makes it act", async () => {
   const held = heldPort();
-  const s = setup(held.port);
+  const s = await setup(held.port);
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Amir" });
   s.loop.onBotRecording(s.sessionId);
   await flush();
   assert.equal(held.calls.length, 1, "the opening turn is in flight");
-  s.say("Amir", "Builder, where do we start?");
+  await s.say("Amir", "Builder, where do we start?");
   await flush();
 
   s.loop.onBotEnded(s.sessionId);
@@ -594,7 +605,7 @@ test("after the bot leaves, Builder stops talking and nothing it hears, no stuck
   assert.deepEqual(s.said, [], "the late opening is discarded, and no fallback line is said");
   assert.ok(s.logs.some((l) => l.msg === "conversation.turn_discarded"));
 
-  s.say("Amir", "Is anyone there?");
+  await s.say("Amir", "Is anyone there?");
   s.loop.onPartial(s.sessionId, { speaker: "Amir", text: "hey builder" });
   s.loop.onParticipant(s.sessionId, { kind: "join", name: "Sara" });
   s.loop.onBotRecording(s.sessionId);
@@ -615,24 +626,24 @@ test("a model call that stalls past its deadline frees the loop: the next uttera
     return silent(url, init);
   }) as typeof fetch;
   const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: fetchFn, deadlineMs: { conversation: 50 } });
-  const s = setup(port);
-  s.say("Amir", "Let's start with the task list.");
+  const s = await setup(port);
+  await s.say("Amir", "Let's start with the task list.");
   await flush();
   assert.equal(fetches, 1);
   await new Promise((r) => setTimeout(r, 150));
   await flush();
   assert.ok(s.logs.some((l) => l.msg === "conversation.turn_failed" && l.fields?.error === "LlmTimeoutError"));
-  s.say("Sara", "And due dates.");
+  await s.say("Sara", "And due dates.");
   await new Promise((r) => setTimeout(r, 50));
   await flush();
   assert.equal(fetches, 2, "the loop is not wedged by the stalled call");
 });
 
 test("chat speech posts the line to meeting chat and flags an agent caption without its text", async () => {
-  const store = openStore(":memory:");
+  const store = await openStore();
   const sessionId = randomUUID();
-  store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
-  store.markCreated(sessionId, "bot-1");
+  await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
+  await store.markCreated(sessionId, "bot-1");
   const sent: StageEvent[] = [];
   const runtime = createRuntime({ store, channel: { send: (_id, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } });
   const chats: { botId: string; message: string }[] = [];
@@ -665,11 +676,11 @@ test("the app forwards realtime events to the loop and bot recording triggers th
     if (u.endsWith("/send_chat_message/")) { chats.push(JSON.parse(String(init?.body)).message); return Response.json({}); }
     return Response.json({ id: "bot-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = openStore(":memory:");
+  const store = await openStore();
   const requests: RunToolsRequest[] = [];
   const inner = createFakePort([[speak("Hi, I'm Builder. What's the app for?", "opening")], []]);
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
-  const app = createApp({
+  const app = await createApp({
     config, store, log: () => {}, indexHtml: "", stageHtml: "",
     recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall, sleep: async () => {} }),
     agent: { port },
@@ -696,7 +707,7 @@ test("the app forwards realtime events to the loop and bot recording triggers th
 
   await deliver("transcript.data", { participant: { name: "Ada" }, words: [{ text: "A" }, { text: "todo" }, { text: "app." }] }, "m2");
   assert.equal(requests.length, 2);
-  const id = store.listEvents(session.id).find((e) => e.kind === "utterance")!.id;
+  const id = (await store.listEvents(session.id)).find((e) => e.kind === "utterance")!.id;
   assert.ok((requests[1].messages as { content: string }[])[0].content.includes(`[${id}] Ada: A todo app.`));
   app.tickAgent();
   server.close();
@@ -711,12 +722,12 @@ test("when the bot's status turns terminal the app ends the session: no more mod
     if (u.endsWith("/send_chat_message/")) return Response.json({});
     return Response.json({ id: "bot-9", status_changes: [{ code: status, sub_code: null, message: null, created_at: "" }] });
   };
-  const store = openStore(":memory:");
+  const store = await openStore();
   const requests: RunToolsRequest[] = [];
   const inner = createFakePort([]);
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
   const logs: string[] = [];
-  const app = createApp({
+  const app = await createApp({
     config, store, log: (m) => logs.push(m), indexHtml: "", stageHtml: "",
     recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall, sleep: async () => {} }),
     agent: { port },
@@ -744,22 +755,22 @@ test("when the bot's status turns terminal the app ends the session: no more mod
   app.tickAgent();
   await settle();
   assert.equal(requests.length, before, "a late utterance costs nothing");
-  assert.equal(store.listEvents(session.id).filter((e) => e.kind === "utterance").length, 2, "late events are still stored");
+  assert.equal((await store.listEvents(session.id)).filter((e) => e.kind === "utterance").length, 2, "late events are still stored");
   server.close();
 });
 
 test("a restarted app picks up a call still recording: the window is reloaded and pending decisions tick again (known issue M2)", async () => {
   const config = appConfig();
-  const store = openStore(":memory:");
+  const store = await openStore();
   const id = randomUUID();
-  store.createIntent(id, "https://meet.google.com/abc-defg-hij");
-  store.markCreated(id, "bot-7");
-  store.updateBotStatus(id, "in_call_recording", null);
-  const earlier = store.addEvent({ sessionId: id, recallMsgId: null, kind: "utterance", speaker: "Ada", text: "A todo app." })!.id;
+  await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
+  await store.markCreated(id, "bot-7");
+  await store.updateBotStatus(id, "in_call_recording", null);
+  const earlier = (await store.addEvent({ sessionId: id, recallMsgId: null, kind: "utterance", speaker: "Ada", text: "A todo app." }))!.id;
   const requests: RunToolsRequest[] = [];
   const inner = createFakePort([[]]);
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const app = createApp({
+  const app = await createApp({
     config, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "", stageHtml: "",
     recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({}), sleep: async () => {} }),
     agent: { port: { runTools(req) { requests.push(req); return inner.runTools(req); } } },
@@ -779,15 +790,15 @@ test("a restarted app picks up a call still recording: the window is reloaded an
 
 test("without agent deps the app stays listen-only", async () => {
   const config = appConfig();
-  const app = createApp({ config, store: openStore(":memory:"), log: () => {}, indexHtml: "", stageHtml: "", recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({}) }) });
+  const app = await createApp({ config, store: await openStore(), log: () => {}, indexHtml: "", stageHtml: "", recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({}) }) });
   app.tickAgent();
 });
 
 
 test("a streamed update_build reaches the build loop before the turn ends", async () => {
   const held = heldPort();
-  const s = setup(held.port);
-  const id = s.say("Amir", "Let's add a quick-add bar.");
+  const s = await setup(held.port);
+  const id = await s.say("Amir", "Let's add a quick-add bar.");
   await flush();
   const call = updateBuild(handoff([id]));
   held.calls[0].req.onToolCall!(call);
@@ -802,8 +813,8 @@ test("a streamed update_build reaches the build loop before the turn ends", asyn
 test("a streamed ui_command runs before the turn ends, once", async () => {
   const held = heldPort();
   let ran = 0;
-  const s = setup(held.port, { uiCommand: () => { ran++; return { ok: true, visible: true }; } });
-  s.say("Amir", "Builder, click save.");
+  const s = await setup(held.port, { uiCommand: () => { ran++; return { ok: true, visible: true }; } });
+  await s.say("Amir", "Builder, click save.");
   await flush();
   const call: ToolCall = { name: "ui_command", input: { action: "click", target: "Save" } };
   held.calls[0].req.onToolCall!(call);
@@ -816,8 +827,8 @@ test("a streamed ui_command runs before the turn ends, once", async () => {
 
 test("speak still waits for the end of the turn and the gate", async () => {
   const held = heldPort();
-  const s = setup(held.port);
-  s.say("Sara", "Builder, tabs or sidebar?");
+  const s = await setup(held.port);
+  await s.say("Sara", "Builder, tabs or sidebar?");
   await flush();
   const call = speak("Tabs. Want them?", "answer");
   held.calls[0].req.onToolCall!(call);
@@ -829,10 +840,10 @@ test("speak still waits for the end of the turn and the gate", async () => {
 
 test("conversation.turn logs queued_ms and handoff_ms", async () => {
   const held = heldPort();
-  const s = setup(held.port);
-  s.say("Amir", "First thing.");
+  const s = await setup(held.port);
+  await s.say("Amir", "First thing.");
   await flush();
-  const id = s.say("Sara", "And a second thing.");
+  const id = await s.say("Sara", "And a second thing.");
   s.advance(700);
   await held.release(0);
   assert.equal(held.calls.length, 2, "the queued utterance runs a follow-up turn");
@@ -847,8 +858,8 @@ test("conversation.turn logs queued_ms and handoff_ms", async () => {
 
 test("a hand-off that streams in after the call ended is not forwarded", async () => {
   const { port, calls, release } = heldPort();
-  const s = setup(port);
-  const id = s.say("Amir", "Let's add a quick-add box at the top.");
+  const s = await setup(port);
+  const id = await s.say("Amir", "Let's add a quick-add box at the top.");
   await flush();
   s.loop.onBotEnded(s.sessionId);
   calls[0].req.onToolCall?.(updateBuild(handoff([id])));

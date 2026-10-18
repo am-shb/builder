@@ -35,51 +35,51 @@ test("costOf computes cache-aware cost", () => {
 });
 
 test("fake port records calls and costs into model_calls", async () => {
-  const store = openStore(":memory:");
+  const store = await openStore();
   const fake = createFakePort([[{ name: "a", input: { x: 1 } }], []]);
   const port = withCostRecording(fake, { store, sessionId: "s1" });
   const r1 = await port.runTools({ loop: "build", ...REQ, tools: [], effort: "medium" });
   await port.runTools({ loop: "conversation", ...REQ, tools: [], effort: "low" });
   assert.deepEqual(r1.toolCalls, [{ name: "a", input: { x: 1 } }]);
-  const rows = store.listModelCalls("s1");
+  const rows = await store.listModelCalls("s1");
   assert.equal(rows.length, 2);
   assert.equal(rows[0].loop, "build");
   assert.equal(rows[0].model, MODELS.build);
   assert.equal(rows[1].model, MODELS.conversation);
   assert.ok(rows[0].usd > 0);
   assert.equal(rows[0].input_tokens, r1.usage.inputTokens);
-  assert.equal(store.sessionCost("s1"), rows[0].usd + rows[1].usd);
-  store.close();
+  assert.equal(await store.sessionCost("s1"), rows[0].usd + rows[1].usd);
+  await store.close();
 });
 
-test("sessionCost sums per session", () => {
-  const store = openStore(":memory:");
+test("sessionCost sums per session", async () => {
+  const store = await openStore();
   const row = { loop: "build", model: MODELS.build, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, ms: 5 };
-  store.addModelCall({ sessionId: "a", ...row, usd: 0.25 });
-  store.addModelCall({ sessionId: "a", ...row, usd: 0.5 });
-  store.addModelCall({ sessionId: "b", ...row, usd: 1 });
-  assert.equal(store.sessionCost("a"), 0.75);
-  assert.equal(store.sessionCost("b"), 1);
-  assert.equal(store.sessionCost("none"), 0);
-  store.close();
+  await store.addModelCall({ sessionId: "a", ...row, usd: 0.25 });
+  await store.addModelCall({ sessionId: "a", ...row, usd: 0.5 });
+  await store.addModelCall({ sessionId: "b", ...row, usd: 1 });
+  assert.equal(await store.sessionCost("a"), 0.75);
+  assert.equal(await store.sessionCost("b"), 1);
+  assert.equal(await store.sessionCost("none"), 0);
+  await store.close();
 });
 
 test("session view includes cost_usd", async () => {
   const config = loadConfig(ENV);
-  const store = openStore(":memory:");
+  const store = await openStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({})) as any, sleep: async () => {} });
-  const app = createApp({ config, recall, store, log: () => {} });
+  const app = await createApp({ config, recall, store, log: () => {} });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   openServers.add(server);
   try {
     const id = randomUUID();
-    store.createIntent(id, "https://meet.google.com/abc-defg-hij");
+    await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
     assert.equal(((await (await fetch(`${base}/api/sessions/${id}`)).json()) as any).session.cost_usd, 0);
-    store.addModelCall({ sessionId: id, loop: "build", model: MODELS.build, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, usd: 0.125, ms: 1 });
+    await store.addModelCall({ sessionId: id, loop: "build", model: MODELS.build, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, usd: 0.125, ms: 1 });
     assert.equal(((await (await fetch(`${base}/api/sessions/${id}`)).json()) as any).session.cost_usd, 0.125);
-  } finally { openServers.delete(server); server.closeAllConnections(); server.close(); store.close(); }
+  } finally { openServers.delete(server); server.closeAllConnections(); server.close(); await store.close(); }
 });
 
 test("config without OPENROUTER_API_KEY disables agent without throwing", () => {
@@ -286,10 +286,10 @@ test("truncated tool stream still records the usage seen and drops the partial c
   assert.equal(r.usage.cacheWriteTokens, 30);
   assert.ok(r.usage.outputTokens >= 1);
   // The usage is recorded, not zeroed.
-  const store = openStore(":memory:");
+  const store = await openStore();
   await withCostRecording(port, { store, sessionId: "t" }).runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
-  assert.ok(store.sessionCost("t") > 0);
-  store.close();
+  assert.ok(await store.sessionCost("t") > 0);
+  await store.close();
 });
 
 // ---- deadlines (known issue I1) ----

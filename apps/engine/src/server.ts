@@ -31,14 +31,20 @@ async function main() {
     log("process.uncaught", { error: e?.name ?? "unknown", frames });
     process.exit(1);
   });
-  const store = openStore(config.dbPath, { log });
+  // Postgres when DATABASE_URL is set (migrated by `npm run migrate`), otherwise PGlite in config.pgliteDir.
+  const store = await openStore(config.databaseUrl ? { databaseUrl: config.databaseUrl, log } : { dataDir: config.pgliteDir, log });
   const recall = config.local ? createLocalRecall() : createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();
   let runtime!: ReturnType<typeof createRuntime>;
   let voice: { stop(sessionId: string): void } | undefined; // Builder's voice, once configured
   const channel = createStageChannel(
     server,
-    (id, token) => tokenMatches(token, store.getSession(id)?.stage_token ?? null),
+    // Loads the session's runtime before the socket opens, so the first thing the stage gets is its snapshot.
+    async (id, token) => {
+      if (!tokenMatches(token, (await store.getSession(id))?.stage_token ?? null)) return false;
+      await runtime.load(id);
+      return true;
+    },
     (id, msg) => handleStageMessage(runtime, id, msg, (sid) => {
       log("barge_in", { session_id: sid, source: "stage" });
       voice?.stop(sid);
@@ -55,7 +61,7 @@ async function main() {
   }) : undefined;
   voice = speech;
   const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }), ...(speech ? { speech } : {}) } : undefined;
-  const app = createApp({ config, recall, store, runtime, log, agent });
+  const app = await createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 
   setInterval(() => void app.pollOnce(), 4000).unref();
@@ -80,8 +86,8 @@ async function smoke() {
     if (u.endsWith("/bot/")) return Response.json({ id: "bot-smoke-1" }, { status: 201 });
     return Response.json({ id: "bot-smoke-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = openStore(":memory:");
-  const app = createApp({ config, store, recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall }), log: () => {} });
+  const store = await openStore();
+  const app = await createApp({ config, store, recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeRecall }), log: () => {} });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as any).port}`;

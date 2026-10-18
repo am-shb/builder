@@ -1,5 +1,7 @@
 // Per-session runtime: owns the prototype, consensus doc, mood and captions,
 // persists them, and pushes every change to the stage over the channel.
+// The runtime in memory is what the session runs on. Saving to the database happens in the background, one
+// write at a time per session and in order, so the last write is always the latest state.
 import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent, UNTITLED_APP } from "../ui/tree.ts";
 import type { Prototype, PatchBatch, Interaction } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
@@ -22,6 +24,15 @@ export type UiState = {
 export type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
 export type SessionRuntime = ReturnType<typeof makeRuntime>;
+
+/**
+ * Finds a session's runtime. `load` starts it from the consensus saved in the database (after a restart,
+ * say) and must come first wherever a session can be met for the first time: an event, the stage, a resume.
+ * Calling the lookup itself for a session not loaded yet starts it empty, as for a brand-new session.
+ */
+export type RuntimeLookup = ((sessionId: string) => SessionRuntime) & { load?: (sessionId: string) => Promise<SessionRuntime> };
+
+const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 /**
  * The side-by-side view of a conflict: each variant applied to the current prototype, with the
@@ -69,22 +80,39 @@ export function handleStageMessage(
   if (m && typeof m === "object" && m.type === "ui_screen" && typeof m.screen === "string") runtime(sessionId).setUiScreen(m.screen);
 }
 
-export function createRuntime(deps: { store: Store; channel: StageSink; clock?: () => number; log?: Log }) {
+type Saved = { doc: ConsensusDoc; proto: Prototype } | undefined;
+
+export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveConsensus">; channel: StageSink; clock?: () => number; log?: Log }) {
   const clock = deps.clock ?? Date.now;
   const log: Log = deps.log ?? (() => {});
   const runtimes = new Map<string, SessionRuntime>();
-  return (sessionId: string): SessionRuntime => {
+  const loading = new Map<string, Promise<SessionRuntime>>();
+  const make = (sessionId: string, saved: Saved) => {
     let rt = runtimes.get(sessionId);
     if (!rt) {
-      rt = makeRuntime(sessionId, deps.store, deps.channel, clock, log);
+      rt = makeRuntime(sessionId, saved, deps.store, deps.channel, clock, log);
       runtimes.set(sessionId, rt);
     }
     return rt;
   };
+  const lookup = (sessionId: string): SessionRuntime => make(sessionId, undefined);
+  // Concurrent loads of one session share a read, and a runtime that exists already is kept.
+  lookup.load = (sessionId: string): Promise<SessionRuntime> => {
+    const rt = runtimes.get(sessionId);
+    if (rt) return Promise.resolve(rt);
+    let pending = loading.get(sessionId);
+    if (!pending) {
+      pending = deps.store.getConsensus(sessionId)
+        .then((saved) => make(sessionId, saved))
+        .finally(() => loading.delete(sessionId));
+      loading.set(sessionId, pending);
+    }
+    return pending;
+  };
+  return lookup;
 }
 
-function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock: () => number, log: Log) {
-  const saved = store.getConsensus(sessionId);
+function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveConsensus">, channel: StageSink, clock: () => number, log: Log) {
   let proto: Prototype = saved?.proto ?? emptyPrototype(UNTITLED_APP);
   let doc: ConsensusDoc = saved?.doc ?? emptyDoc();
   // After a restart the room still sees the comparison it was choosing from (known issue M2).
@@ -115,9 +143,21 @@ function makeRuntime(sessionId: string, store: Store, channel: StageSink, clock:
   }
 
   const send = (ev: StageEvent) => channel.send(sessionId, ev);
-  const persist = () => store.saveConsensus(sessionId, doc, proto);
+  // Writes queue behind each other with the state as it was when asked, so they land in order. A failed
+  // write is logged by name and doesn't stop the session; the next change writes the whole state again.
+  let writes: Promise<void> = Promise.resolve();
+  const persist = () => {
+    const d = doc, p = proto;
+    writes = writes.then(() => store.saveConsensus(sessionId, d, p))
+      .catch((err) => log("runtime.persist_failed", { session_id: sessionId, error: errorName(err) }));
+  };
 
   return {
+    // Resolves once every change made so far is saved (or its failure logged).
+    saved(): Promise<void> {
+      return writes;
+    },
+
     snapshot(): StageEvent {
       return {
         type: "snapshot", proto, uiScreen: uiState.screen, doc,

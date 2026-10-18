@@ -8,7 +8,9 @@ export type Config = {
   verificationSecret: string;
   publicBaseUrl: string;
   port: number;
-  dbPath: string;
+  // Postgres connection string (Render). Null = PGlite in this process, kept in `pgliteDir`.
+  databaseUrl: string | null;
+  pgliteDir: string;
   // Larger bot for smoother Output Media (costs more per hour); null = plain web bot.
   botVariant: "web_4_core" | "web_gpu" | null;
   // OpenRouter key for all model access (LLM + TTS). Absent = listen-only.
@@ -63,7 +65,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     verificationSecret,
     publicBaseUrl,
     port: Number(env.PORT ?? 3000),
-    dbPath: env.DB_PATH ?? "data/app.db",
+    databaseUrl: env.DATABASE_URL?.trim() || null,
+    pgliteDir: env.PGLITE_DIR?.trim() || "data/pg",
     botVariant,
     ...agentSettings(env),
     local: false,
@@ -73,7 +76,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 /**
  * Local mode: no Recall setting is read or needed. The stage is served from localhost, the
  * realtime webhook accepts nothing (its secret is random and never shared), and sessions go in
- * their own database so they don't mix with real calls.
+ * their own database so they don't mix with real calls: always PGlite, even when DATABASE_URL is set.
  */
 export function loadLocalConfig(env: Record<string, string | undefined>): Config {
   const port = Number(env.PORT ?? 3000);
@@ -83,7 +86,8 @@ export function loadLocalConfig(env: Record<string, string | undefined>): Config
     verificationSecret: "whsec_" + randomBytes(24).toString("base64"),
     publicBaseUrl: `http://localhost:${port}`,
     port,
-    dbPath: env.DB_PATH ?? "data/local.db",
+    databaseUrl: null,
+    pgliteDir: env.PGLITE_DIR?.trim() || "data/local-pg",
     botVariant: null,
     ...agentSettings(env),
     local: true,

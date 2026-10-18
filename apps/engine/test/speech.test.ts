@@ -31,11 +31,11 @@ function pcm(samples: number, from = 0): Uint8Array {
 
 type Logged = { msg: string; fields?: Record<string, unknown> };
 
-function setup(opts: { tts: TtsProvider; channel?: StageSink; timeoutMs?: number; chatFails?: boolean }) {
-  const store = openStore(":memory:");
+async function setup(opts: { tts: TtsProvider; channel?: StageSink; timeoutMs?: number; chatFails?: boolean }) {
+  const store = await openStore();
   const sessionId = randomUUID();
-  store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
-  store.markCreated(sessionId, "bot-1");
+  await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
+  await store.markCreated(sessionId, "bot-1");
   const sent: StageEvent[] = [];
   const frames: { utteranceId: string; pcm: Uint8Array }[] = [];
   const timeline: string[] = [];
@@ -82,15 +82,15 @@ function heldTts(first: Uint8Array[], honoursSignal = true) {
 
 // A real stage channel on a loopback server, and a ws client connected to it.
 async function stageWithClient() {
-  const store = openStore(":memory:");
+  const store = await openStore();
   const sessionId = randomUUID();
-  store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
-  store.markCreated(sessionId, "bot-1");
-  const token = store.ensureStageToken(sessionId);
+  await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
+  await store.markCreated(sessionId, "bot-1");
+  const token = await store.ensureStageToken(sessionId);
   const server = http.createServer();
   servers.add(server);
   let runtime!: ReturnType<typeof createRuntime>;
-  const channel = createStageChannel(server, (id, t) => tokenMatches(t, store.getSession(id)?.stage_token ?? null), () => {}, (id) => runtime(id).snapshot());
+  const channel = createStageChannel(server, async (id, t) => tokenMatches(t, (await store.getSession(id))?.stage_token ?? null), () => {}, (id) => runtime(id).snapshot());
   runtime = createRuntime({ store, channel });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as { port: number }).port;
@@ -159,7 +159,7 @@ test("say streams start→audio→end to stage and flags an agent caption withou
 
 test("stop aborts the provider stream and sends speech_stop", async () => {
   const { tts, seen } = heldTts([pcm(480)]);
-  const s = setup({ tts });
+  const s = await setup({ tts });
   const said = s.speech.say(s.sessionId, "Let me think about that.");
   await flush();
   assert.equal(s.frames.length, 1);
@@ -183,7 +183,7 @@ test("stop aborts the provider stream and sends speech_stop", async () => {
 
 test("stop is instant even when the provider ignores the abort signal", async () => {
   const { tts } = heldTts([pcm(480)], false);
-  const s = setup({ tts });
+  const s = await setup({ tts });
   const said = s.speech.say(s.sessionId, "Hm.");
   await flush();
   s.speech.stop(s.sessionId);
@@ -195,7 +195,7 @@ test("stop is instant even when the provider ignores the abort signal", async ()
 test("tts failure falls back to chat", async () => {
   // The provider throws.
   const broken: TtsProvider = { async *stream() { throw new Error("upstream 502"); } };
-  const a = setup({ tts: broken });
+  const a = await setup({ tts: broken });
   const long = "y".repeat(600);
   await a.speech.say(a.sessionId, long);
   assert.deepEqual(a.chats.map((c) => [c.botId, c.message.length]), [["bot-1", 500]], "posted to meeting chat within the Meet limit");
@@ -203,11 +203,11 @@ test("tts failure falls back to chat", async () => {
   assert.notEqual(a.mood(), "speaking");
   assert.ok(a.sent.some((e) => e.type === "caption" && e.caption.isAgent), "the agent caption is still emitted");
   assert.ok(a.logs.some((l) => l.msg === "speech.fallback" && l.fields?.reason === "error"));
-  assert.equal(a.store.listEvents(a.sessionId).filter((e) => e.kind === "bot_chat").length, 1, "the chat line is recorded");
+  assert.equal((await a.store.listEvents(a.sessionId)).filter((e) => e.kind === "bot_chat").length, 1, "the chat line is recorded");
 
   // The provider never answers: after timeoutMs the line goes to chat and say resolves.
   const { tts, seen } = heldTts([]);
-  const b = setup({ tts, timeoutMs: 60 });
+  const b = await setup({ tts, timeoutMs: 60 });
   const t0 = Date.now();
   await b.speech.say(b.sessionId, "Want me to add it?");
   const took = Date.now() - t0;
@@ -220,21 +220,21 @@ test("tts failure falls back to chat", async () => {
 
   // A stream that stalls mid-line: the stage is told to stop, and the whole line goes to chat.
   const stalled = heldTts([pcm(480)]);
-  const d = setup({ tts: stalled.tts, timeoutMs: 60 });
+  const d = await setup({ tts: stalled.tts, timeoutMs: 60 });
   await d.speech.say(d.sessionId, "Half a line.");
   assert.deepEqual(d.sent.filter((e) => e.type.startsWith("speech_")).map((e) => e.type), ["speech_start", "speech_stop"]);
   assert.deepEqual(d.chats.map((c) => c.message), ["Half a line."]);
   assert.equal(d.speech.speaking(d.sessionId), false);
 
   // If chat fails too, say rejects (the loop logs speak.failed and carries on).
-  const c = setup({ tts: broken, chatFails: true });
+  const c = await setup({ tts: broken, chatFails: true });
   await assert.rejects(c.speech.say(c.sessionId, "Hello."));
   assert.equal(c.speech.speaking(c.sessionId), false);
 });
 
 test("tts failure falls back to chat without blocking the conversation loop", async () => {
   const { tts } = heldTts([]);
-  const s = setup({ tts, timeoutMs: 60 });
+  const s = await setup({ tts, timeoutMs: 60 });
   const requests: number[] = [];
   const inner = createFakePort([
     [{ name: "speak", input: { text: "I think a sidebar fits.", reason: "answer" } }],
@@ -245,14 +245,14 @@ test("tts failure falls back to chat without blocking the conversation loop", as
     runtime: s.runtime, store: s.store, speech: s.speech, clock: Date.now,
     buildLoop: { handoff() {} },
   });
-  const utter = (text: string) => {
-    const e = s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Amir", text })!;
+  const utter = async (text: string) => {
+    const e = (await s.store.addEvent({ sessionId: s.sessionId, recallMsgId: null, kind: "utterance", speaker: "Amir", text }))!;
     loop.onUtterance(s.sessionId, { id: e.id, speaker: "Amir", text });
   };
-  utter("Hey Builder, what do you think about a sidebar?");
+  await utter("Hey Builder, what do you think about a sidebar?");
   await sleep(300);
   assert.deepEqual(s.chats.map((c) => c.message), ["I think a sidebar fits."], "the line reached the room by chat");
-  utter("Okay, let's do it.");
+  await utter("Okay, let's do it.");
   await sleep(100);
   assert.equal(requests.length, 2, "the next turn ran");
 });
@@ -265,7 +265,7 @@ test("a long line gets longer for its first audio, up to twice the gap allowed b
 
   // The provider takes longer than the gap allowed between chunks to start this line: it is still heard.
   const slow: TtsProvider = { async *stream() { await sleep(280); yield pcm(480); } };
-  const s = setup({ tts: slow, timeoutMs: 200 });
+  const s = await setup({ tts: slow, timeoutMs: 200 });
   const line = "A longer line, which takes the provider a moment.";
   assert.ok(firstChunkTimeout(line, 200) >= 380);
   await s.speech.say(s.sessionId, line);
