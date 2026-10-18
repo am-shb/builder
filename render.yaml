@@ -42,12 +42,13 @@ services:
         - package-lock.json
         - .nvmrc
         - .dockerignore
-      # Tests, scripts and docs aren't in the image, so a change to them alone doesn't deploy (an engine deploy ends
-      # live meetings).
+      # Tests, scripts and READMEs aren't used at runtime, so a change to them alone doesn't deploy (an engine deploy
+      # ends live meetings). Not every .md: the engine reads its prompts from src/agent/prompts/*.md.
       ignoredPaths:
         - apps/engine/test/**
         - apps/engine/scripts/**
-        - "**/*.md"
+        - apps/engine/README.md
+        - contracts/README.md
     envVars:
       - key: NODE_ENV
         value: production
@@ -98,12 +99,12 @@ services:
         - package-lock.json
         - .nvmrc
         - .dockerignore
-      # Tests, scripts and docs aren't in the image, so a change to them alone doesn't deploy (an engine deploy ends
-      # live meetings).
+      # Tests, scripts and READMEs aren't used at runtime, so a change to them alone doesn't deploy.
       ignoredPaths:
         - apps/api/test/**
         - apps/api/scripts/**
-        - "**/*.md"
+        - apps/api/README.md
+        - contracts/README.md
     envVars:
       # Makes SURREAL_URL required, so the api never falls back to a database in its own process.
       - key: NODE_ENV
