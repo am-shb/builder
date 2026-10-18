@@ -30,11 +30,8 @@ export type DbTarget = {
   dataDir?: string;
 };
 
-// Error names and Postgres error codes only: messages and details can quote row values.
-export const errorCode = (err: unknown) => {
-  const code = (err as { code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : err instanceof Error ? err.name : "unknown";
-};
+export { errorCode } from "../error-code.ts";
+import { errorCode } from "../error-code.ts";
 
 export async function connect(target: DbTarget, log: Log = () => {}): Promise<{ db: Db; close(): Promise<void> }> {
   if (target.databaseUrl) {

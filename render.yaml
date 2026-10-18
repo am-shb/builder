@@ -28,6 +28,7 @@ services:
         - package.json
         - package-lock.json
         - render.yaml
+        - .nvmrc
     envVars:
       - key: NODE_ENV
         value: production

@@ -86,7 +86,9 @@ $38 a month plus bandwidth. Nothing runs on a free plan.
    `RECALL_API_KEY`, `RECALL_WEBHOOK_VERIFICATION_SECRET`, `OPENROUTER_API_KEY`, `RECALL_REGION`, `TTS_VOICE` and
    `BOT_VARIANT`. Paste the secrets here and nowhere else. `RECALL_REGION` is a value such as `us-west-2`, and it
    must match the region of the Recall key. `TTS_VOICE` and `BOT_VARIANT` can stay empty. If Render won't accept an
-   empty value, you can add them later under the service's Environment tab.
+   empty value, you can add them later under the service's Environment tab. Render asks for these values only when
+   the Blueprint is first created. Change them later in the dashboard Environment tab, because editing `render.yaml`
+   won't update them.
 3. Apply. `DATABASE_URL` (the internal connection string) and `NODE_ENV=production` are set by the Blueprint.
    `PUBLIC_API_BASE_URL` isn't needed. The engine uses `RENDER_EXTERNAL_URL`, which Render sets, unless you set
    `PUBLIC_API_BASE_URL` yourself (for a custom domain, for example).
@@ -103,7 +105,9 @@ $38 a month plus bandwidth. Nothing runs on a free plan.
 - `curl https://<your-service>.onrender.com/healthz` returns `{"ok":true}`.
 - In the dashboard, the Logs tab shows `db.migrated` and `Listening on`. A bad config shows as `Missing required
   environment variables` and the names only.
-- Point Recall's webhooks at the service URL plus the realtime path shown in the `Recall realtime endpoint:` log line.
+- Don't configure webhooks in the Recall dashboard. The engine sets the realtime webhook URL on each bot when it
+  creates it, from `PUBLIC_API_BASE_URL` or else `RENDER_EXTERNAL_URL`, and the log line `Recall realtime endpoint:`
+  shows it. Bot lifecycle uses polling, not dashboard webhooks.
 
 **Roll back**
 - Code: in the service's Events tab, choose Rollback on the last good deploy. It doesn't undo migrations. The
@@ -111,12 +115,14 @@ $38 a month plus bandwidth. Nothing runs on a free plan.
 - Data: `builder-db` has backups. Restoring is a dashboard action on the database. Check what the plan includes first.
 
 **Known limits**
-- **A deploy ends live meetings.** The engine holds sessions in memory and Render starts the new instance before it
-  stops the old one. Recall webhooks for the old sessions reach an instance that doesn't know them. Deploy outside
-  meetings. Turn off auto-deploy if that gets in the way.
+- **A deploy overlaps two instances on live meetings.** Render starts the new instance before it stops the old one.
+  The new one resumes every active session from the database at boot while the old one still serves. For a short
+  time both can run loops for the same meeting, so Builder could speak twice and the last consensus write wins.
+  Before sessions run on Render the engine needs writes that drain on SIGTERM, and either a session lease with
+  fencing or a drain-then-resume handover. Until then, deploy outside meetings.
 - **Nobody can start a session on Render yet.** The operator page `/` and `/api/*` refuse requests that arrive
   through a proxy, and Render is one. Starting sessions needs the api and Clerk, or an interim operator token that
-  an ADR decides. Recall's webhook, the stage and the handoff pages work, and so does `/healthz`.
+  an ADR decides. The Recall realtime webhook, the stage and the handoff pages work, and so does `/healthz`.
 - One instance only. Don't raise `numInstances`.
 - A free-tier database expires and has no backups, so keep `basic-256mb`.
 

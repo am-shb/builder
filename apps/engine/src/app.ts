@@ -26,6 +26,7 @@ import type { Speech } from "./agent/conversation-loop.ts";
 import type { ModelPort } from "./agent/llm.ts";
 import type { RealtimeEvent } from "./realtime.ts";
 import { z } from "zod";
+import { errorCode } from "./error-code.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -43,9 +44,6 @@ const LocalSpeech = z.object({
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
-// Error names only: messages can carry request bodies (V8's JSON.parse quotes its input), and database
-// errors quote the values of the query.
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 // Runs tasks with the same key one after another, in the order they were queued. Tasks with different keys
 // run side by side. Each call's promise settles with its own task.
@@ -177,7 +175,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     try {
       active = await store.listActiveSessions();
     } catch (err) {
-      log("bot.poll_failed", { error: errorName(err) });
+      log("bot.poll_failed", { error: errorCode(err) });
       return;
     }
     for (const s of active) {
@@ -193,7 +191,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       try {
         await store.updateBotStatus(s.id, last.code, last.sub_code);
       } catch (err) {
-        log("bot.status_save_failed", { session_id: s.id, error: errorName(err) });
+        log("bot.status_save_failed", { session_id: s.id, error: errorCode(err) });
         continue;
       }
       log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
@@ -211,7 +209,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       buildLoop?.end(sessionId);
       log("session.ended", { session_id: sessionId, status });
     } catch (err) {
-      log("session.end_failed", { session_id: sessionId, error: errorName(err) });
+      log("session.end_failed", { session_id: sessionId, error: errorCode(err) });
     }
   }
 
@@ -366,7 +364,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       // Runs outside the request: an error here would otherwise take the whole process down,
       // and again on every later event for the session (known issue I6).
       setImmediate(() => {
-        processRealtime(raw, msgId).catch((err) => log("realtime.process_failed", { error: errorName(err) }));
+        processRealtime(raw, msgId).catch((err) => log("realtime.process_failed", { error: errorCode(err) }));
       });
       return;
     }
@@ -442,7 +440,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
         json(res, 200, { ok: true });
         setImmediate(() => {
           perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null))
-            .catch((err) => log("local.speech_failed", { error: errorName(err) }));
+            .catch((err) => log("local.speech_failed", { error: errorCode(err) }));
         });
         return;
       }
@@ -492,7 +490,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
   return {
     handler: (req: http.IncomingMessage, res: http.ServerResponse) => {
       handle(req, res).catch((err) => {
-        log("http.error", { error: errorName(err) });
+        log("http.error", { error: errorCode(err) });
         if (!res.headersSent) json(res, 500, { error: "internal error" });
       });
     },

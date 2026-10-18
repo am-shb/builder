@@ -11,6 +11,7 @@ import type { BuildTask, ComparisonView, StageEvent, StageSink } from "../stage/
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "./mood.ts";
 import type { Mood, MoodInputs } from "./mood.ts";
 import { initialUiState, reduceInteraction } from "../../public/renderer/interact.js";
+import { errorCode } from "../error-code.ts";
 
 /** The stage's interaction state, mirrored here: screen, toggles, open, lists, values (keyed by node id). */
 export type UiState = {
@@ -32,7 +33,6 @@ export type SessionRuntime = ReturnType<typeof makeRuntime>;
  */
 export type RuntimeLookup = ((sessionId: string) => SessionRuntime) & { load?: (sessionId: string) => Promise<SessionRuntime> };
 
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 /**
  * The side-by-side view of a conflict: each variant applied to the current prototype, with the
@@ -149,7 +149,7 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
   const persist = () => {
     const d = doc, p = proto;
     writes = writes.then(() => store.saveConsensus(sessionId, d, p))
-      .catch((err) => log("runtime.persist_failed", { session_id: sessionId, error: errorName(err) }));
+      .catch((err) => log("runtime.persist_failed", { session_id: sessionId, error: errorCode(err) }));
   };
 
   return {

@@ -20,6 +20,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { StageEvent } from "../stage/channel.ts";
 import type { RecallClient } from "../recall-client.ts";
 import type { Store } from "../store.ts";
+import { errorCode } from "../error-code.ts";
 
 export const WINDOW = 40;
 export const ADDRESSED_MS = 8_000;
@@ -138,7 +139,6 @@ type SessionState = {
   dirty: boolean;
 };
 
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 const questions = (text: string) => (text.match(/\?/g) ?? []).length;
 
 /** Meeting-chat stand-in for voice: posts the line (≤500 chars, the Meet limit) and tells the stage Builder spoke. */
@@ -306,7 +306,7 @@ export function createConversationLoop(deps: {
       st.dirty = true;
       return;
     }
-    run(sessionId, st).catch((err) => log("conversation.turn_failed", { session_id: sessionId, error: errorName(err) }));
+    run(sessionId, st).catch((err) => log("conversation.turn_failed", { session_id: sessionId, error: errorCode(err) }));
   }
 
   function userTurn(st: SessionState, snap: Snapshot, turn: Turn, open: SpeakReason[], now: number): string {
@@ -351,7 +351,7 @@ export function createConversationLoop(deps: {
     try {
       outcome = uiCommand(sessionId, parsed.data);
     } catch (err) {
-      log("conversation.command_failed", { session_id: sessionId, error: errorName(err) });
+      log("conversation.command_failed", { session_id: sessionId, error: errorCode(err) });
       outcome = { ok: false, reason: "unsupported" };
     }
     st.command = { at: clock(), cmd: parsed.data, outcome, shown: false, fedBack: false };
@@ -404,7 +404,7 @@ export function createConversationLoop(deps: {
     try {
       await speech.say(sessionId, text);
     } catch (err) {
-      log("speak.failed", { session_id: sessionId, reason, error: errorName(err) });
+      log("speak.failed", { session_id: sessionId, reason, error: errorCode(err) });
       return false;
     }
     pushLine(st, { id: null, speaker: botName, text });
@@ -472,7 +472,7 @@ export function createConversationLoop(deps: {
       try {
         await modelTurn(sessionId, st, turn, now);
       } catch (err) {
-        log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorName(err) });
+        log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorCode(err) });
       }
       // The room always gets an opening: the fixed line when the model failed or didn't open.
       if (turn.opening && !st.opened && !ended.has(sessionId)) {
@@ -501,7 +501,7 @@ export function createConversationLoop(deps: {
         try {
           handleCall(sessionId, st, call, work, now);
         } catch (err) {
-          log("conversation.stream_call_failed", { session_id: sessionId, tool: call.name, error: errorName(err) });
+          log("conversation.stream_call_failed", { session_id: sessionId, tool: call.name, error: errorCode(err) });
         }
       },
     });
@@ -530,7 +530,7 @@ export function createConversationLoop(deps: {
         log("conversation.stuck", { session_id: sessionId, reason: ev.reason });
         schedule(sessionId, st);
       } catch (err) {
-        log("conversation.poll_failed", { session_id: sessionId, error: errorName(err) });
+        log("conversation.poll_failed", { session_id: sessionId, error: errorCode(err) });
       }
     }
   }
@@ -540,7 +540,7 @@ export function createConversationLoop(deps: {
     try {
       fn();
     } catch (err) {
-      log("conversation.entry_failed", { ...(sessionId ? { session_id: sessionId } : {}), entry, error: errorName(err) });
+      log("conversation.entry_failed", { ...(sessionId ? { session_id: sessionId } : {}), entry, error: errorCode(err) });
     }
   };
 
@@ -564,7 +564,7 @@ export function createConversationLoop(deps: {
           if (addressed) markAddressed(sessionId, st, { lastSpeechWasQuestion: false });
           else runtime(sessionId).updateMoodInputs({ lastSpeechWasQuestion: false });
         } catch (err) {
-          log("conversation.mood_failed", { session_id: sessionId, error: errorName(err) });
+          log("conversation.mood_failed", { session_id: sessionId, error: errorCode(err) });
         }
         maybeOpen(sessionId, st);
         schedule(sessionId, st);
@@ -618,7 +618,7 @@ export function createConversationLoop(deps: {
       try {
         [session, stored] = await Promise.all([store.getSession(sessionId), store.listEvents(sessionId)]);
       } catch (err) {
-        log("conversation.entry_failed", { session_id: sessionId, entry: "resume", error: errorName(err) });
+        log("conversation.entry_failed", { session_id: sessionId, entry: "resume", error: errorCode(err) });
         return;
       }
       // Met in the meantime (ended, or an event came first): what is in memory wins.

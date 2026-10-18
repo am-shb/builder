@@ -20,6 +20,7 @@ import { buildComparisonView } from "../session/runtime.ts";
 import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
+import { errorCode } from "../error-code.ts";
 
 export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
@@ -144,7 +145,6 @@ const batchLabel = (prefix: "Agreed" | "Reopened", text: string) => {
   return full.length <= LABEL_MAX ? full : `${full.slice(0, LABEL_MAX - 1)}…`;
 };
 
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 export function createBuildLoop(deps: {
   port: ModelPort;
@@ -234,7 +234,7 @@ export function createBuildLoop(deps: {
     try {
       anyPending = view(runtime(sessionId)).doc.decisions.some((d) => d.status === "pending");
     } catch (err) {
-      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tick_failed", { session_id: sessionId, error: errorCode(err) });
       return;
     }
     if (anyPending && st.tick === null) {
@@ -267,7 +267,7 @@ export function createBuildLoop(deps: {
         promote(sessionId, rt, promoted, "timeout");
       }
     } catch (err) {
-      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tick_failed", { session_id: sessionId, error: errorCode(err) });
     }
     ensureTick(sessionId, st);
   }
@@ -314,7 +314,7 @@ export function createBuildLoop(deps: {
         },
       };
     } catch (err) {
-      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorName(err) });
+      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorCode(err) });
       return { kind: "ignored" };
     }
   }
@@ -327,7 +327,7 @@ export function createBuildLoop(deps: {
         timers.clearTimeout(st.timer);
         st.timer = null;
       }
-      run(sessionId, st).catch((err) => log("build.run_failed", { session_id: sessionId, error: errorName(err) }));
+      run(sessionId, st).catch((err) => log("build.run_failed", { session_id: sessionId, error: errorCode(err) }));
     } else if (st.timer === null) {
       st.timer = timers.setTimeout(() => {
         st.timer = null;
@@ -348,7 +348,7 @@ export function createBuildLoop(deps: {
         queued: list.filter((t) => t.state === "queued").length, done: list.filter((t) => t.state === "done").length,
       });
     } catch (err) {
-      log("build.tasks_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tasks_failed", { session_id: sessionId, error: errorCode(err) });
     }
   }
 
@@ -543,7 +543,7 @@ export function createBuildLoop(deps: {
             parentRe.lastIndex = 0;
           }
         } catch (err) {
-          log("build.stream_apply_failed", { session_id: sessionId, error: errorName(err) });
+          log("build.stream_apply_failed", { session_id: sessionId, error: errorCode(err) });
         }
       };
 
@@ -570,7 +570,7 @@ export function createBuildLoop(deps: {
       }
     } catch (err) {
       log("build.run_failed", {
-        session_id: sessionId, stage, error: errorName(err),
+        session_id: sessionId, stage, error: errorCode(err),
         status: (err as { status?: unknown } | null)?.status ?? null,
       });
     } finally {
@@ -580,7 +580,7 @@ export function createBuildLoop(deps: {
         if (rt && region) rt.pendingRegion(null);
         rt?.updateMoodInputs({ buildInFlight: false, buildStreaming: false });
       } catch (err) {
-        log("build.cleanup_failed", { session_id: sessionId, error: errorName(err) });
+        log("build.cleanup_failed", { session_id: sessionId, error: errorCode(err) });
       }
       finishTasks(sessionId, st, taskIds, patchCounts.applied > 0 || opsApplied > 0);
       ensureTick(sessionId, st);
@@ -649,12 +649,12 @@ export function createBuildLoop(deps: {
           let stored: StoredEvent[] = [];
           // Unread grounding grounds nobody, so a pick is not acted on: agreement needs real lines (spec §4).
           if (picks) stored = await store.listEvents(sessionId).catch((err) => {
-            log("build.grounding_failed", { session_id: sessionId, error: errorName(err) });
+            log("build.grounding_failed", { session_id: sessionId, error: errorCode(err) });
             return [];
           });
           if (!ended.has(sessionId)) take(sessionId, st, parsed.data, stored);
         })
-        .catch((err) => log("build.handoff_failed", { session_id: sessionId, error: errorName(err) }))
+        .catch((err) => log("build.handoff_failed", { session_id: sessionId, error: errorCode(err) }))
         .finally(() => { if (st.intake === intake) st.intake = null; });
       st.intake = intake;
     },
