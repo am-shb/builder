@@ -71,10 +71,63 @@ Never paste a secret into an issue, a PR, a log or a chat. Edit `apps/engine/.en
 - **Stage or handoff tokens:** they can't be revoked yet (see [../security/](../security/)). To cut off a leaked
   handoff link today, you'd have to change that session's `handoff_token` in the database.
 
-## Deploy and environments
+## Deploy to Render
 
-Nothing is deployed yet. The plan is in [ADR 0005](../adr/0005-hosting-on-render.md): Render, with a persistent public
-URL per environment (dev, staging and production) so Recall webhooks and the stage no longer depend on a tunnel.
+[ADR 0005](../adr/0005-hosting-on-render.md) picks Render. The Blueprint is `render.yaml` at the repo root. It
+defines the Postgres `builder-db` and the web service `builder-engine`, both in `oregon`, the region nearest
+Recall's `us-west-2`. There is no api or web service yet. They go in the same file when they exist.
+
+**Cost:** a Pro workspace ($25 a month), the engine on `starter` ($7) and `builder-db` on `basic-256mb` ($6), about
+$38 a month plus bandwidth. Nothing runs on a free plan.
+
+**Create it**
+1. In the Render dashboard choose New > Blueprint. Pick the repo and the branch.
+2. Render lists the database and the engine. It asks for each variable marked `sync: false`:
+   `RECALL_API_KEY`, `RECALL_WEBHOOK_VERIFICATION_SECRET`, `OPENROUTER_API_KEY`, `RECALL_REGION`, `TTS_VOICE` and
+   `BOT_VARIANT`. Paste the secrets here and nowhere else. `RECALL_REGION` is a value such as `us-west-2`, and it
+   must match the region of the Recall key. `TTS_VOICE` and `BOT_VARIANT` can stay empty. If Render won't accept an
+   empty value, you can add them later under the service's Environment tab.
+3. Apply. `DATABASE_URL` (the internal connection string) and `NODE_ENV=production` are set by the Blueprint.
+   `PUBLIC_API_BASE_URL` isn't needed. The engine uses `RENDER_EXTERNAL_URL`, which Render sets, unless you set
+   `PUBLIC_API_BASE_URL` yourself (for a custom domain, for example).
+
+**What a deploy does**
+1. Build: `npm ci --workspace @builder/engine --include-workspace-root`. With `NODE_ENV=production` this installs
+   production dependencies only. The engine needs no dev dependency to migrate or start.
+2. Pre-deploy: `npm run migrate -w @builder/engine`. If it fails, the deploy stops and the old version keeps
+   running. The log line is `db.migrate_failed` with an error code.
+3. Start: `npm start -w @builder/engine`. Render waits for `GET /healthz` to return 200 before it switches traffic.
+4. The Blueprint redeploys on a push to the branch, but only when a path in `buildFilter` changed.
+
+**Check health**
+- `curl https://<your-service>.onrender.com/healthz` returns `{"ok":true}`.
+- In the dashboard, the Logs tab shows `db.migrated` and `Listening on`. A bad config shows as `Missing required
+  environment variables` and the names only.
+- Point Recall's webhooks at the service URL plus the realtime path shown in the `Recall realtime endpoint:` log line.
+
+**Roll back**
+- Code: in the service's Events tab, choose Rollback on the last good deploy. It doesn't undo migrations. The
+  committed migrations only add to the schema so far. If a migration must be undone, write a new migration.
+- Data: `builder-db` has backups. Restoring is a dashboard action on the database. Check what the plan includes first.
+
+**Known limits**
+- **A deploy ends live meetings.** The engine holds sessions in memory and Render starts the new instance before it
+  stops the old one. Recall webhooks for the old sessions reach an instance that doesn't know them. Deploy outside
+  meetings. Turn off auto-deploy if that gets in the way.
+- **Nobody can start a session on Render yet.** The operator page `/` and `/api/*` refuse requests that arrive
+  through a proxy, and Render is one. Starting sessions needs the api and Clerk, or an interim operator token that
+  an ADR decides. Recall's webhook, the stage and the handoff pages work, and so does `/healthz`.
+- One instance only. Don't raise `numInstances`.
+- A free-tier database expires and has no backups, so keep `basic-256mb`.
+
+**Other notes**
+- The database accepts internal connections only (`ipAllowList: []`). To use `psql`, add your IP in the dashboard
+  for the time you need it, or use Render's shell on the engine.
+- Internal connection strings don't need SSL, and the engine doesn't set it. If you ever use the external URL, add
+  `?sslmode=require` to it.
+- Staging and production, from the same Blueprint, are still to do (ADR 0005).
+
+## Environments and CI
 
 - Secrets live in the host's secret store: the Recall keys and webhook secret, the OpenRouter key, and the auth and
   payment provider keys. Never in the repo.

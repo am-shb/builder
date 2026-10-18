@@ -26,13 +26,11 @@ export type Config = {
 const REGIONS = new Set(["us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1"]);
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
-  const required = [
-    "RECALL_REGION",
-    "RECALL_API_KEY",
-    "RECALL_WEBHOOK_VERIFICATION_SECRET",
-    "PUBLIC_API_BASE_URL",
-  ] as const;
-  const missing = required.filter((name) => !env[name]?.trim());
+  // Render sets RENDER_EXTERNAL_URL on web services, so PUBLIC_API_BASE_URL needs no manual step there.
+  const publicUrl = env.PUBLIC_API_BASE_URL?.trim() || env.RENDER_EXTERNAL_URL?.trim() || "";
+  const required = ["RECALL_REGION", "RECALL_API_KEY", "RECALL_WEBHOOK_VERIFICATION_SECRET"] as const;
+  const missing: string[] = required.filter((name) => !env[name]?.trim());
+  if (!publicUrl) missing.push("PUBLIC_API_BASE_URL");
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
@@ -45,7 +43,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new Error("RECALL_WEBHOOK_VERIFICATION_SECRET must start with whsec_");
   }
 
-  const publicBaseUrl = env.PUBLIC_API_BASE_URL!.trim().replace(/\/+$/, "");
+  const publicBaseUrl = publicUrl.replace(/\/+$/, "");
   const url = new URL(publicBaseUrl);
   if (url.protocol !== "https:") throw new Error("PUBLIC_API_BASE_URL must be https");
   if (/^(localhost|127\.|10\.|192\.168\.|0\.0\.0\.0)/.test(url.hostname)) {

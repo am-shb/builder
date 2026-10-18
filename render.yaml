@@ -1,0 +1,50 @@
+# Render Blueprint (ADR 0005). Create it from the dashboard: New > Blueprint. See docs/runbooks/README.md.
+# No secrets here. Values marked `sync: false` are asked for in the dashboard.
+# The api and web services go below the engine when they exist (ADR 0008 and the web framework ADR).
+
+databases:
+  - name: builder-db
+    plan: basic-256mb
+    region: oregon # Same region as every service, so the private network connects them.
+    postgresMajorVersion: "17"
+    ipAllowList: [] # Internal connections only.
+
+services:
+  - type: web
+    name: builder-engine
+    runtime: node
+    plan: starter
+    region: oregon
+    numInstances: 1 # The engine keeps live sessions in memory.
+    # No rootDir: it would hide contracts/ from the build.
+    buildCommand: npm ci --workspace @builder/engine --include-workspace-root
+    preDeployCommand: npm run migrate -w @builder/engine
+    startCommand: npm start -w @builder/engine
+    healthCheckPath: /healthz
+    buildFilter:
+      paths:
+        - apps/engine/**
+        - contracts/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: builder-db
+          property: connectionString
+      # PUBLIC_API_BASE_URL is not set: the engine falls back to RENDER_EXTERNAL_URL, which Render provides.
+      - key: RECALL_API_KEY
+        sync: false
+      - key: RECALL_WEBHOOK_VERIFICATION_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: RECALL_REGION
+        sync: false
+      - key: TTS_VOICE
+        sync: false
+      - key: BOT_VARIANT
+        sync: false
