@@ -2,7 +2,6 @@
 
 - **Status:** proposed
 - **Date:** 2026-10-17
-- **Deciders:** ma-shamshiri (api)
 - **Area:** api (`apps/api`)
 
 ## Context
@@ -35,7 +34,7 @@ Option 1, with these rules:
   never from a body or query. Tests sign their own tokens with a key pair made at test time.
 - **Data.** Postgres and Drizzle in the `api` schema, as ADR 0007 decides, with PGlite in tests. (Superseded by
   [ADR 0011](0011-surrealdb.md): SurrealDB, database `api`, with the in-process engine in tests.) Whether the api
-  uses `node:sqlite` until the hackathon submission is open with the repo owner. Either way, every db function takes
+  uses `node:sqlite` until the hackathon submission is an open question. Either way, every db function takes
   `orgId` as its first argument, and only `src/db/` knows which database is underneath.
 - **Ids.** Session ids are UUIDs from `randomUUID()`, because the engine's stage and hand-off routes only match UUIDs.
   Org and user ids are Clerk's.

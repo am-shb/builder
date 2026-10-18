@@ -4,8 +4,8 @@
 > the schema in SurrealQL, in database `api` on SurrealDB Cloud, with `@surrealdb/node` in memory for tests. That also settles "Postgres
 > or SQLite for the hackathon": neither.
 
-- **Status:** agreed by the api owner on 2026-10-17, except D5 (open, for the repo owner) and the engine and
-  contracts items, which need their owners. Steps 0, 1, 2 and 4 are merged. On 2026-10-18 the repo owner chose
+- **Status:** agreed on 2026-10-17, except D5 (open) and the engine and
+  contracts items, which need review before merge. Steps 0, 1, 2 and 4 are merged. On 2026-10-18 the project chose
   SurrealDB on SurrealDB Cloud for both apps, one database each ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 below
   is rewritten for it, and isn't started. Later on 2026-10-18 the engine's move to SurrealDB landed on `main`
   (PR #6), so step 3 now follows the engine's connection and migration code.
@@ -13,7 +13,7 @@
 - **Deadline:** hackathon submission due 2026-10-25, 11:59 PM ET. Where there's a choice, take the simplest option.
   See [Timeline](#timeline).
 - **Area:** `apps/api`. Changes needed in `apps/engine` and `contracts/` are listed separately in
-  [Changes outside apps/api](#changes-outside-appsapi) and need their owners' approval.
+  [Changes outside apps/api](#changes-outside-appsapi) and need review before merge.
 - **Built on:** ADRs [0004](../adr/0004-workspaces-and-repo-layout.md), [0005](../adr/0005-hosting-on-render.md),
   [0006](../adr/0006-identity-and-tenancy.md), [0008](../adr/0008-api-engine-boundary.md),
   [0009](../adr/0009-pricing-model.md), [0010](../adr/0010-api-stack.md) and
@@ -258,7 +258,7 @@ The namespace and database are constants in `connect.ts`, not settings, as in th
 
 One rule is stricter than the engine's: `SURREAL_URL` is required when `NODE_ENV=production`. Without it, production
 would silently write to a local folder that disappears on the next deploy. The Blueprint sets `NODE_ENV=production`
-on the api (I-1). The engine has the same gap, which is worth raising with its owner.
+on the api (I-1). The engine has the same gap, which is an open question for the engine.
 
 `apps/api/.env.example` lists names only. `apps/api/.env` is git-ignored by the root `.env` rule. Config never logs
 values.
@@ -309,9 +309,9 @@ check). Then billing.
 These need approval before anyone builds them. None of them blocks a step: O1, the only one that did, is on `main`.
 Until the rest land, the api is only ever tested against the fake engine.
 
-**Engine (engine owner; E1 built by the api owner):**
-- **E1.** `POST /internal/sessions`, as ADR 0008 describes. **The engine owner asked the api owner to build it
-  (2026-10-18).** It's still engine code, so it goes on its own `engine/` branch with the engine owner's review
+**Engine:**
+- **E1.** `POST /internal/sessions`, as ADR 0008 describes. **Built as part of this slice
+  (2026-10-18).** It's still engine code, so it goes on its own `engine/` branch and needs review before merge
   (AGENTS.md). Not started; the route doesn't exist on `main` yet. It requires the bearer token (`ENGINE_INTERNAL_TOKEN`,
   compared in constant time, as `tokenMatches` already does). It refuses requests with proxy headers, using the
   existing `viaProxy`. It parses the body with `StartSessionRequest`, uses the api's `sessionId` instead of making
@@ -328,7 +328,7 @@ Until the rest land, the api is only ever tested against the fake engine.
 - Later, not needed for this slice: enforce the limits, send `/internal/engine-events`, the org-deletion route, and
   turning off `/` and `/api/*` in production (all from ADR 0008).
 
-**Contracts (engine and api owners together, additive only):**
+**Contracts (additive only, both apps must agree):**
 - **C1.** `StartSessionError`: `{ error: { code: string } }`, used for non-2xx replies from `/internal/sessions`, with
   known codes such as `recall_rejected`, `recall_outcome_unknown`, `meeting_in_use`, `invalid_request` and
   `unauthorized`. Without it, the api has to guess from the HTTP status alone whether a bot might exist.
@@ -337,13 +337,13 @@ Until the rest land, the api is only ever tested against the fake engine.
   always send `randomUUID()`. Alternatively, tighten it to `z.uuid()` now while nothing sends it yet. Decision D11.
 - **C3 (later).** Move `CreateSessionBody`, `SessionView` and `SessionList` here when `apps/web` imports them.
 
-**Repo root (repo owner):**
+**Repo root:**
 - **O1. Done.** The root `package.json` overrides the TypeScript peer of `surrealdb` and `@surrealdb/sqon` with
   `"$typescript"`. It landed with the engine's move to SurrealDB (PR #6). `surrealdb` 2.1.1 declares a TypeScript
   `^5 || ^6` peer, and the override is the smallest fix; `--legacy-peer-deps` would loosen peer checks for every
   package. Remove it when `surrealdb` accepts TypeScript 7.
 
-**Infra (infra owner, in the engine plan's Task 2):**
+**Infra (in the engine plan's Task 2):**
 - **I-1.** The api service in `render.yaml`. The engine plan's Task 2 (`infra/render`, not on GitHub yet) covers most
   of it:
   - `builder-api`, a Docker web service with health check `/health`
@@ -370,8 +370,8 @@ this plan's steps.
 
 - **The engine** is on SurrealDB (engine plan, Task 1, on `main` since PR #6). It uses database `engine` with its own
   user, so the two apps never share tables. Its `connect.ts` and `migrate.ts` are the model for the api's (step 3).
-- **The Postgres work** (`engine/postgres`, and the archive branches the engine plan reuses) is the
-  engine owner's. The api never depended on it.
+- **The Postgres work** (`engine/postgres`, and the archive branches the engine plan reuses) belongs to the
+  engine plan. The api never depended on it.
 - **`render.yaml`, `docker-compose.yml` and the Cloud setup script** are written in the engine plan's Task 2
   (`infra/render`), with no database on Render. They already plan an api service and the api's database and user.
   I-1 and I-2 list what the api still needs from them.
@@ -386,11 +386,11 @@ this plan's steps.
 
 ## Decisions
 
-**Made by the api owner (2026-10-17).** These go into ADR 0010 in step 0.
+**Made on 2026-10-17.** These go into ADR 0010 in step 0.
 - **D1.** Plain `node:http` with a small router. No framework.
 - **D2.** Api-to-web shapes stay in `apps/api` until web imports them.
 - **D3.** A token with no active org gets 403 `no_active_org`. The Clerk project needs a dashboard setting that
-  makes every user belong to an org, so ADR 0006's "personal org of one" holds. That's for whoever owns the Clerk
+  makes every user belong to an org, so ADR 0006's "personal org of one" holds. That's an open setup task in the Clerk
   project.
 - **D4.** `orgs` rows are created on the org's first request. The webhook mirror comes later.
 - **D6.** The api adds its own statuses `starting`, `start_failed` and `start_unknown` next to the contract's four.
@@ -398,7 +398,7 @@ this plan's steps.
 - **D8.** `GET` and `POST` return the stage URL to members of the owning org. It's never logged.
 - **D10.** `GET /v1/me` ships with auth in step 2.
 
-**Answered by the repo owner in [ADR 0011](../adr/0011-surrealdb.md) (2026-10-18):**
+**Answered in [ADR 0011](../adr/0011-surrealdb.md) (2026-10-18):**
 - ~~Postgres or SQLite for the hackathon.~~ Neither: SurrealDB.
 - **D15. The engine's database:** SurrealDB too, database `engine`. Landed on `main` (PR #6).
 - **D16. Where it runs:** SurrealDB Cloud, one instance, created by the engine plan's runbook. The free instance at
@@ -407,20 +407,20 @@ this plan's steps.
   `legacy-peer-deps` (O1). On `main`.
 
 **Still open:**
-- **D5 (repo owner).** Default per-session limits until billing exists: values for `DEFAULT_MAX_USD` and
+- **D5.** Default per-session limits until billing exists: values for `DEFAULT_MAX_USD` and
   `DEFAULT_MAX_MINUTES`.
-- **D18 (repo owner, engine owner).** Memory across meetings for the prize: whether to build it before 2026-10-25,
+- **D18.** Memory across meetings for the prize: whether to build it before 2026-10-25,
   and with SurrealDB Agent Memory or our own tables. See
   [Later: memory across meetings](#later-memory-across-meetings-surrealdb).
-- The Clerk instance: which Clerk application and environment to use for staging, and who holds `CLERK_JWT_KEY`.
+- The Clerk instance: which Clerk application and environment to use for staging, and where `CLERK_JWT_KEY` is kept.
   Tests don't need it.
 
-**From the engine owner (with you where noted):**
-- **D11.** C2: document the uuid rule only, or tighten `sessionId` to `z.uuid()` now. Both owners.
-- **D12.** Approve E2–E4 and review E1. The engine owner asked the api owner to build E1 (2026-10-18). The question of
+**Engine side (some need both apps to agree, as noted):**
+- **D11.** C2: document the uuid rule only, or tighten `sessionId` to `z.uuid()` now. Both apps.
+- **D12.** Approve E2–E4 and review E1, built as part of this slice (2026-10-18). The question of
   whether E4 lands before or after `engine/surrealdb` no longer applies, since that branch has landed.
 - **D13.** C1's error codes, and which HTTP statuses the engine uses for "Recall rejected" versus "outcome unknown".
-  Both owners.
+  Both apps.
 - **D14.** The engine's timeout budget for `/internal/sessions`. Recall's create-bot call is a few seconds. The api's
   client timeout (proposed: 20 s) must be longer than the engine's own timeout.
 
@@ -441,14 +441,14 @@ half a day to a day each. Two parts are at risk:
 - **A real end-to-end meeting depends on work outside the api:** E1–E4 in the engine, C1 in contracts, and the
   infra items for a deploy. The api can be finished and tested against the fake engine without them. But a demo where
   the web app starts a real bot needs E1 and E3 by about 2026-10-22 to leave time to test with real meetings.
-  E1 is now the api owner's to build (with E4, which it needs), on top of steps 3, 5 and 6.
+  E1 is built as part of this slice (with E4, which it needs), on top of steps 3, 5 and 6.
 
 If time runs short, the order to cut is: `GET /v1/sessions/:id`, then session reuse (D7), then `GET /v1/me`. Auth,
 create and list stay.
 
 ## Later: memory across meetings (SurrealDB)
 Not in this slice and not scheduled. There's a hackathon prize for agent memory, so this is a sketch of how Builder
-could remember things from one meeting to the next. It needs the repo owner's go-ahead, and it's mostly engine work.
+could remember things from one meeting to the next. It needs a go-ahead first, and it's mostly engine work.
 ADR 0011 already places memory in the same SurrealDB Cloud instance, in a design of its own later.
 
 **What's worth remembering.** Each session already ends with a decision document (spec §11):
@@ -489,10 +489,10 @@ the build loop reuse components the org already approved.
 - **The engine owns memory.** ADR 0008 keeps transcripts and decision documents out of the api. The api would only
   hold the org's on/off setting and ask the engine to delete memory when an org is deleted.
 
-**A small version for the demo**, if the owner wants a shot at the prize:
+**A small version for the demo**, if the prize is worth a shot:
 1. When a session ends, the engine writes its agreed decisions and open questions to memory, scoped to the org.
 2. When the next session in that org starts, it recalls the top few for the meeting's first topic.
 3. The conversation model gets them as "from earlier meetings". The stage can show one line for it.
 
-This needs E1 and E3 first. Building it is D18 (repo owner): option 1 or option 2, and whether it's worth doing
+This needs E1 and E3 first. Building it is D18: option 1 or option 2, and whether it's worth doing
 before 2026-10-25.
