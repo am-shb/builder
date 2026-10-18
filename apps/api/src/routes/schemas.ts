@@ -41,3 +41,31 @@ export function toSessionView(r: SessionRecord): SessionView {
     updatedAt: r.updatedAt,
   };
 }
+
+// The same hosts the engine accepts (MEETING_HOSTS in apps/engine/src/app.ts): Google Meet, Zoom and Teams.
+const MEETING_HOSTS = /^(meet\.google\.com|([a-z0-9-]+\.)?zoom\.us|teams\.microsoft\.com|teams\.live\.com)$/i;
+
+/** An https meeting link on a host the engine can join, normalized by URL parsing (so reuse matches it). */
+export const MeetingUrl = z.string().trim().max(2000).transform((s, ctx) => {
+  const u = URL.canParse(s) ? new URL(s) : null;
+  if (!u || u.protocol !== "https:" || !MEETING_HOSTS.test(u.hostname) || u.username || u.password) {
+    ctx.addIssue({ code: "custom", message: "Use an https Google Meet, Zoom or Teams link." });
+    return z.NEVER;
+  }
+  return u.href;
+});
+
+/** POST /v1/sessions. Any other field, such as an org id, is ignored: the org comes from the token. */
+export const CreateSessionBody = z.object({ meetingUrl: MeetingUrl });
+export type CreateSessionBody = z.infer<typeof CreateSessionBody>;
+
+/** POST /v1/sessions, 201 (started) or 200 (`reused`: the org's active session for this meeting). */
+export const CreateSessionResponse = z.strictObject({ session: SessionView, reused: z.boolean() });
+export type CreateSessionResponse = z.infer<typeof CreateSessionResponse>;
+
+/** POST /v1/sessions, 502 engine_rejected or 504 engine_outcome_unknown: the error, and the session as saved. */
+export const StartFailedResponse = z.strictObject({
+  error: z.strictObject({ code: z.enum(["engine_rejected", "engine_outcome_unknown"]), message: z.string() }),
+  session: SessionView,
+});
+export type StartFailedResponse = z.infer<typeof StartFailedResponse>;
