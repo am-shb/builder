@@ -7,15 +7,20 @@ import type { Config } from "./config.ts";
 import { createHandler } from "./router.ts";
 import type { Log } from "./router.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { meRoutes } from "./routes/me.ts";
+import { createClerkAuth } from "./auth/clerk.ts";
+import type { Authenticator } from "./auth/clerk.ts";
 
-// Everything the server needs is passed in, so tests can use fakes. Later steps add the db, auth and engine client.
-export type Deps = { config: Config; log?: Log };
+// Everything the server needs is passed in, so tests can use fakes. Later steps add the db and engine client.
+// `auth` defaults to Clerk with the config's key.
+export type Deps = { config: Config; log?: Log; auth?: Authenticator };
 
 export const jsonLog: Log = (msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
 
 export function createServer(deps: Deps): Server {
   const log = deps.log ?? jsonLog;
-  const handle = createHandler([...healthRoutes], log);
+  const auth = deps.auth ?? createClerkAuth(deps.config.clerk, { log });
+  const handle = createHandler([...healthRoutes, ...meRoutes(auth)], log);
   return createHttpServer((req, res) => void handle(req, res));
 }
 
