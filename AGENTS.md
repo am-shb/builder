@@ -22,7 +22,7 @@ production product with accounts, billing and the rest.
 
 ## Current stack (engine)
 - Node 24 or newer, running TypeScript natively through type stripping, with no build step
-- `node:sqlite`, `node:test`, zod v4, `@anthropic-ai/sdk` pointed at OpenRouter, `ws`
+- SurrealDB (`surrealdb` SDK, `@surrealdb/node` in-process for tests and local), `node:test`, zod v4, `@anthropic-ai/sdk` pointed at OpenRouter, `ws`
 - TypeScript 7 for type checking only (`tsc`, no emit). Use erasable syntax only: no enums, namespaces or
   parameter properties ([ADR 0001](docs/adr/0001-ci-and-type-checking.md))
 - New areas can choose differently, but record the choice in an ADR

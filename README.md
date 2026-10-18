@@ -92,7 +92,10 @@ have an older `.env` or `data/` at the repo root, move them into `apps/engine/` 
 | `TTS_VOICE` | no | ElevenLabs voice for Builder. Unset means Builder's lines go to meeting chat. One of: george, sarah, adam, alice, bella, bill, brian, callum, charlie, chris, daniel, eric, harry, jessica, laura, liam, lily, matilda, river, roger, will. |
 | `BOT_VARIANT` | no | `web_4_core` (default), `web_gpu`, or `web` for Recall's plain web bot. Larger variants cost more per hour. |
 | `PORT` | no | Listen port, default 3000. |
-| `DB_PATH` | no | SQLite path, default `data/app.db` (inside `apps/engine/`). |
+| `SURREAL_URL` | no | SurrealDB server, `ws://` or `wss://` (production: SurrealDB Cloud). Unset means SurrealDB runs in the engine's process, in `SURREAL_PATH`. Run `npm run migrate -w @builder/engine` before starting against a new or updated server. |
+| `SURREAL_USER`, `SURREAL_PASS` | with `SURREAL_URL` | The user to sign in as, and its password. |
+| `SURREAL_AUTH` | no | `database` (default): a user on namespace `builder`, database `engine`, with the `OWNER` role there. `root`: a root user, as on a local `surreal start`. |
+| `SURREAL_PATH` | no | Folder of the in-process database when `SURREAL_URL` is unset, default `data/surreal` (`data/local-surreal` for `npm run local`), inside `apps/engine/`. |
 
 ## Running
 
@@ -124,7 +127,7 @@ macOS default path or at `CHROME_PATH`, and skip otherwise.
 `npm run local` runs the engine with no Recall, no meeting and no tunnel. Open `http://localhost:3000/local` in
 Chrome, type your name and click **Start session**. Your mic is the meeting: Chrome's speech recognition turns what
 you say into transcript lines, and the real stage, shown in the page, plays Builder's voice. Only `OPENROUTER_API_KEY`
-(and `TTS_VOICE` for voice) are read from `.env`. The Recall settings are ignored, and sessions go to `apps/engine/data/local.db`.
+(and `TTS_VOICE` for voice) are read from `.env`. The Recall settings are ignored, and sessions go to an in-process SurrealDB in `apps/engine/data/local-surreal`, even when `SURREAL_URL` is set.
 Use headphones, or Builder hears itself and stops talking. [ADR 0003](docs/adr/0003-local-mode.md) has the details.
 
 ### Replay
@@ -173,7 +176,7 @@ Run in a real Google Meet with 2 or more people. Not yet done.
   register a dashboard webhook endpoint on a stable URL for bot status, `transcript.done` and
   `transcript.failed` (the failure event is only delivered there, not to realtime endpoints).
 - Partial transcripts drive the character and the live captions but are not stored; finalized utterances
-  are stored in SQLite.
+  are stored in SurrealDB.
 - The local control UI has no login. It relies on being reachable only from localhost, detected by the
   absence of proxy headers. Fine for a personal test, not for a shared deployment.
 - Calendar scheduling is deferred; sessions start from a pasted meeting URL.

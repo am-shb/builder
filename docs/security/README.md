@@ -29,6 +29,6 @@ Builder records and transcribes other people's meetings, so this area is part of
   Anyone who reaches the process directly can create bots, read transcripts and post chat messages. Don't expose the
   port.
 - **Capability tokens never expire and can't be revoked.** Anyone who has a link keeps access.
-- **Data has no retention or deletion.** SQLite keeps transcripts indefinitely, in `data/app.db`.
+- **Data has no retention or deletion.** The engine's SurrealDB keeps transcripts indefinitely (in-process, in `apps/engine/data/surreal`, without `SURREAL_URL`).
 - **Prompt injection from meeting speech isn't modelled.** The agent acts only through validated tools, and agreement
   needs grounded utterances, but nothing has been tested adversarially.
