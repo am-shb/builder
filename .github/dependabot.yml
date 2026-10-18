@@ -8,6 +8,11 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    # @types/node must match the Node we run (.nvmrc, the Docker images, CI). A major bump would let the type check
+    # accept APIs that don't exist at runtime, so it moves only together with .nvmrc.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         dependency-type: development
