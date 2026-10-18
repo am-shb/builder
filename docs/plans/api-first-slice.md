@@ -1,9 +1,5 @@
 # Plan: the api's first slice (Clerk auth, sessions, engine client, SurrealDB)
 
-> **2026-10-18:** the database is now SurrealDB, not Postgres ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 writes
-> the schema in SurrealQL, in database `api` on SurrealDB Cloud, with `@surrealdb/node` in memory for tests. That also settles "Postgres
-> or SQLite for the hackathon": neither.
-
 - **Status:** agreed on 2026-10-17, except D5 (open) and the engine and
   contracts items, which need review before merge. Steps 0, 1, 2 and 4 are merged. On 2026-10-18 the project chose
   SurrealDB on SurrealDB Cloud for both apps, one database each ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 below

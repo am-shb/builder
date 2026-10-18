@@ -31,16 +31,11 @@ Settle these first, as ADRs in `docs/adr/`:
    [ADR 0008](adr/0008-api-engine-boundary.md).
 6. Pricing model. This blocks billing. Proposed in [ADR 0009](adr/0009-pricing-model.md) (per meeting hour).
 
-## Before any shared deployment
+## Production
 
-The engine blockers (I1, I5, I6 and I7 in [known-issues.md](known-issues.md)) were fixed on 2026-10-17. These still
-stand between v0 and a deployment other people can reach:
+Production has run on Render since 2026-10-18, with SurrealDB Cloud, and CD from `main` (ADR 0005, ADR 0011,
+[runbook](runbooks/README.md)). People start sessions through the api with a Clerk token, and the engine's operator
+surface is off behind Render's proxy. That settles the earlier blockers on login, a stable public URL and storage.
 
-1. **The operator surface has no login.** `/` and `/api/*` answer only requests that carry no proxy headers. Behind a
-   hosting platform's proxy that means nobody can use them; on a host reachable directly, it means anyone can,
-   including sending bots, which costs money. This needs sign-in in the api ([ADR 0006](adr/0006-identity-and-tenancy.md)), or an interim operator token decided in an
-   ADR.
-2. **The engine runs as one process.** Session state is held in memory, so run a single instance until scaling is
-   settled. Storage is SurrealDB. Proposed in [ADR 0005](adr/0005-hosting-on-render.md) and [ADR 0011](adr/0011-surrealdb.md).
-3. **There's no stable public URL.** Recall needs one for webhooks and the stage (decision 2 above).
-4. **Nothing caps spend.** No per-session or per-org cost cap exists yet (the api's spend limits, [ADR 0008](adr/0008-api-engine-boundary.md)).
+What's left before other people use it is R1 to R7 in [known-issues.md](known-issues.md#open-since-the-first-production-deploy-2026-10-18).
+The most urgent are R1, nothing caps spend yet, and R2, a deploy ends live meetings.
