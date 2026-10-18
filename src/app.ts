@@ -24,6 +24,8 @@ import { createUiCommandRunner } from "./agent/ui-command.ts";
 import { createChatSpeech, createConversationLoop } from "./agent/conversation-loop.ts";
 import type { Speech } from "./agent/conversation-loop.ts";
 import type { ModelPort } from "./agent/llm.ts";
+import type { RealtimeEvent } from "./realtime.ts";
+import { z } from "zod";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -31,6 +33,13 @@ const MAX_BODY = 1_000_000;
 const MEETING_HOSTS = /^(meet\.google\.com|([a-z0-9-]+\.)?zoom\.us|teams\.microsoft\.com|teams\.live\.com)$/i;
 
 const MAX_STAGE_HTML = 200_000;
+
+// What the /local page sends from the operator's mic, in place of Recall's transcript (local mode only).
+const LocalSpeech = z.object({
+  kind: z.enum(["partial", "utterance", "join", "leave"]),
+  speaker: z.string().trim().min(1).max(100),
+  text: z.string().trim().max(5000).optional(),
+});
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
@@ -54,11 +63,12 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
 // `clock` and `timers` default to real time; replays and tests inject virtual ones.
 export type AgentDeps = { port: ModelPort; speech?: Speech; clock?: () => number; timers?: Timers };
 
-export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {
+export function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: (sessionId: string) => SessionRuntime; agent?: AgentDeps }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const stageHtml = deps.stageHtml ?? readFileSync(new URL("../public/stage.html", import.meta.url), "utf8");
+  const localHtml = config.local ? deps.localHtml ?? readFileSync(new URL("../public/local.html", import.meta.url), "utf8") : null;
   const runtime = deps.runtime ?? createRuntime({ store, channel: noopStageSink, log });
   const clock = deps.agent?.clock ?? Date.now;
   const buildLoop = deps.agent
@@ -175,6 +185,11 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       log("realtime.unknown_session", { kind: parsed.kind });
       return;
     }
+    handleEvent(session, parsed, msgId);
+  }
+
+  // A transcript or participant event for a session, from Recall or (in local mode) the operator's mic.
+  function handleEvent(session: Session, parsed: RealtimeEvent, msgId: string | null) {
     // Late events after the call ended are stored, but the agent no longer acts on them.
     const agent = isTerminal(session.bot_status) ? null : conversation;
     if (parsed.kind === "partial") {
@@ -318,6 +333,20 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
     }
     if (req.method === "GET" && path === "/api/sessions") return json(res, 200, { sessions: store.listSessions() });
 
+    // ---- local mode: the operator's own mic stands in for the meeting ----
+    if (localHtml !== null && req.method === "GET" && path === "/local") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(localHtml);
+    }
+    if (config.local && req.method === "POST" && path === "/api/local/sessions") {
+      const result = await createSession(`local:${randomUUID()}`);
+      // The stand-in bot is in the call already: pick that up now rather than at the next poll.
+      await pollOnce();
+      const id = (result.body as { session?: Session }).session?.id;
+      const s = id ? store.getSession(id) : undefined;
+      return json(res, result.status, s ? { session: sessionView(s) } : result.body);
+    }
+
     if (req.method === "POST" && path === "/api/sessions") {
       let meetingUrl: string;
       try {
@@ -332,7 +361,7 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
       return json(res, result.status, result.body);
     }
 
-    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/cost|\/chat|\/leave|\/screenshare|\/stage|\/script)?$/);
+    const m = path.match(/^\/api\/sessions\/([0-9a-f-]{36})(\/stream|\/cost|\/chat|\/leave|\/screenshare|\/stage|\/script|\/speech)?$/);
     if (m) {
       const session = store.getSession(m[1]);
       if (!session) return json(res, 404, { error: "not found" });
@@ -352,6 +381,24 @@ export function createApp(deps: { config: Config; recall: RecallClient; store: S
         publish(session.id, "stage", { html });
         log("stage.updated", { session_id: session.id, bytes: html.length });
         return json(res, 200, { ok: true });
+      }
+
+      // Local mode: a line (or a partial, or a join) from the operator's mic, handled as Recall's would be.
+      if (config.local && req.method === "POST" && sub === "/speech") {
+        const parsed = LocalSpeech.safeParse(await readJson(req));
+        if (!parsed.success) return json(res, 400, { error: "invalid speech" });
+        if (isTerminal(session.bot_status)) return json(res, 409, { error: "session has ended" });
+        const { kind, speaker, text } = parsed.data;
+        if ((kind === "partial" || kind === "utterance") && !text) return json(res, 400, { error: "text is required" });
+        json(res, 200, { ok: true });
+        setImmediate(() => {
+          try {
+            handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null);
+          } catch (err) {
+            log("local.speech_failed", { error: errorName(err) });
+          }
+        });
+        return;
       }
 
       // Visual-QA script driver (local only: this block is behind the viaProxy gate).

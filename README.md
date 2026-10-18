@@ -100,6 +100,7 @@ equivalent) first.
 npm install
 npm run tunnel          # cloudflared quick tunnel to port 3000; put the printed URL in PUBLIC_API_BASE_URL
 npm start               # http://localhost:3000, paste a Meet link and click Send bot
+npm run local           # no Recall: talk to Builder through your own mic at http://localhost:3000/local
 npm test                # unit, HTTP-boundary and end-to-end replay tests (no network, no ports but ephemeral ones)
 npm run smoke           # boots the real app on a loopback socket with a fake Recall API; prints SMOKE OK
 npm run typecheck       # tsc --noEmit over src, scripts and test
@@ -111,6 +112,14 @@ anything longer-lived. Admit "Builder" in the call when it asks to join.
 
 Browser tests (`test/*browser*.test.ts`, and parts of `test/handoff.test.ts`) need Chrome. They find it at the
 macOS default path or at `CHROME_PATH`, and skip otherwise.
+
+### Local mode: talk to Builder without Recall
+
+`npm run local` runs the engine with no Recall, no meeting and no tunnel. Open `http://localhost:3000/local` in
+Chrome, type your name and click **Start session**. Your mic is the meeting: Chrome's speech recognition turns what
+you say into transcript lines, and the real stage, shown in the page, plays Builder's voice. Only `OPENROUTER_API_KEY`
+(and `TTS_VOICE` for voice) are read from `.env`. The Recall settings are ignored, and sessions go to `data/local.db`.
+Use headphones, or Builder hears itself and stops talking. [ADR 0003](docs/adr/0003-local-mode.md) has the details.
 
 ### Replay
 

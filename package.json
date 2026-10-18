@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/server.ts",
-    "smoke": "node src/server.ts --smoke",
+    "local": "node src/server.ts --local",
+    "smoke":"node src/server.ts --smoke",
     "replay": "node scripts/replay.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",

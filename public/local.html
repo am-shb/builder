@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Builder Local</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e3e3de; --accent:#1a73e8; --ok:#188038; --bad:#c5221f; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --panel:#1f1f1d; --ink:#ececea; --muted:#9a9a94; --line:#33332f; --accent:#8ab4f8; --ok:#81c995; --bad:#f28b82; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, sans-serif; }
+  main { display:grid; grid-template-columns:minmax(0, 1fr) 340px; gap:16px; padding:16px; height:100vh; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; height:auto; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  aside { display:flex; flex-direction:column; gap:12px; min-height:0; }
+  h1 { font-size:17px; margin:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--ink); font:inherit; }
+  button { padding:8px 13px; border:0; border-radius:7px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  button.on { background:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  .badge { font-size:12px; font-weight:600; padding:3px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); }
+  .badge.live { color:var(--ok); border-color:var(--ok); }
+  .error { color:var(--bad); font-size:13px; white-space:pre-wrap; }
+  #stageBox { position:relative; overflow:hidden; border-radius:10px; border:1px solid var(--line); background:#000; aspect-ratio:16/9; align-self:start; }
+  #stageBox iframe { position:absolute; top:0; left:0; width:1280px; height:720px; border:0; transform-origin:0 0; }
+  #stageBox .empty { position:absolute; inset:0; display:grid; place-items:center; color:#aaa; }
+  #log { flex:1; min-height:200px; overflow-y:auto; }
+  .line { padding:3px 0; font-size:14px; }
+  .line b { margin-right:6px; }
+  .line.bot b { color:var(--accent); }
+  .line.meta, .line.partial { color:var(--muted); }
+  .line.partial { font-style:italic; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div id="stageBox"><div class="empty">Start a session to see the stage</div></div>
+  <aside>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h1>Builder, local</h1><span class="badge" id="status">no session</span></div>
+      <p class="muted">No Recall, no meeting: your mic is the meeting. Use headphones, or Builder hears itself and stops talking. Needs Chrome (speech is transcribed by Chrome's built-in recognizer).</p>
+      <div class="row">
+        <input type="text" id="name" placeholder="Your name" autocomplete="off">
+        <button id="startBtn">Start session</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="micBtn" disabled>Mic on</button>
+        <button id="endBtn" class="secondary" disabled>End session</button>
+        <span class="muted" id="cost"></span>
+      </div>
+      <div class="row muted" style="margin-top:8px" id="links" hidden>
+        <a id="handoffLink" target="_blank" rel="noopener">Handoff</a>
+        <a id="stageLink" target="_blank" rel="noopener">Stage in its own tab</a>
+      </div>
+      <div class="error" id="err"></div>
+    </div>
+    <div class="panel" id="log"></div>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const PARTIAL_MS = 250; // at most this often a partial goes up (Builder stops talking on the first one)
+let session = null;
+let rec = null;
+let micOn = false;
+let interim = "";
+let lastPartialAt = 0;
+let pollTimer = null;
+
+function storageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function storageSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+$("name").value = storageGet("builder.local.name") || "";
+
+const speaker = () => $("name").value.trim() || "Me";
+const showError = (msg) => { $("err").textContent = msg || ""; };
+
+async function send(kind, text) {
+  if (!session) return;
+  const res = await fetch(`/api/sessions/${session.id}/speech`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, speaker: speaker(), ...(text ? { text } : {}) }),
+  });
+  if (res.status === 409) { stopMic(); setEnded(); }
+}
+
+// ---------- stage: the real stage page, scaled to fit (it is laid out for 1280x720) ----------
+function showStage(url) {
+  const u = new URL(url);
+  const frame = document.createElement("iframe");
+  frame.src = u.pathname + u.search;
+  frame.allow = "autoplay";
+  $("stageBox").replaceChildren(frame);
+  const fit = () => { frame.style.transform = `scale(${$("stageBox").clientWidth / 1280})`; };
+  new ResizeObserver(fit).observe($("stageBox"));
+  fit();
+  $("stageLink").href = u.pathname + u.search;
+}
+
+// ---------- mic ----------
+function startMic() {
+  if (!Recognition) return showError("This browser has no speech recognition. Use Chrome.");
+  micOn = true;
+  $("micBtn").textContent = "Mic off";
+  $("micBtn").classList.add("on");
+  rec = new Recognition();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = navigator.language || "en-US";
+  rec.onresult = (e) => {
+    let partial = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      const text = r[0].transcript.trim();
+      if (!text) continue;
+      if (r.isFinal) {
+        interim = "";
+        void send("utterance", text);
+      } else partial += " " + text;
+    }
+    partial = partial.trim();
+    if (partial) {
+      interim = partial;
+      const now = performance.now();
+      if (now - lastPartialAt > PARTIAL_MS) { lastPartialAt = now; void send("partial", partial); }
+    }
+    renderInterim();
+  };
+  rec.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") { showError("Microphone access was refused."); stopMic(); }
+    else if (e.error !== "no-speech" && e.error !== "aborted") showError(`Speech recognition: ${e.error}`);
+  };
+  // Chrome ends recognition after a pause or about a minute: keep it going while the mic is on.
+  rec.onend = () => { if (micOn) { try { rec.start(); } catch {} } };
+  rec.start();
+}
+
+function stopMic() {
+  micOn = false;
+  interim = "";
+  renderInterim();
+  $("micBtn").textContent = "Mic on";
+  $("micBtn").classList.remove("on");
+  if (rec) { rec.onend = null; rec.abort(); rec = null; }
+}
+
+// ---------- event log ----------
+let events = [];
+function render() {
+  const log = $("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.replaceChildren(...events.map((ev) => {
+    const div = document.createElement("div");
+    if (ev.kind === "join" || ev.kind === "leave") {
+      div.className = "line meta";
+      div.textContent = `${ev.speaker ?? "Someone"} ${ev.kind === "join" ? "joined" : "left"}`;
+    } else {
+      div.className = "line" + (ev.kind === "bot_chat" ? " bot" : "");
+      const b = document.createElement("b");
+      b.textContent = ev.speaker ?? "?";
+      div.append(b, document.createTextNode(ev.text ?? ""));
+    }
+    return div;
+  }));
+  renderInterim();
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+function renderInterim() {
+  $("log").querySelector(".partial")?.remove();
+  if (!interim) return;
+  const div = document.createElement("div");
+  div.className = "line partial";
+  div.textContent = interim;
+  $("log").append(div);
+}
+
+async function poll() {
+  if (!session) return;
+  try {
+    const res = await fetch(`/api/sessions/${session.id}`);
+    if (res.ok) {
+      const { session: s } = await res.json();
+      if (s.events.length !== events.length) { events = s.events; render(); }
+      $("cost").textContent = s.cost_usd ? `$${s.cost_usd.toFixed(3)}` : "";
+      if (s.bot_status === "done") setEnded();
+    }
+  } catch {}
+  pollTimer = setTimeout(poll, 1500);
+}
+
+// ---------- session ----------
+function attach(s) {
+  session = s;
+  history.replaceState(null, "", `/local?session=${s.id}`);
+  showStage(s.stage_url);
+  $("handoffLink").href = new URL(s.handoff_url).pathname + new URL(s.handoff_url).search;
+  $("links").hidden = false;
+  $("status").textContent = "live";
+  $("status").className = "badge live";
+  $("micBtn").disabled = false;
+  $("endBtn").disabled = false;
+  $("startBtn").textContent = "New session";
+  clearTimeout(pollTimer);
+  events = [];
+  render();
+  poll();
+}
+
+function setEnded() {
+  stopMic();
+  clearTimeout(pollTimer);
+  $("status").textContent = "ended";
+  $("status").className = "badge";
+  $("micBtn").disabled = true;
+  $("endBtn").disabled = true;
+}
+
+$("startBtn").onclick = async () => {
+  showError("");
+  storageSet("builder.local.name", $("name").value.trim());
+  stopMic();
+  const res = await fetch("/api/local/sessions", { method: "POST" });
+  const body = await res.json();
+  if (!res.ok) return showError(body.error || `Could not start (${res.status})`);
+  attach(body.session);
+  await send("join");
+  startMic();
+};
+$("micBtn").onclick = () => (micOn ? stopMic() : startMic());
+$("endBtn").onclick = async () => {
+  if (!session) return;
+  await send("leave");
+  await fetch(`/api/sessions/${session.id}/leave`, { method: "POST" });
+  setEnded();
+};
+
+// Reopen a session after a reload (?session=<id>).
+const resume = new URLSearchParams(location.search).get("session");
+if (resume) {
+  fetch(`/api/sessions/${resume}`).then((r) => (r.ok ? r.json() : null)).then((body) => {
+    if (!body) return;
+    attach(body.session);
+    if (body.session.bot_status === "done") setEnded();
+  });
+}
+</script>
+</body>
+</html>

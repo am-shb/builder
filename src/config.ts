@@ -1,5 +1,6 @@
 // Backend-only configuration boundary. Reads named Recall settings from the
 // runtime environment; never logs values.
+import { randomBytes } from "node:crypto";
 
 export type Config = {
   region: string;
@@ -16,6 +17,8 @@ export type Config = {
   // ElevenLabs voice for elevenlabs/eleven-v4-turbo, e.g. "george" (test/fixtures/openrouter-tts.md).
   // Absent = Builder's lines go to meeting chat.
   ttsVoice: string | null;
+  // Local mode (`npm run local`): no Recall. Transcript comes from the operator's own mic on /local.
+  local: boolean;
 };
 
 const REGIONS = new Set(["us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1"]);
@@ -54,8 +57,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   }
   const botVariant = rawVariant === "web" ? null : rawVariant;
 
-  const openrouterApiKey = env.OPENROUTER_API_KEY?.trim() || null;
-
   return {
     region,
     apiKey: env.RECALL_API_KEY!.trim(),
@@ -64,8 +65,32 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     port: Number(env.PORT ?? 3000),
     dbPath: env.DB_PATH ?? "data/app.db",
     botVariant,
-    openrouterApiKey,
-    agentEnabled: !!openrouterApiKey,
-    ttsVoice: env.TTS_VOICE?.trim() || null,
+    ...agentSettings(env),
+    local: false,
   };
+}
+
+/**
+ * Local mode: no Recall setting is read or needed. The stage is served from localhost, the
+ * realtime webhook accepts nothing (its secret is random and never shared), and sessions go in
+ * their own database so they don't mix with real calls.
+ */
+export function loadLocalConfig(env: Record<string, string | undefined>): Config {
+  const port = Number(env.PORT ?? 3000);
+  return {
+    region: "local",
+    apiKey: "",
+    verificationSecret: "whsec_" + randomBytes(24).toString("base64"),
+    publicBaseUrl: `http://localhost:${port}`,
+    port,
+    dbPath: env.DB_PATH ?? "data/local.db",
+    botVariant: null,
+    ...agentSettings(env),
+    local: true,
+  };
+}
+
+function agentSettings(env: Record<string, string | undefined>) {
+  const openrouterApiKey = env.OPENROUTER_API_KEY?.trim() || null;
+  return { openrouterApiKey, agentEnabled: !!openrouterApiKey, ttsVoice: env.TTS_VOICE?.trim() || null };
 }

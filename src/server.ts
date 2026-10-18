@@ -3,8 +3,9 @@
 // real loopback socket, then exits.
 import http from "node:http";
 import { existsSync } from "node:fs";
-import { loadConfig } from "./config.ts";
+import { loadConfig, loadLocalConfig } from "./config.ts";
 import { createRecallClient } from "./recall-client.ts";
+import { createLocalRecall } from "./local-recall.ts";
 import { openStore } from "./store.ts";
 import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
 import { createRuntime, handleStageMessage } from "./session/runtime.ts";
@@ -18,7 +19,8 @@ async function main() {
   if (process.argv.includes("--smoke")) return smoke();
 
   if (existsSync(".env")) process.loadEnvFile(".env");
-  const config = loadConfig(process.env);
+  // --local: no Recall and no meeting. You talk into your own mic on /local (docs/adr/0003-local-mode.md).
+  const config = process.argv.includes("--local") ? loadLocalConfig(process.env) : loadConfig(process.env);
   if (!config.agentEnabled) console.warn("OPENROUTER_API_KEY is not set: running listen-only (no agent replies or prototype building).");
   const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   // Last resort. Logs the error's name and stack frames, never its message (which can quote meeting
@@ -30,7 +32,7 @@ async function main() {
     process.exit(1);
   });
   const store = openStore(config.dbPath, { log });
-  const recall = createRecallClient({ region: config.region, apiKey: config.apiKey });
+  const recall = config.local ? createLocalRecall() : createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();
   let runtime!: ReturnType<typeof createRuntime>;
   let voice: { stop(sessionId: string): void } | undefined; // Builder's voice, once configured
@@ -60,7 +62,8 @@ async function main() {
   if (agent) setInterval(() => app.tickAgent(), 1000).unref();
   server.listen(config.port, () => {
     console.log(`Listening on http://localhost:${config.port}`);
-    console.log(`Recall realtime endpoint: ${config.publicBaseUrl}${REALTIME_PATH} (region ${config.region})`);
+    if (config.local) console.log(`Local mode, no Recall: open http://localhost:${config.port}/local in Chrome`);
+    else console.log(`Recall realtime endpoint: ${config.publicBaseUrl}${REALTIME_PATH} (region ${config.region})`);
   });
 }
 
