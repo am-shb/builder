@@ -25,10 +25,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      # Browser tests skip here (no Chrome configured); the browser job runs them.
-      - run: npm test
-      - run: npm run smoke
+      # Typecheck, tests and the smoke boot for every workspace. Browser tests skip here (no Chrome
+      # configured); the browser job runs them.
+      - run: npm run check
 
   browser:
     name: Tests with headless Chrome

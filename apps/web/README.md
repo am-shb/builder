@@ -3,7 +3,7 @@
 **Status:** placeholder, no code yet. **Owner:** TBD. Claim it in [docs/workstreams.md](../../docs/workstreams.md).
 
 ## Purpose
-The product customers use day to day. It replaces the v0 local operator page (`public/index.html`). It also holds the
+The product customers use day to day. It replaces the v0 local operator page (`apps/engine/public/index.html`). It also holds the
 staff-only admin pages (see [ADR 0006](../../docs/adr/0006-identity-and-tenancy.md)), which are routes in this app and
 not a separate app.
 
@@ -17,7 +17,7 @@ not a separate app.
   overrides, suspending an org, and stopping a bot in a live meeting
 
 ## Out of scope
-- The screenshared stage and its renderer. They stay in the engine (`public/stage.html`, `public/renderer/`).
+- The screenshared stage and its renderer. They stay in the engine (`apps/engine/public/stage.html`, `apps/engine/public/renderer/`).
 - Anything the api owns: accounts, billing and the list of meetings. This app calls the api.
 
 ## Depends on
@@ -25,7 +25,7 @@ not a separate app.
 
 ## Open decisions (record each as an ADR in `docs/adr/`)
 - Framework and hosting. This app may use a framework with a build step ([ADR 0004](../../docs/adr/0004-workspaces-and-repo-layout.md)).
-- Design system, and whether it shares tokens with the stage theme (`public/renderer/theme.css`)
+- Design system, and whether it shares tokens with the stage theme (`apps/engine/public/renderer/theme.css`)
 - How staff get access to the admin pages, and audit logging
 
 ## First tasks

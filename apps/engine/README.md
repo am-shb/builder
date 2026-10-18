@@ -2,9 +2,9 @@
 
 **Status:** working v0. **Owner:** TBD. Claim it in [docs/workstreams.md](../../docs/workstreams.md).
 
-## Where the code is today
-The v0 engine hasn't moved here yet. It lives at the repo root, and moves here in the next PR (one PR that only moves
-files and fixes paths, per [ADR 0004](../../docs/adr/0004-workspaces-and-repo-layout.md)):
+## Where the code is
+The v0 engine moved here from the repo root in a PR that only moved files and fixed paths, per
+[ADR 0004](../../docs/adr/0004-workspaces-and-repo-layout.md). Paths below are relative to this folder:
 
 | Path | What it does |
 |---|---|
@@ -19,6 +19,9 @@ files and fixes paths, per [ADR 0004](../../docs/adr/0004-workspaces-and-repo-la
 | `src/store.ts` | SQLite storage |
 | `public/` | The stage (the screenshared page), its renderer, the handoff page, and the v0 operator page |
 | `test/`, `scripts/` | Tests, the replay harness, and live probes |
+
+Run it from the repo root (`npm start`, `npm run check`) or from this folder. It reads `.env` and `data/` from this
+folder.
 
 The authority on how it behaves is `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`.
 
@@ -37,5 +40,5 @@ ruling, a move of an agreed node, and the live checks.
 ## First tasks
 - [x] Fix known issues I1, I5, I6 and I7
 - [x] Fix I2 and I3 together (agreement correctness)
-- [ ] Move `src/`, `public/`, `test/` and `scripts/` here
+- [x] Move `src/`, `public/`, `test/` and `scripts/` here
 - [ ] Accept `orgId` and `limits`, stop at the limits, and send events to the api (ADR 0008)

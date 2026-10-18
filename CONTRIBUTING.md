@@ -4,9 +4,9 @@
 ```
 nvm use            # Node 24, from .nvmrc
 npm ci
-npm run check      # engine typecheck, tests and smoke, then every workspace; no keys or network needed
+npm run check      # typecheck, tests and the engine smoke boot in every workspace; no keys or network needed
 ```
-To run the real server you need `.env` (see `.env.example` and the root README). Ask before running anything that
+To run the real server you need `apps/engine/.env` (see `apps/engine/.env.example` and the root README). Ask before running anything that
 costs money (see [AGENTS.md](AGENTS.md)).
 
 ## Workflow

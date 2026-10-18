@@ -1,5 +1,5 @@
 {
-  "name": "meet2build-live-agent-poc",
+  "name": "builder",
   "version": "0.1.0",
   "private": true,
   "description": "Builder: a Recall.ai meeting bot that listens to a Google Meet, steers the group, and live-builds a clickable prototype on a screenshared stage.",
@@ -12,23 +12,17 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node src/server.ts",
-    "local": "node src/server.ts --local",
-    "smoke":"node src/server.ts --smoke",
-    "replay": "node scripts/replay.ts",
-    "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc -p .",
-    "check": "npm run typecheck && npm test && npm run smoke && npm run check --workspaces --if-present",
-    "tunnel": "cloudflared tunnel --url http://localhost:3000"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
-    "ws": "^8.22.0",
-    "zod": "^4.6.7"
+    "start": "npm run start -w @builder/engine --",
+    "local": "npm run local -w @builder/engine --",
+    "smoke": "npm run smoke -w @builder/engine --",
+    "replay": "npm run replay -w @builder/engine --",
+    "tunnel": "npm run tunnel -w @builder/engine --",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
-    "@types/ws": "^8.18.2",
     "typescript": "^7.0.2"
   }
 }

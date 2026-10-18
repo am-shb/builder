@@ -18,7 +18,7 @@ with these schemas, and each side's tests use them to build fakes.
 - Source only, no build step. `exports` points at `src/index.ts`. Erasable syntax only, and `.ts` extensions in imports.
 
 ## Candidates to move here later
-Only when a second app imports them. The prototype component schema (`src/ui/schema.ts`) and the hand-off spec format
+Only when a second app imports them. The prototype component schema (`apps/engine/src/ui/schema.ts`) and the hand-off spec format
 are the likely ones, once the web app renders hand-offs.
 
 ## Commands

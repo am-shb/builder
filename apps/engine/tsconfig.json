@@ -1,6 +1,6 @@
 {
-  // The engine's type check. Shared options are in tsconfig.base.json.
-  "extends": "./tsconfig.base.json",
+  // The engine's type check. Shared options are in ../../tsconfig.base.json.
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     // The stage renderer is plain JS shared with the server; its types are inferred, not checked.
     "allowJs": true,

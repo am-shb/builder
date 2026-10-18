@@ -11,14 +11,13 @@ Full design: `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.m
 
 ## Repository layout
 
-The repo is npm workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)). The working v0 engine is still
-in `src/` and `public/` at the root, and the rest of this README describes it. It moves to `apps/engine/` in the next
-PR. Each app has a README with its scope, its open decisions and its first tasks.
+The repo is npm workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)). The working v0 engine is in
+`apps/engine/`, and the rest of this README describes it. Each app has a README with its scope, its open decisions and
+its first tasks.
 
 | Folder | Area |
 |---|---|
-| `src/`, `public/`, `test/`, `scripts/` | Engine v0, planned to move to `apps/engine/` |
-| `apps/engine/` | The engine's brief (the code arrives in the move PR) |
+| `apps/engine/` | The engine (Builder core): `src/`, `public/`, `test/`, `scripts/` |
 | `apps/api/` | Accounts, sessions, billing and jobs. Today only `GET /health` |
 | `apps/web/` | The customer app and staff pages. No code yet |
 | `contracts/` | zod schemas for what crosses an app boundary (engine and api, api and web) |
@@ -78,7 +77,10 @@ Everything else answers localhost only.
 
 ## Environment variables
 
-Copy `.env.example` to `.env` and fill it in. Never commit `.env`. Names only here.
+Copy `apps/engine/.env.example` to `apps/engine/.env` and fill it in. Never commit `.env`. Names only here.
+
+The engine runs with `apps/engine/` as its working directory, so it reads `.env` and `data/` from there. If you
+have an older `.env` or `data/` at the repo root, move them into `apps/engine/` yourself. Both are git-ignored.
 
 | Name | Required | Purpose |
 |---|---|---|
@@ -90,7 +92,7 @@ Copy `.env.example` to `.env` and fill it in. Never commit `.env`. Names only he
 | `TTS_VOICE` | no | ElevenLabs voice for Builder. Unset means Builder's lines go to meeting chat. One of: george, sarah, adam, alice, bella, bill, brian, callum, charlie, chris, daniel, eric, harry, jessica, laura, liam, lily, matilda, river, roger, will. |
 | `BOT_VARIANT` | no | `web_4_core` (default), `web_gpu`, or `web` for Recall's plain web bot. Larger variants cost more per hour. |
 | `PORT` | no | Listen port, default 3000. |
-| `DB_PATH` | no | SQLite path, default `data/app.db`. |
+| `DB_PATH` | no | SQLite path, default `data/app.db` (inside `apps/engine/`). |
 
 ## Running
 
@@ -104,14 +106,17 @@ npm start               # http://localhost:3000, paste a Meet link and click Sen
 npm run local           # no Recall: talk to Builder through your own mic at http://localhost:3000/local
 npm test                # unit, HTTP-boundary and end-to-end replay tests (no network, no ports but ephemeral ones)
 npm run smoke           # boots the real app on a loopback socket with a fake Recall API; prints SMOKE OK
-npm run typecheck       # tsc --noEmit over src, scripts and test
-npm run check           # engine typecheck + test + smoke, then check in every workspace: what must pass before a PR
+npm run typecheck       # tsc --noEmit in every workspace (the engine checks src, scripts and test)
+npm run check           # typecheck + test (+ smoke for the engine) in every workspace: what must pass before a PR
 ```
+
+These commands run from the repo root. The root `start`, `local`, `smoke`, `replay` and `tunnel` scripts forward to
+`@builder/engine`.
 
 Quick-tunnel URLs change on every restart. Use a reserved ngrok domain or a named Cloudflare tunnel for
 anything longer-lived. Admit "Builder" in the call when it asks to join.
 
-Browser tests (`test/*browser*.test.ts`, and parts of `test/handoff.test.ts`) need Chrome. They find it at the
+Browser tests (`apps/engine/test/*browser*.test.ts`, and parts of `apps/engine/test/handoff.test.ts`) need Chrome. They find it at the
 macOS default path or at `CHROME_PATH`, and skip otherwise.
 
 ### Local mode: talk to Builder without Recall
@@ -119,7 +124,7 @@ macOS default path or at `CHROME_PATH`, and skip otherwise.
 `npm run local` runs the engine with no Recall, no meeting and no tunnel. Open `http://localhost:3000/local` in
 Chrome, type your name and click **Start session**. Your mic is the meeting: Chrome's speech recognition turns what
 you say into transcript lines, and the real stage, shown in the page, plays Builder's voice. Only `OPENROUTER_API_KEY`
-(and `TTS_VOICE` for voice) are read from `.env`. The Recall settings are ignored, and sessions go to `data/local.db`.
+(and `TTS_VOICE` for voice) are read from `.env`. The Recall settings are ignored, and sessions go to `apps/engine/data/local.db`.
 Use headphones, or Builder hears itself and stops talking. [ADR 0003](docs/adr/0003-local-mode.md) has the details.
 
 ### Replay
@@ -132,7 +137,7 @@ speak. Options: `--base-url` (default `http://localhost:3000`), `--speed` (defau
 which must match the target server. Open the stage in Chrome to watch.
 
 `--live-models` means the target server's real models answer, which costs real money. Without it, the
-fixture's `fakeModel` scripts are what `test/e2e-replay.test.ts` feeds the app (through
+fixture's `fakeModel` scripts are what `apps/engine/test/e2e-replay.test.ts` feeds the app (through
 `createRoutedFakePort`, with a virtual clock so the 30 s and 25 s waits cost nothing).
 
 ## Measured live results (2026-10-17)

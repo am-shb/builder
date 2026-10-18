@@ -5,7 +5,7 @@ put your name in the Owner column and open a small PR. One owner per area. Anyon
 
 | Area | Folder | Owner | Status | Depends on |
 |---|---|---|---|---|
-| Engine (Builder core) | `apps/engine/` (the code is at the repo root until the move PR) | TBD | v0 working | none |
+| Engine (Builder core) | `apps/engine/` | TBD | v0 working | none |
 | Web (customer app and staff pages) | `apps/web/` | TBD | not started | api |
 | Api (accounts, sessions, billing, jobs) | `apps/api/` | TBD | skeleton (`/health`) | contracts, engine |
 | Contracts (schemas between apps) | `contracts/` | engine and api owners together | engine and api shapes written | none |

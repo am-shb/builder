@@ -1,7 +1,5 @@
 # Owners for each area. Replace each commented line with a real owner once someone claims the area in
 # docs/workstreams.md. Format: <path> @github-user
-# /src/                       @owner-engine
-# /public/                    @owner-engine
 # /apps/engine/               @owner-engine
 # /apps/api/                  @owner-api
 # /apps/web/                  @owner-web

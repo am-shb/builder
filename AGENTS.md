@@ -6,8 +6,8 @@ production product with accounts, billing and the rest.
 
 ## Before you start
 1. Read [docs/workstreams.md](docs/workstreams.md), then the README in the folder for your area. The repo is npm
-   workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)): three apps and `contracts/`. Until the move
-   PR lands, the engine's code is still at the root (`src/`, `public/`, `test/`, `scripts/`).
+   workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)): three apps and `contracts/`. The engine's code is
+   in `apps/engine/` (`src/`, `public/`, `test/`, `scripts/`).
 2. Work inside your app's folder: `apps/engine`, `apps/api` or `apps/web`. To change another app, `contracts/`, or the
    engine's interfaces, write an ADR (`docs/adr/`) or get that owner's review. `contracts/` needs both the engine and
    api owners.
@@ -31,8 +31,8 @@ production product with accounts, billing and the rest.
 - Use Node 24 (`.nvmrc`). `npm run check` runs the engine's type check, tests and smoke boot against fakes, then `check` in every workspace. It must
   pass before you open a PR, and CI runs it on every PR. You can also run the parts on their own: `npm run typecheck`,
   `npm test`, `npm run smoke`.
-- `npm start` runs the server. It needs `.env`; see `.env.example`.
-- Ask the human before running anything that costs money: `scripts/probe-*.ts`, `npm run replay -- --live-models`,
+- `npm start` runs the server. It needs `apps/engine/.env`; see `apps/engine/.env.example`.
+- Ask the human before running anything that costs money: `apps/engine/scripts/probe-*.ts`, `npm run replay -- --live-models`,
   or sending a real bot to a meeting.
 
 ## Hard rules

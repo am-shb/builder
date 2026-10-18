@@ -1,0 +1,28 @@
+{
+  "name": "@builder/engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Builder: a Recall.ai meeting bot that listens to a Google Meet, steers the group, and live-builds a clickable prototype on a screenshared stage.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "local": "node src/server.ts --local",
+    "smoke": "node src/server.ts --smoke",
+    "replay": "node scripts/replay.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "check": "npm run typecheck && npm test && npm run smoke",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

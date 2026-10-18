@@ -10,7 +10,7 @@ contain transcript text, prompts or model output, so you can paste them into an 
 
 Live tests cost money (Recall bot minutes, models, TTS). Run one only when the meeting-engine owner has approved it.
 
-1. Fill in `.env` from `.env.example`. Run `npm run tunnel` and copy the printed URL into `PUBLIC_API_BASE_URL`, then
+1. Fill in `apps/engine/.env` from `apps/engine/.env.example`. Run `npm run tunnel` and copy the printed URL into `PUBLIC_API_BASE_URL`, then
    run `npm start`.
 2. Open http://localhost:3000, paste a Meet link and click **Send bot**. Admit "Builder" in Meet.
 3. Work through the "Manual live checklist" in the root [README](../../README.md).
@@ -43,7 +43,7 @@ Live tests cost money (Recall bot minutes, models, TTS). Run one only when the m
 
 ## Rotating secrets
 
-Never paste a secret into an issue, a PR, a log or a chat. Edit `.env` (or the host's secret store) and restart.
+Never paste a secret into an issue, a PR, a log or a chat. Edit `apps/engine/.env` (or the host's secret store) and restart.
 
 - **`OPENROUTER_API_KEY`:** create a new key in OpenRouter, swap it in, restart, then revoke the old key.
 - **`RECALL_API_KEY`:** create a new key in the Recall dashboard (Developers > API Keys) **in the same region** as
