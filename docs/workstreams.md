@@ -9,7 +9,7 @@ put your name in the Owner column and open a small PR. One owner per area. Anyon
 | Web (customer app and staff pages) | `apps/web/` | TBD | not started | api |
 | Api (accounts, sessions, billing, jobs) | `apps/api/` | TBD | skeleton (`/health`) | contracts, engine |
 | Contracts (schemas between apps) | `contracts/` | engine and api owners together | engine and api shapes written | none |
-| Infra and quality | `render.yaml`, CI, `e2e/`, `docs/security/`, `docs/runbooks/` | TBD | CI running (ADR 0001 proposed) | none |
+| Infra and quality | `render.yaml`, CI, `e2e/`, `docs/security/`, `docs/runbooks/` | TBD | CI running (ADR 0001 proposed). Dockerfiles, `docker-compose.yml`, `render.yaml` (production, CD on checks pass) and the deploy runbook written. The SurrealDB Cloud instance exists; its users and the Render services are not set up yet | none |
 
 Code becomes its own workspace only when two or more apps import it ([ADR 0004](adr/0004-workspaces-and-repo-layout.md)).
 Anything used by one app is a folder inside that app.
