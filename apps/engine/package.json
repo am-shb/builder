@@ -19,6 +19,7 @@
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
+    "@builder/contracts": "*",
     "@anthropic-ai/sdk": "^0.135.0",
     "@surrealdb/node": "3.1.0",
     "@surrealdb/node-native": "3.3.2",

@@ -28,6 +28,11 @@ export type Session = {
   // Read-only capability for the handoff page; never the stage token, which also opens the stage socket.
   handoff_token: string | null;
   stage_html: string | null;
+  // The org that started it through POST /internal/sessions, and its limits (db/0002). null for sessions the
+  // operator starts from the local routes.
+  org_id: string | null;
+  max_usd: number | null;
+  max_minutes: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -65,6 +70,7 @@ type Opt<T> = T | undefined;
 type SessionRow = {
   id: RecordId<"sessions", string>; meeting_url: string; state: Session["state"]; bot_id: Opt<string>; bot_status: Opt<string>;
   bot_sub_code: Opt<string>; error: Opt<string>; stage_token: Opt<string>; handoff_token: Opt<string>; stage_html: Opt<string>;
+  org_id: Opt<string>; max_usd: Opt<number>; max_minutes: Opt<number>;
   created_at: DateTime; updated_at: DateTime;
 };
 type EventRow = {
@@ -80,7 +86,9 @@ const none = <T>(v: T | null): T | undefined => v ?? undefined;
 const toSession = (r: SessionRow): Session => ({
   id: r.id.id, meeting_url: r.meeting_url, state: r.state, bot_id: r.bot_id ?? null, bot_status: r.bot_status ?? null,
   bot_sub_code: r.bot_sub_code ?? null, error: r.error ?? null, stage_token: r.stage_token ?? null,
-  handoff_token: r.handoff_token ?? null, stage_html: r.stage_html ?? null, created_at: iso(r.created_at), updated_at: iso(r.updated_at),
+  handoff_token: r.handoff_token ?? null, stage_html: r.stage_html ?? null,
+  org_id: r.org_id ?? null, max_usd: r.max_usd ?? null, max_minutes: r.max_minutes ?? null,
+  created_at: iso(r.created_at), updated_at: iso(r.updated_at),
 });
 const toEvent = (r: EventRow): StoredEvent => ({
   id: r.id.id, session_id: r.session_id.id, kind: r.kind, speaker: r.speaker ?? null, text: r.text ?? null, created_at: iso(r.created_at),
@@ -124,18 +132,25 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   }
 
   return {
-    async createIntent(id: string, meetingUrl: string): Promise<Session> {
+    // `org` is set for sessions the api starts (POST /internal/sessions): the org and its limits.
+    async createIntent(id: string, meetingUrl: string, org?: { orgId: string; maxUsd: number; maxMinutes: number }): Promise<Session> {
       const t = now();
       const [row] = await run<[SessionRow]>("CREATE ONLY $id CONTENT $row", {
         id: sessionRef(id),
-        row: { meeting_url: meetingUrl, state: "intent", stage_token: newToken(), handoff_token: newToken(), created_at: t, updated_at: t },
+        row: {
+          meeting_url: meetingUrl, state: "intent", stage_token: newToken(), handoff_token: newToken(), created_at: t, updated_at: t,
+          ...(org ? { org_id: org.orgId, max_usd: org.maxUsd, max_minutes: org.maxMinutes } : {}),
+        },
       });
       return toSession(row);
     },
-    // An unfinished session for the same meeting means a bot is (or may be) already there.
-    async findActiveForMeeting(meetingUrl: string): Promise<Session | undefined> {
+    // An unfinished session for the same meeting means a bot is (or may be) already there. Only within one org
+    // (E3): an org never gets another org's session, or its stage URL. `orgId` null looks only at sessions with
+    // no org, the ones the operator starts from the local routes.
+    async findActiveForMeeting(meetingUrl: string, orgId: string | null = null): Promise<Session | undefined> {
       const [rows] = await run<[SessionRow[]]>(
-        `SELECT * FROM sessions WHERE meeting_url = $url AND state != "create_failed" ORDER BY created_at DESC`, { url: meetingUrl });
+        `SELECT * FROM sessions WHERE meeting_url = $url AND org_id = $org AND state != "create_failed" ORDER BY created_at DESC`,
+        { url: meetingUrl, org: none(orgId) });
       return rows.map(toSession).find((s) => !isTerminal(s.bot_status));
     },
     async markCreated(id: string, botId: string): Promise<void> {

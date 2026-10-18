@@ -26,6 +26,8 @@ import type { Speech } from "./agent/conversation-loop.ts";
 import type { ModelPort } from "./agent/llm.ts";
 import type { RealtimeEvent } from "./realtime.ts";
 import { z } from "zod";
+import { StartSessionRequest, StartSessionResponse } from "@builder/contracts";
+import type { SessionStatus } from "@builder/contracts";
 import { errorCode } from "./error-code.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
@@ -62,6 +64,25 @@ function createSerialQueue() {
 // localhost requests don't. Only Recall-facing routes are reachable publicly.
 const viaProxy = (req: http.IncomingMessage) =>
   Boolean(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.headers["x-forwarded-host"]);
+
+// Session ids the api sends must be UUIDs: the stage and handoff routes only match those.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const isMeetingUrl = (s: string) => {
+  if (!URL.canParse(s)) return false;
+  const u = new URL(s);
+  return u.protocol === "https:" && MEETING_HOSTS.test(u.hostname);
+};
+
+const bearerToken = (req: http.IncomingMessage) => /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization ?? "")?.[1] ?? null;
+
+// The contract's status for a session, from Recall's last bot status.
+function contractStatus(s: Session): SessionStatus {
+  if (s.bot_status === "fatal") return "failed";
+  if (isTerminal(s.bot_status)) return "ended";
+  if (s.bot_status?.startsWith("in_call")) return "in_meeting";
+  return "joining";
+}
 
 export const tokenMatches = (given: string | null, expected: string | null) => {
   if (!given || !expected) return false;
@@ -127,22 +148,24 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
   }
 
   // ---- session creation: intent first, then Recall ----
-  async function createSession(meetingUrl: string): Promise<{ status: number; body: unknown }> {
+  // One start: reuse the active session for this meeting within the same org (E3; `org` absent means the
+  // operator's own sessions, which have no org), or write the intent row and then ask Recall for a bot. Recall is
+  // asked once: a network failure leaves the intent row for a person to reconcile, never a retry.
+  type StartOutcome =
+    | { kind: "existing"; session: Session }
+    | { kind: "created"; session: Session }
+    | { kind: "rejected"; session: Session; error: string; status: number }
+    | { kind: "unknown"; session: Session };
+
+  async function startBot(meetingUrl: string, opts: { id?: string; org?: { orgId: string; maxUsd: number; maxMinutes: number } } = {}): Promise<StartOutcome> {
     const claim = await perMeeting(meetingUrl, async () => {
-      const existing = await store.findActiveForMeeting(meetingUrl);
-      return existing ? { existing } : { session: await store.createIntent(randomUUID(), meetingUrl) };
+      const existing = await store.findActiveForMeeting(meetingUrl, opts.org?.orgId ?? null);
+      return existing ? { existing } : { session: await store.createIntent(opts.id ?? randomUUID(), meetingUrl, opts.org) };
     });
-    const { existing } = claim;
-    if (existing) {
-      if (existing.state === "intent") {
-        // A previous create never resolved (crash / ambiguous network failure).
-        // Don't blindly re-send: surface it so it can be reconciled.
-        return { status: 409, body: { error: "A bot request for this meeting is unresolved; check the Recall dashboard before retrying.", session: existing } };
-      }
-      return { status: 200, body: { session: existing, reused: true } };
-    }
+    if (claim.existing) return { kind: "existing", session: claim.existing };
 
     const session = claim.session!;
+    const current = async () => (await store.getSession(session.id)) ?? session;
     try {
       const bot = await recall.createBot({
         meetingUrl,
@@ -154,18 +177,92 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       });
       await store.markCreated(session.id, bot.id);
       log("bot.created", { session_id: session.id, bot_id: bot.id });
-      return { status: 201, body: { session: await store.getSession(session.id) } };
+      return { kind: "created", session: await current() };
     } catch (err) {
       if (err instanceof RecallApiError) {
         // Definite rejection from Recall: no bot exists.
         await store.markCreateFailed(session.id, err.message);
         log("bot.create_failed", { session_id: session.id, status: err.status });
-        return { status: 502, body: { error: err.message, session: await store.getSession(session.id) } };
+        return { kind: "rejected", session: await current(), error: err.message, status: err.status };
       }
       // Network-level failure: outcome unknown. Leave the intent row in place.
       log("bot.create_ambiguous", { session_id: session.id });
-      return { status: 504, body: { error: "Recall request outcome unknown; not retrying automatically.", session: await store.getSession(session.id) } };
+      return { kind: "unknown", session: await current() };
     }
+  }
+
+  // The operator's routes (/api/sessions and local mode): the same answers as before the api existed.
+  async function createSession(meetingUrl: string): Promise<{ status: number; body: unknown }> {
+    const outcome = await startBot(meetingUrl);
+    switch (outcome.kind) {
+      case "existing":
+        if (outcome.session.state === "intent") {
+          // A previous create never resolved (crash / ambiguous network failure).
+          // Don't blindly re-send: surface it so it can be reconciled.
+          return { status: 409, body: { error: "A bot request for this meeting is unresolved; check the Recall dashboard before retrying.", session: outcome.session } };
+        }
+        return { status: 200, body: { session: outcome.session, reused: true } };
+      case "created":
+        return { status: 201, body: { session: outcome.session } };
+      case "rejected":
+        return { status: 502, body: { error: outcome.error, session: outcome.session } };
+      case "unknown":
+        return { status: 504, body: { error: "Recall request outcome unknown; not retrying automatically.", session: outcome.session } };
+    }
+  }
+
+  // ---- POST /internal/sessions: the api starts a session for an org (ADR 0008, E1-E3) ----
+  // Answers with StartSessionResponse from contracts/, or { error: { code } }. The api reads any 4xx as "no bot was
+  // sent" and any 5xx as "a bot may exist", so:
+  // - 201: started; 200: this sessionId was started before (E2), its current state
+  // - 409 meeting_in_use: the org already has another active session in this meeting, so no second bot
+  // - 409 session_conflict: this sessionId exists with another org or meeting
+  // - 422 recall_rejected: Recall refused, no bot exists
+  // - 504 recall_outcome_unknown: Recall didn't answer clearly, or an earlier start for this id never resolved
+  type InternalReply = { status: number; body: unknown };
+  const internalError = (status: number, code: string): InternalReply => ({ status, body: { error: { code } } });
+  const startResponse = async (s: Session): Promise<InternalReply["body"]> =>
+    StartSessionResponse.parse({ sessionId: s.id, status: contractStatus(s), stageUrl: await stageUrl(s) });
+
+  // E2: starts for the same sessionId in this process share one attempt. After it, the stored row answers.
+  const internalStarts = new Map<string, { req: StartSessionRequest; reply: Promise<InternalReply> }>();
+  const sameStart = (s: { org_id: string | null; meeting_url: string }, r: StartSessionRequest) => s.org_id === r.orgId && s.meeting_url === r.meetingUrl;
+
+  async function replayStart(s: Session, r: StartSessionRequest): Promise<InternalReply> {
+    if (!sameStart(s, r)) return internalError(409, "session_conflict");
+    if (s.state === "created") return { status: 200, body: await startResponse(s) };
+    if (s.state === "create_failed") return internalError(422, "recall_rejected");
+    return internalError(504, "recall_outcome_unknown");
+  }
+
+  async function startForApi(r: StartSessionRequest): Promise<InternalReply> {
+    const existing = await store.getSession(r.sessionId);
+    if (existing) return replayStart(existing, r);
+    const outcome = await startBot(r.meetingUrl, { id: r.sessionId, org: { orgId: r.orgId, maxUsd: r.limits.maxUsd, maxMinutes: r.limits.maxMinutes } });
+    switch (outcome.kind) {
+      case "existing": return internalError(409, "meeting_in_use");
+      case "created": return { status: 201, body: await startResponse(outcome.session) };
+      case "rejected": return internalError(422, "recall_rejected");
+      case "unknown": return internalError(504, "recall_outcome_unknown");
+    }
+  }
+
+  async function handleInternalStart(req: http.IncomingMessage): Promise<InternalReply> {
+    const parsed = StartSessionRequest.safeParse(await readJson(req));
+    if (!parsed.success || !UUID.test(parsed.data.sessionId) || !isMeetingUrl(parsed.data.meetingUrl)) {
+      return internalError(400, "invalid_request");
+    }
+    const r = parsed.data;
+    let inFlight = internalStarts.get(r.sessionId);
+    if (inFlight && !sameStart({ org_id: inFlight.req.orgId, meeting_url: inFlight.req.meetingUrl }, r)) return internalError(409, "session_conflict");
+    if (!inFlight) {
+      inFlight = { req: r, reply: startForApi(r).finally(() => internalStarts.delete(r.sessionId)) };
+      internalStarts.set(r.sessionId, inFlight);
+    }
+    const reply = await inFlight.reply;
+    const code = (reply.body as { error?: { code?: string } }).error?.code;
+    log("internal.session_start", { session_id: r.sessionId, org_id: r.orgId, status: reply.status, ...(code ? { code } : {}) });
+    return reply;
   }
 
   // ---- lifecycle polling (feasibility shortcut; production uses dashboard webhooks) ----
@@ -373,6 +470,18 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
 
     // Everything below is the local control surface: never served through the tunnel.
     if (viaProxy(req)) return json(res, 404, { error: "not found" });
+
+    // ---- the api's internal routes (ADR 0008): private network only (the proxy check above), and the shared
+    // bearer token. Off (404) when ENGINE_INTERNAL_TOKEN isn't set. ----
+    if (path.startsWith("/internal/")) {
+      if (!config.internalToken) return json(res, 404, { error: "not found" });
+      if (!tokenMatches(bearerToken(req), config.internalToken)) return json(res, 401, { error: { code: "unauthorized" } });
+      if (req.method === "POST" && path === "/internal/sessions") {
+        const reply = await handleInternalStart(req);
+        return json(res, reply.status, reply.body);
+      }
+      return json(res, 404, { error: { code: "not_found" } });
+    }
 
     if (req.method === "GET" && path === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
