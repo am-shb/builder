@@ -52,6 +52,13 @@ test("engine settings parse, and a trailing slash is dropped", () => {
   assert.deepEqual(c.engine, { url: "http://engine:10000", token });
 });
 
+test("a bare host:port, as Render's fromService hostport gives it, means http", () => {
+  assert.deepEqual(loadConfig({ ENGINE_INTERNAL_URL: "builder-engine:10000", ENGINE_INTERNAL_TOKEN: token }).engine,
+    { url: "http://builder-engine:10000", token });
+  rejects({ ENGINE_INTERNAL_URL: "builder-engine", ENGINE_INTERNAL_TOKEN: token }, /ENGINE_INTERNAL_URL/);
+  rejects({ ENGINE_INTERNAL_URL: "builder-engine:10000/internal", ENGINE_INTERNAL_TOKEN: token }, /ENGINE_INTERNAL_URL/);
+});
+
 test("engine settings must come together, with an origin and a long enough token", () => {
   rejects({ ENGINE_INTERNAL_URL: "http://engine:10000" }, /ENGINE_INTERNAL_TOKEN/);
   rejects({ ENGINE_INTERNAL_TOKEN: token }, /ENGINE_INTERNAL_URL/);
