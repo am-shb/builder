@@ -1,0 +1,12 @@
+# Build context for apps/*/Dockerfile (the repo root). Keep out secrets, local data and anything the images rebuild.
+**/node_modules
+**/.env*
+**/data
+.git
+.github
+.claude
+.superpowers
+.mcp.json
+history.txt
+docs
+e2e
