@@ -46,6 +46,23 @@ The engine keeps its data in SurrealDB, namespace `builder`, database `engine` (
 To try the migrations against a real server, run one locally with `surreal start --user root --pass <pass> memory`,
 then `SURREAL_URL=ws://127.0.0.1:8000 SURREAL_AUTH=root SURREAL_USER=root SURREAL_PASS=<pass> npm run migrate -w @builder/engine`.
 
+## Starting sessions from the api
+`POST /internal/sessions` ([ADR 0008](../../docs/adr/0008-api-engine-boundary.md)) is how the api starts a session
+for an org. It takes and answers the `StartSessionRequest` and `StartSessionResponse` shapes from `contracts/`.
+- **It's off unless `ENGINE_INTERNAL_TOKEN` is set.** That's the same value as the api's, at least 32 characters.
+- **Callers must send `Authorization: Bearer <token>`.**
+- **Requests that came through the public proxy get 404,** as the operator routes do.
+- **It uses the api's `sessionId`.** A repeat with the same id gets the same session back, and never sends a second bot.
+- **Reuse stays within one org.** An org that already has an active session in that meeting gets 409 `meeting_in_use`.
+  Another org gets its own session and bot.
+- **Answers:**
+  - 4xx means no bot was sent: `invalid_request`, `unauthorized`, `meeting_in_use`, `session_conflict` and
+    `recall_rejected` (422).
+  - 504 `recall_outcome_unknown` means a bot may exist.
+
+The session's org and limits are stored, from `db/0002_session_org_limits.surql`. Enforcing the limits comes later.
+The operator routes (`/`, `/api/*`, local mode) work as before, and their sessions have no org.
+
 ## Known issues
 See [docs/known-issues.md](../../docs/known-issues.md). The deployment blockers I1, I5, I6 and I7, the
 agreement-correctness items I2 and I3, and the minor and visual items were fixed on 2026-10-17. Still open: the I4
@@ -62,4 +79,5 @@ ruling, a move of an agreed node, and the live checks.
 - [x] Fix known issues I1, I5, I6 and I7
 - [x] Fix I2 and I3 together (agreement correctness)
 - [x] Move `src/`, `public/`, `test/` and `scripts/` here
-- [ ] Accept `orgId` and `limits`, stop at the limits, and send events to the api (ADR 0008)
+- [x] Accept `orgId` and `limits` on `POST /internal/sessions` (ADR 0008)
+- [ ] Stop at the limits, and send events to the api (ADR 0008)

@@ -146,3 +146,50 @@ test("in-memory stores are separate databases", async () => {
   assert.equal(await b.getSession("x"), undefined);
   await Promise.all([a.close(), b.close()]);
 });
+
+// ---- E4 and E3 (docs/plans/api-first-slice.md): sessions belong to an org, and reuse stays within it ----
+
+test("E4: a session saved before 0002 still reads after it, with no org and no limits", async () => {
+  const { copyFileSync, mkdirSync } = await import("node:fs");
+  const { migrate, MIGRATIONS_DIR } = await import("../src/db/migrate.ts");
+  const path = tmpDir();
+  const only0001 = join(mkdtempSync(join(tmpdir(), "engine-0001-")), "db");
+  mkdirSync(only0001);
+  copyFileSync(join(MIGRATIONS_DIR, "0001_init.surql"), join(only0001, "0001_init.surql"));
+  const db = await connect({ path });
+  try {
+    await migrate(db, only0001);
+    await db.query("CREATE $id CONTENT { meeting_url: 'https://meet.google.com/old', state: 'created', created_at: time::now(), updated_at: time::now() }",
+      { id: new RecordId("sessions", "11111111-1111-1111-1111-111111111111") }).collect();
+  } finally {
+    await db.close();
+  }
+  const store = await testStore({ path });
+  const s = await store.getSession("11111111-1111-1111-1111-111111111111");
+  assert.deepEqual([s?.org_id, s?.max_usd, s?.max_minutes], [null, null, null]);
+  assert.equal((await store.findActiveForMeeting("https://meet.google.com/old"))?.id, s?.id, "still the operator's to reuse");
+  await store.close();
+});
+
+test("E4: createIntent saves the org and its limits when given them, and the schema checks their types", async () => {
+  const store = await testStore();
+  const s = await store.createIntent("22222222-2222-2222-2222-222222222222", "https://meet.google.com/x", { orgId: "org_a", maxUsd: 2.5, maxMinutes: 30 });
+  assert.deepEqual([s.org_id, s.max_usd, s.max_minutes], ["org_a", 2.5, 30]);
+  const plain = await store.createIntent("33333333-3333-3333-3333-333333333333", "https://meet.google.com/y");
+  assert.deepEqual([plain.org_id, plain.max_usd, plain.max_minutes], [null, null, null]);
+  await assert.rejects(store.createIntent("44444444-4444-4444-4444-444444444444", "https://meet.google.com/z",
+    { orgId: "org_a", maxUsd: "lots" as unknown as number, maxMinutes: 30 }));
+});
+
+test("E3: findActiveForMeeting only finds the given org's sessions; no org finds only sessions without one", async () => {
+  const store = await testStore();
+  const url = "https://meet.google.com/sha-redm-eet";
+  const limits = { maxUsd: 5, maxMinutes: 60 };
+  const a = await store.createIntent("aaaaaaaa-0000-4000-8000-000000000001", url, { orgId: "org_a", ...limits });
+  assert.equal((await store.findActiveForMeeting(url, "org_a"))?.id, a.id);
+  assert.equal(await store.findActiveForMeeting(url, "org_b"), undefined, "never another org's session");
+  assert.equal(await store.findActiveForMeeting(url), undefined, "nor an org's session for the operator");
+  const op = await store.createIntent("aaaaaaaa-0000-4000-8000-000000000002", url);
+  assert.equal((await store.findActiveForMeeting(url))?.id, op.id);
+  assert.equal((await store.findActiveForMeeting(url, "org_a"))?.id, a.id, "nor the operator's session for an org");
+});

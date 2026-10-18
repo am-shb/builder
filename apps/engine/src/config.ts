@@ -21,6 +21,9 @@ export type Config = {
   ttsVoice: string | null;
   // Local mode (`npm run local`): no Recall. Transcript comes from the operator's own mic on /local.
   local: boolean;
+  // Shared bearer token for /internal/* (ADR 0008), the same value as the api's ENGINE_INTERNAL_TOKEN. null: the
+  // internal routes are off and answer 404.
+  internalToken: string | null;
 };
 
 const REGIONS = new Set(["us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1"]);
@@ -69,6 +72,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     botVariant,
     ...agentSettings(env),
     local: false,
+    internalToken: internalToken(env),
   };
 }
 
@@ -90,6 +94,7 @@ export function loadLocalConfig(env: Record<string, string | undefined>): Config
     botVariant: null,
     ...agentSettings(env),
     local: true,
+    internalToken: internalToken(env),
   };
 }
 
@@ -118,6 +123,17 @@ export function surrealSettings(env: Record<string, string | undefined>): Surrea
     if (!user || !pass) throw new Error("SURREAL_USER and SURREAL_PASS are required with SURREAL_URL");
   }
   return { url, user, pass, auth, path: env.SURREAL_PATH?.trim() || "data/surreal" };
+}
+
+const MIN_INTERNAL_TOKEN_LENGTH = 32;
+
+/** ENGINE_INTERNAL_TOKEN: unset turns /internal/* off. Set, it must be long enough to guess at; the error never quotes it. */
+export function internalToken(env: Record<string, string | undefined>): string | null {
+  const token = env.ENGINE_INTERNAL_TOKEN?.trim() || null;
+  if (token && token.length < MIN_INTERNAL_TOKEN_LENGTH) {
+    throw new Error(`ENGINE_INTERNAL_TOKEN must be at least ${MIN_INTERNAL_TOKEN_LENGTH} characters`);
+  }
+  return token;
 }
 
 function agentSettings(env: Record<string, string | undefined>) {
