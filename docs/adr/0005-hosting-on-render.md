@@ -29,14 +29,15 @@ Option 1, defined in a `render.yaml` Blueprint at the repo root. Prices are from
 | `engine` | Web service, 1 instance | 0.5 CPU / 512 MB, $7 | Public: Recall and the stage need it. WebSockets for the stage. Grow to 1 CPU / 2 GB ($25) with concurrent meetings |
 | `api` | Web service | 0.5 CPU / 512 MB, $7 | Webhooks from Clerk and Stripe. Can scale out |
 | `web` | Static site, or web service if server-rendered | $0, or $7 | Depends on the web framework ADR |
-| `db` | Render Postgres | 256 MB, $6 | ADR 0007. 1 GB storage included, $0.30 per GB after |
+| `db` | Not on Render: SurrealDB Cloud | Free instance at launch, about $15 for a small one | [ADR 0011](0011-surrealdb.md) (it replaced Render Postgres, ADR 0007). Reached over TLS, credentials in Render secrets |
 
 - **Workspace: Pro ($25 a month).** Hobby allows one seat. Pro includes 25 GB of bandwidth, then $0.15 per GB.
 - **Nothing runs on a free plan.** Free web services spin down after 15 idle minutes, lose their filesystem, and
   can't receive private network traffic. Free Postgres expires after 30 days and has no backups.
 - **One region** for everything, because the private network only connects services in the same region. Choose
   the one nearest to Recall's region.
-- The api and the engine call each other over the private network (ADR 0008). Postgres is reached by its internal URL.
+- The api and the engine call each other over the private network (ADR 0008). SurrealDB Cloud is reached over the
+  internet with TLS (ADR 0011).
 - **Monorepo:** don't set `rootDir`. Render doesn't make files outside it available, so `contracts/` would be missing.
   Build from the repo root with a workspace-scoped install. Use `buildFilter` so each service deploys only when its
   app or `contracts/**` changes.
@@ -49,7 +50,7 @@ Option 1, defined in a `render.yaml` Blueprint at the repo root. Prices are from
 - About $45 a month for production at launch, plus about $20 for staging. Meetings (Recall per bot-hour, models, TTS)
   will cost far more than hosting, which is why ADR 0008 adds spend limits.
 - There's a stable URL for Recall, which clears deployment blocker 3 in [workstreams.md](../workstreams.md).
-- **Deploying the engine still ends live meetings.** The engine has no disk after ADR 0007, so Render starts the new
+- **Deploying the engine still ends live meetings.** The engine has no disk after ADR 0011, so Render starts the new
   instance before stopping the old one. The old instance's in-memory sessions end, and Recall webhooks for them reach
   the new instance, which doesn't know them. Deploy the engine outside meetings. Rebuilding a session from its stored
   events on the new instance is the fix, for the engine's scaling ADR.

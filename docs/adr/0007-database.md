@@ -1,6 +1,6 @@
 # 0007: Postgres for both apps, one schema each
 
-- **Status:** proposed
+- **Status:** superseded by [ADR 0011](0011-surrealdb.md)
 - **Date:** 2026-10-17
 - **Deciders:** Amir Shahbandegan
 - **Area:** database (`apps/api/src/db`, the engine's `store.ts`)
