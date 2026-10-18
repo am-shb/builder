@@ -11,7 +11,7 @@ import {
 } from "../src/consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../src/consensus/doc.ts";
 import { emptyPrototype } from "../src/ui/tree.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 
 function decision(over: Partial<Decision> = {}): Decision {
   return { id: "d1", text: "Use a sidebar", status: "draft", proposedBy: "Ann", agreedBy: [], affects: [], rejectedOptions: [], ...over };
@@ -131,7 +131,7 @@ test("resolveConflict twice does not duplicate the decision", () => {
 });
 
 test("store round-trips consensus doc and prototype", async () => {
-  const store = await openStore();
+  const store = await testStore();
   assert.equal(await store.getConsensus("s1"), undefined);
   const doc = markPending(docWith(decision()), "d1", 123);
   const proto = emptyPrototype("Demo");

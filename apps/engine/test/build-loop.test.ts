@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
@@ -47,7 +47,7 @@ function fakeTimers(start = 1_700_000_000_000) {
 
 // One database for the file: each test works in its own new session, and starting a database per test
 // would cost more than the tests themselves.
-const sharedStore = openStore();
+const sharedStore = testStore();
 
 async function setup(portOrScript: ModelPort | ToolCall[][]) {
   const store = await sharedStore;

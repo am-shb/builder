@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createFakePort, createOpenRouterPort, MODELS } from "../src/agent/llm.ts";
 import type { ModelPort, PortTool, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
@@ -39,7 +39,7 @@ function heldPort() {
 
 // One database for the file: each test works in its own new session, and starting a database per test
 // would cost more than the tests themselves.
-const sharedStore = openStore();
+const sharedStore = testStore();
 
 async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome } = {}) {
   const store = await sharedStore;
@@ -219,7 +219,7 @@ test("an opening longer than about five seconds is not said; the short fixed lin
 });
 
 test("a failing store or runtime does not throw into the caller", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const fail = async (): Promise<never> => { throw new Error("db is gone"); };
   const broken = { ...store, getSession: fail, listEvents: fail, addEvent: fail, addModelCall: fail } as typeof store;
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
@@ -640,7 +640,7 @@ test("a model call that stalls past its deadline frees the loop: the next uttera
 });
 
 test("chat speech posts the line to meeting chat and flags an agent caption without its text", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const sessionId = randomUUID();
   await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
   await store.markCreated(sessionId, "bot-1");
@@ -676,7 +676,7 @@ test("the app forwards realtime events to the loop and bot recording triggers th
     if (u.endsWith("/send_chat_message/")) { chats.push(JSON.parse(String(init?.body)).message); return Response.json({}); }
     return Response.json({ id: "bot-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = await openStore();
+  const store = await testStore();
   const requests: RunToolsRequest[] = [];
   const inner = createFakePort([[speak("Hi, I'm Builder. What's the app for?", "opening")], []]);
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
@@ -722,7 +722,7 @@ test("when the bot's status turns terminal the app ends the session: no more mod
     if (u.endsWith("/send_chat_message/")) return Response.json({});
     return Response.json({ id: "bot-9", status_changes: [{ code: status, sub_code: null, message: null, created_at: "" }] });
   };
-  const store = await openStore();
+  const store = await testStore();
   const requests: RunToolsRequest[] = [];
   const inner = createFakePort([]);
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
@@ -761,7 +761,7 @@ test("when the bot's status turns terminal the app ends the session: no more mod
 
 test("a restarted app picks up a call still recording: the window is reloaded and pending decisions tick again (known issue M2)", async () => {
   const config = appConfig();
-  const store = await openStore();
+  const store = await testStore();
   const id = randomUUID();
   await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
   await store.markCreated(id, "bot-7");
@@ -790,7 +790,7 @@ test("a restarted app picks up a call still recording: the window is reloaded an
 
 test("without agent deps the app stays listen-only", async () => {
   const config = appConfig();
-  const app = await createApp({ config, store: await openStore(), log: () => {}, indexHtml: "", stageHtml: "", recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({}) }) });
+  const app = await createApp({ config, store: await testStore(), log: () => {}, indexHtml: "", stageHtml: "", recall: createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({}) }) });
   app.tickAgent();
 });
 

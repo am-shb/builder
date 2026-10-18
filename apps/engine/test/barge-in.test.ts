@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime, handleStageMessage } from "../src/session/runtime.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import { createConversationLoop } from "../src/agent/conversation-loop.ts";
@@ -15,7 +15,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.UTC(2026, 0, 1);
 
 async function loopWith(speaking: boolean) {
-  const store = await openStore();
+  const store = await testStore();
   const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
   const stops: string[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
@@ -46,7 +46,7 @@ test("Builder's own partial, an empty partial, or a quiet room does not stop spe
 });
 
 test("a barge_in stage message calls the barge-in handler; malformed ones do not", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
   const got: string[] = [];
   handleStageMessage(runtime, "s1", { type: "barge_in" }, (id) => got.push(id));

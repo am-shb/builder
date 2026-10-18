@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { MODELS, BUILD_FALLBACKS, DEADLINE_MS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
 import { PRICES, costOf, withCostRecording } from "../src/agent/cost.ts";
@@ -35,7 +35,7 @@ test("costOf computes cache-aware cost", () => {
 });
 
 test("fake port records calls and costs into model_calls", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const fake = createFakePort([[{ name: "a", input: { x: 1 } }], []]);
   const port = withCostRecording(fake, { store, sessionId: "s1" });
   const r1 = await port.runTools({ loop: "build", ...REQ, tools: [], effort: "medium" });
@@ -53,7 +53,7 @@ test("fake port records calls and costs into model_calls", async () => {
 });
 
 test("sessionCost sums per session", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const row = { loop: "build", model: MODELS.build, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, ms: 5 };
   await store.addModelCall({ sessionId: "a", ...row, usd: 0.25 });
   await store.addModelCall({ sessionId: "a", ...row, usd: 0.5 });
@@ -66,7 +66,7 @@ test("sessionCost sums per session", async () => {
 
 test("session view includes cost_usd", async () => {
   const config = loadConfig(ENV);
-  const store = await openStore();
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({})) as any, sleep: async () => {} });
   const app = await createApp({ config, recall, store, log: () => {} });
   const server = http.createServer(app.handler);
@@ -286,7 +286,7 @@ test("truncated tool stream still records the usage seen and drops the partial c
   assert.equal(r.usage.cacheWriteTokens, 30);
   assert.ok(r.usage.outputTokens >= 1);
   // The usage is recorded, not zeroed.
-  const store = await openStore();
+  const store = await testStore();
   await withCostRecording(port, { store, sessionId: "t" }).runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
   assert.ok(await store.sessionCost("t") > 0);
   await store.close();

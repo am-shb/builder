@@ -7,7 +7,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { noopStageSink } from "../src/stage/channel.ts";
@@ -61,7 +61,7 @@ test("todo-app session replays end to end", async () => {
     if (u.endsWith("/bot/")) return Response.json({ id: "bot-e2e-1" }, { status: 201 });
     return Response.json({ id: "bot-e2e-1", status_changes: [{ code: "in_call_recording", sub_code: null, message: null, created_at: "" }] });
   };
-  const store = await openStore();
+  const store = await testStore();
   const time = virtualTime();
   const runtime = createRuntime({ store, clock: time.now, channel: noopStageSink });
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];

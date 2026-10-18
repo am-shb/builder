@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime, handleStageMessage } from "../src/session/runtime.ts";
 import { resolveCommand, createUiCommandRunner } from "../src/agent/ui-command.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
@@ -116,7 +116,7 @@ test("navigate, back, toggle, type and focus_option map to interactions", () => 
 });
 
 async function setup() {
-  const store = await openStore();
+  const store = await testStore();
   const id = randomUUID();
   await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
   await store.saveConsensus(id, emptyDoc(), twoScreens());

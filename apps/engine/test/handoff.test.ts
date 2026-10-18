@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { withChrome } from "./helpers/chrome.ts";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype } from "../src/ui/tree.ts";
@@ -37,7 +37,7 @@ async function start() {
     RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("unit-test-secret").toString("base64"),
     PUBLIC_API_BASE_URL: "https://agent.example.com/",
   });
-  const store = await openStore();
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({})) as any, sleep: async () => {} });
   const app = await createApp({ config, recall, store, log: () => {} });
   const server = http.createServer(app.handler);

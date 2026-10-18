@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createStageChannel } from "../src/stage/channel.ts";
 import type { StageEvent, StageSink } from "../src/stage/channel.ts";
@@ -32,7 +32,7 @@ function pcm(samples: number, from = 0): Uint8Array {
 type Logged = { msg: string; fields?: Record<string, unknown> };
 
 async function setup(opts: { tts: TtsProvider; channel?: StageSink; timeoutMs?: number; chatFails?: boolean }) {
-  const store = await openStore();
+  const store = await testStore();
   const sessionId = randomUUID();
   await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
   await store.markCreated(sessionId, "bot-1");
@@ -82,7 +82,7 @@ function heldTts(first: Uint8Array[], honoursSignal = true) {
 
 // A real stage channel on a loopback server, and a ws client connected to it.
 async function stageWithClient() {
-  const store = await openStore();
+  const store = await testStore();
   const sessionId = randomUUID();
   await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
   await store.markCreated(sessionId, "bot-1");

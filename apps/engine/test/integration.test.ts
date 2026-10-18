@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { verifyRequestFromRecall, signForTest } from "../src/verify.ts";
 import { parseRealtimeEvent } from "../src/realtime.ts";
@@ -25,7 +25,7 @@ after(() => { for (const s of openServers) { s.closeAllConnections(); s.close();
 
 async function startApp(fakeFetch: typeof fetch) {
   const config = loadConfig(ENV);
-  const store = await openStore();
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeFetch, sleep: async () => {} });
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const app = await createApp({ config, recall, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "<html></html>", stageHtml: "<html>stage</html>" });
@@ -285,7 +285,7 @@ test("stage routes never serve transcript text: /state has no captions and there
 // ---------- crash safety (known issue I6) ----------
 test("an error while processing a realtime event is logged by name and the server keeps running", async () => {
   const config = loadConfig(ENV);
-  const store = await openStore();
+  const store = await testStore();
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-7" }, { status: 201 })) as any, sleep: async () => {} });
   const app = await createApp({

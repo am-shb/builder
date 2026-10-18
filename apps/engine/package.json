@@ -13,7 +13,7 @@
     "smoke": "node src/server.ts --smoke",
     "replay": "node scripts/replay.ts",
     "migrate": "node src/db/migrate.ts",
-    "test": "node --test --test-force-exit \"test/**/*.test.ts\"",
+    "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test && npm run smoke",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"

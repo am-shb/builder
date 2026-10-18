@@ -75,6 +75,7 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   const { db, close } = await connect(opts, log);
   const now = () => new Date();
   const newToken = () => randomBytes(24).toString("base64url");
+  let closing: Promise<void> | undefined;
 
   async function getSession(id: string): Promise<Session | undefined> {
     const [row] = await db.select().from(sessions).where(eq(sessions.id, id));
@@ -186,8 +187,11 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
         .where(eq(modelCalls.session_id, sessionId));
       return row.total;
     },
+    // Ends the connection (PGlite: shuts the database down). An open PGlite keeps a timer running, so a
+    // process that opened a store must close it to exit. Safe to call more than once.
     close(): Promise<void> {
-      return close();
+      closing ??= close();
+      return closing;
     },
   };
 }

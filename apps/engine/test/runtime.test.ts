@@ -4,7 +4,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { tokenMatches } from "../src/app.ts";
 import { deriveMood, NEUTRAL_MOOD_INPUTS } from "../src/session/mood.ts";
@@ -28,7 +28,7 @@ after(() => { for (const s of openServers) { s.closeAllConnections(); s.close();
 
 async function start(fakeFetch: typeof fetch = (async () => Response.json({ id: "bot-1" }, { status: 201 })) as any) {
   const config = loadConfig(ENV);
-  const store = await openStore();
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeFetch, sleep: async () => {} });
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const log = (msg: string, fields?: Record<string, unknown>) => logs.push({ msg, fields });
@@ -191,7 +191,7 @@ test("applyBatch failure sends nothing and keeps persisted proto", async () => {
 });
 
 test("captions reach the stage as flags only and never enter the snapshot (known issue I7)", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("22222222-2222-2222-2222-222222222222", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_id, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
@@ -205,7 +205,7 @@ test("captions reach the stage as flags only and never enter the snapshot (known
 });
 
 test("mood changes are pushed once, not on every input update", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("33333333-3333-3333-3333-333333333333", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
@@ -233,7 +233,7 @@ function conflictDoc(): ConsensusDoc {
 }
 
 test("resolveComparison applies the winner, resolves the doc, persists and sends resolve+patch+doc", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("44444444-4444-4444-4444-444444444444", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
@@ -258,7 +258,7 @@ test("resolveComparison applies the winner, resolves the doc, persists and sends
 });
 
 test("resolveComparison with an unappliable winner batch still resolves the doc and keeps the proto", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("55555555-5555-5555-5555-555555555555", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const logs: string[] = [];
@@ -330,7 +330,7 @@ test("createBot sends bot_name Builder and variant web_4_core by default", async
 });
 
 const mkRuntime = async (id: string, sent: StageEvent[]) => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent(id, "https://meet.google.com/x");
   return createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
 };
@@ -381,7 +381,7 @@ test("snapshotFor throwing terminates only that socket and the server keeps serv
 });
 
 test("setTasks pushes a tasks event and the snapshot carries the list", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("33333333-3333-3333-3333-333333333333", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_id, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
@@ -406,7 +406,7 @@ test("the operator's cost poll reads one total, and only locally (known issue M7
 });
 
 test("saving is in the background but in order: a slow first write never lands over a later one", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("99999999-9999-9999-9999-999999999999", "https://meet.google.com/x");
   let first = true;
   const slowFirst = {
@@ -428,7 +428,7 @@ test("saving is in the background but in order: a slow first write never lands o
 });
 
 test("a failed save is logged by name and the session carries on", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("aaaaaaaa-9999-9999-9999-999999999999", "https://meet.google.com/x");
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const broken = { getConsensus: store.getConsensus, saveConsensus: async () => { throw new Error("secret text"); } };
@@ -441,7 +441,7 @@ test("a failed save is logged by name and the session carries on", async () => {
 });
 
 test("after a restart, load() starts a session's runtime from what was saved, once", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("bbbbbbbb-9999-9999-9999-999999999999", "https://meet.google.com/x");
   const before = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(s.id);
   before.applyBatch(addHeading);

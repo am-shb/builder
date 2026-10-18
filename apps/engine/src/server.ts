@@ -7,6 +7,7 @@ import { loadConfig, loadLocalConfig } from "./config.ts";
 import { createRecallClient } from "./recall-client.ts";
 import { createLocalRecall } from "./local-recall.ts";
 import { openStore } from "./store.ts";
+import { errorCode } from "./db/connect.ts";
 import { createApp, REALTIME_PATH, tokenMatches } from "./app.ts";
 import { createRuntime, handleStageMessage } from "./session/runtime.ts";
 import { createStageChannel } from "./stage/channel.ts";
@@ -66,6 +67,15 @@ async function main() {
 
   setInterval(() => void app.pollOnce(), 4000).unref();
   if (agent) setInterval(() => app.tickAgent(), 1000).unref();
+  // Shut the database down cleanly on Ctrl-C or a platform stop, so a PGlite data directory is left whole.
+  // A pending write gets a few seconds; after that the process exits anyway.
+  const shutdown = () => {
+    setTimeout(() => process.exit(0), 5000).unref();
+    server.close();
+    store.close().catch((err) => log("store.close_failed", { error: errorCode(err) })).finally(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
   server.listen(config.port, () => {
     console.log(`Listening on http://localhost:${config.port}`);
     if (config.local) console.log(`Local mode, no Recall: open http://localhost:${config.port}/local in Chrome`);
@@ -106,6 +116,7 @@ async function smoke() {
   await app.pollOnce();
   const view = (await (await fetch(`${base}/api/sessions/${session.id}`)).json()) as any;
   server.close();
+  await store.close();
 
   const ok = bad.status === 401 && good.status === 200 &&
     view.session.events[0]?.text === "hello world" && view.session.bot_status === "in_call_recording";

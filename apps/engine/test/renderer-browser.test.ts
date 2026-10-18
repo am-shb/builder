@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { withChrome } from "./helpers/chrome.ts";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp, tokenMatches } from "../src/app.ts";
 import { createRuntime } from "../src/session/runtime.ts";
 import { createStageChannel } from "../src/stage/channel.ts";
@@ -149,7 +149,7 @@ test("stage page renders the scripted to-do prototype over the websocket", async
       RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("unit-test-secret").toString("base64"),
       PUBLIC_API_BASE_URL: "https://agent.example.com/",
     });
-    const store = await openStore();
+    const store = await testStore();
     const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-1" }, { status: 201 })) as any, sleep: async () => {} });
     const server = http.createServer();
     let runtime!: ReturnType<typeof createRuntime>;

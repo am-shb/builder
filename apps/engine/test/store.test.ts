@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype, UNTITLED_APP } from "../src/ui/tree.ts";
 
@@ -14,7 +14,7 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 const tmpDir = () => join(mkdtempSync(join(tmpdir(), "engine-pg-")), "pg");
 
 test("the same Recall event delivered twice at once is stored once", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const id = "11111111-1111-1111-1111-111111111111";
   await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
   const e = { sessionId: id, recallMsgId: "msg-1", kind: "utterance", speaker: "Ada", text: "hello" };
@@ -30,7 +30,7 @@ test("the same Recall event delivered twice at once is stored once", async () =>
 });
 
 test("events read back in the order they were stored, with ISO timestamps", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const id = "22222222-2222-2222-2222-222222222222";
   const s = await store.createIntent(id, "https://meet.google.com/abc-defg-hij");
   assert.equal(s.state, "intent");
@@ -46,13 +46,13 @@ test("events read back in the order they were stored, with ISO timestamps", asyn
 });
 
 test("an event for a session that doesn't exist is refused", async () => {
-  const store = await openStore();
+  const store = await testStore();
   await assert.rejects(store.addEvent({ sessionId: "nope", recallMsgId: null, kind: "utterance", speaker: null, text: null }));
   await store.close();
 });
 
 test("a session's bot id is unique", async () => {
-  const store = await openStore();
+  const store = await testStore();
   await store.createIntent("a", "https://meet.google.com/a");
   await store.createIntent("b", "https://meet.google.com/b");
   await store.markCreated("a", "bot-1");
@@ -63,7 +63,7 @@ test("a session's bot id is unique", async () => {
 
 test("a missing stage or handoff token is issued once, even when asked for twice at the same time", async () => {
   const dataDir = tmpDir();
-  const store = await openStore({ dataDir });
+  const store = await testStore({ dataDir });
   const id = "44444444-4444-4444-4444-444444444444";
   await store.createIntent(id, "https://meet.google.com/x");
   await store.close();
@@ -72,7 +72,7 @@ test("a missing stage or handoff token is issued once, even when asked for twice
   await raw.query(`UPDATE engine.sessions SET stage_token = NULL, handoff_token = NULL WHERE id = $1`, [id]);
   await raw.close();
 
-  const again = await openStore({ dataDir });
+  const again = await testStore({ dataDir });
   const stage = await Promise.all([again.ensureStageToken(id), again.ensureStageToken(id)]);
   assert.ok(stage[0].length >= 32);
   assert.equal(stage[1], stage[0], "both callers get the one token");
@@ -87,7 +87,7 @@ test("a missing stage or handoff token is issued once, even when asked for twice
 test("a data directory keeps sessions, events, consensus and cost across a restart", async () => {
   const dataDir = tmpDir();
   const id = "55555555-5555-5555-5555-555555555555";
-  const first = await openStore({ dataDir });
+  const first = await testStore({ dataDir });
   await first.createIntent(id, "https://meet.google.com/x");
   await first.markCreated(id, "bot-5");
   await first.updateBotStatus(id, "in_call_recording", null);
@@ -99,7 +99,7 @@ test("a data directory keeps sessions, events, consensus and cost across a resta
   await first.addModelCall({ sessionId: id, loop: "conversation", model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, usd: 0.5, ms: 3 });
   await first.close();
 
-  const second = await openStore({ dataDir }); // migrating an up-to-date database again is a no-op
+  const second = await testStore({ dataDir }); // migrating an up-to-date database again is a no-op
   assert.deepEqual((await second.listActiveSessions()).map((s) => s.id), [id]);
   assert.equal((await second.findActiveForMeeting("https://meet.google.com/x"))?.bot_id, "bot-5");
   assert.equal(await second.addEvent({ sessionId: id, recallMsgId: "m1", kind: "utterance", speaker: "Ada", text: "hi" }), null, "still a duplicate");
@@ -115,7 +115,7 @@ test("a data directory keeps sessions, events, consensus and cost across a resta
 test("a stored consensus row that no longer parses reads as absent instead of throwing", async () => {
   const dataDir = tmpDir();
   const id = "33333333-3333-3333-3333-333333333333";
-  const first = await openStore({ dataDir });
+  const first = await testStore({ dataDir });
   await first.createIntent(id, "https://meet.google.com/x");
   await first.close();
   const raw = new PGlite(dataDir);
@@ -123,15 +123,15 @@ test("a stored consensus row that no longer parses reads as absent instead of th
   await raw.close();
 
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
-  const store = await openStore({ dataDir, log: (msg, fields) => logs.push({ msg, fields }) });
+  const store = await testStore({ dataDir, log: (msg, fields) => logs.push({ msg, fields }) });
   assert.equal(await store.getConsensus(id), undefined);
   assert.deepEqual(logs, [{ msg: "store.consensus_invalid", fields: { session_id: id, doc_ok: false, proto_ok: false } }]);
   await store.close();
 });
 
 test("in-memory stores are separate databases", async () => {
-  const a = await openStore();
-  const b = await openStore();
+  const a = await testStore();
+  const b = await testStore();
   await a.createIntent("x", "https://meet.google.com/x");
   assert.equal(await b.getSession("x"), undefined);
   await Promise.all([a.close(), b.close()]);

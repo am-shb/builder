@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { buildComparisonView, createRuntime, nextComparison } from "../src/session/runtime.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { applyBatch, emptyPrototype, findNode } from "../src/ui/tree.ts";
@@ -83,7 +83,7 @@ test("buildComparisonView drops invalid variants and requires ≥2", () => {
 });
 
 test("resolveComparison applies winner batch to main proto and records decision", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("66666666-6666-6666-6666-666666666666", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 }, clock: () => 5000 })(s.id);
@@ -116,7 +116,7 @@ test("resolveComparison applies winner batch to main proto and records decision"
 });
 
 test("resolveComparison with an unknown conflict returns ok:false and sends nothing", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("77777777-7777-7777-7777-777777777777", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
@@ -158,7 +158,7 @@ const SECOND: Conflict = {
 };
 
 async function twoConflicts(id: string) {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent(id, "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
@@ -196,7 +196,7 @@ test("resolving the comparison on screen brings up the next open conflict, built
 });
 
 test("a runtime made from a saved doc shows the open comparison again (known issue M2)", async () => {
-  const store = await openStore();
+  const store = await testStore();
   const s = await store.createIntent("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", "https://meet.google.com/x");
   await store.saveConsensus(s.id, docWith(THREE), baseProto());
   const rt = await createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } }).load(s.id);

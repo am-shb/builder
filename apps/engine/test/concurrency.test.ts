@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import type { Store } from "../src/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { signForTest } from "../src/verify.ts";
@@ -22,7 +22,7 @@ after(() => { for (const s of servers) { s.closeAllConnections(); s.close(); } }
 
 async function start(fakeFetch: (url: string) => Promise<Response>, wrap: (store: Store) => Store = (s) => s) {
   const config = loadConfig(ENV);
-  const store = await openStore();
+  const store = await testStore();
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: fakeFetch as typeof fetch, sleep: async () => {} });
   const app = await createApp({ config, recall, store: wrap(store), log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "", stageHtml: "" });

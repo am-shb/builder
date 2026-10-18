@@ -4,7 +4,7 @@ import http from "node:http";
 import { loadConfig, loadLocalConfig } from "../src/config.ts";
 import { createLocalRecall } from "../src/local-recall.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import { signForTest } from "../src/verify.ts";
@@ -14,7 +14,7 @@ after(() => { for (const s of openServers) { s.closeAllConnections(); s.close();
 
 async function startLocal(opts: { speaking?: boolean } = {}) {
   const config = loadLocalConfig({});
-  const store = await openStore();
+  const store = await testStore();
   const stops: string[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const agent = opts.speaking === undefined ? undefined : {
@@ -120,7 +120,7 @@ test("outside local mode the local routes do not exist", async () => {
     RECALL_REGION: "us-west-2", RECALL_API_KEY: "k", RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("s").toString("base64"),
     PUBLIC_API_BASE_URL: "https://a.example.com",
   });
-  const store = await openStore();
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({ id: "b1" }, { status: 201 }) });
   const app = await createApp({ config, store, recall, log: () => {}, indexHtml: "", stageHtml: "", localHtml: "" });
   const server = http.createServer(app.handler);
