@@ -11,6 +11,7 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "@builder/contracts": "*"
+    "@builder/contracts": "*",
+    "@clerk/backend": "^3.23.2"
   }
 }
