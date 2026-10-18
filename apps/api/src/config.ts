@@ -11,7 +11,8 @@ export type ClerkConfig = {
 };
 
 export type EngineConfig = {
-  // The engine's private-network origin, e.g. http://engine:10000 on Render.
+  // The engine's private-network origin, e.g. http://builder-engine:10000 on Render. ENGINE_INTERNAL_URL may also be
+  // a bare host:port, which means http.
   url: string;
   // Shared bearer token for /internal/* (ADR 0008).
   token: string;
@@ -113,10 +114,15 @@ function readClerk(env: Env): ClerkConfig | null {
   return { jwtKey, authorizedParties };
 }
 
+const HOST_PORT = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?:\d{1,5}$/i;
+
 function readEngine(env: Env): EngineConfig | null {
   const v = together(env, ["ENGINE_INTERNAL_URL", "ENGINE_INTERNAL_TOKEN"]);
   if (!v) return null;
-  const url = v.ENGINE_INTERNAL_URL.replace(/\/+$/, "");
+  // A bare host:port, as Render's `fromService` `hostport` gives it (builder-engine:10000), is reached over plain
+  // http on the private network.
+  const raw = v.ENGINE_INTERNAL_URL.replace(/\/+$/, "");
+  const url = HOST_PORT.test(raw) ? `http://${raw}` : raw;
   if (!isOrigin(url)) throw new ConfigError("ENGINE_INTERNAL_URL must be an http or https origin, with no path");
   if (v.ENGINE_INTERNAL_TOKEN.length < MIN_TOKEN_LENGTH) {
     throw new ConfigError(`ENGINE_INTERNAL_TOKEN must be at least ${MIN_TOKEN_LENGTH} characters`);

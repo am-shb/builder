@@ -25,6 +25,9 @@ export type DbTarget = {
   path?: string;
   // How long to wait for a server before giving up at startup.
   connectTimeoutMs?: number;
+  // Another database in the namespace, for tests against a real server (test/helpers), which give each test its own.
+  // The apps always use DATABASE.
+  database?: string;
 };
 
 // Two writes to the same record (or the same unique index entry) at the same time make one of them fail with a
@@ -39,7 +42,8 @@ const codeError = (code: string, message: string, cause?: unknown) => Object.ass
 
 export async function connect(target: DbTarget = {}): Promise<Surreal> {
   const db = new Surreal({ engines: { ...createRemoteEngines(), ...createNodeEngines() } });
-  const base: ConnectOptions = { namespace: NAMESPACE, database: DATABASE, retry: RETRY };
+  const database = target.database ?? DATABASE;
+  const base: ConnectOptions = { namespace: NAMESPACE, database, retry: RETRY };
   if (!target.url) {
     let endpoint = "mem://";
     if (target.path) {
@@ -56,7 +60,7 @@ export async function connect(target: DbTarget = {}): Promise<Surreal> {
   if (!target.user || !target.pass) throw codeError("SURREAL_AUTH_MISSING", "SURREAL_USER and SURREAL_PASS are required with SURREAL_URL");
   const authentication = target.auth === "root"
     ? { username: target.user, password: target.pass }
-    : { namespace: NAMESPACE, database: DATABASE, username: target.user, password: target.pass };
+    : { namespace: NAMESPACE, database, username: target.user, password: target.pass };
   // Once connected, a dropped connection is retried for as long as it takes (the default gives up after five
   // tries). At startup the first connection gets `connectTimeoutMs`, so an unreachable server fails fast.
   const connecting = db.connect(url, { ...base, authentication, reconnect: { attempts: -1, retryDelay: 500, retryDelayMax: 10_000 } });

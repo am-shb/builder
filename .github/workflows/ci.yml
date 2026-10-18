@@ -43,3 +43,86 @@ jobs:
       - name: Point the tests at the runner's Chrome
         run: echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable)" >> "$GITHUB_ENV"
       - run: npm test
+
+  images:
+    name: Build the Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The images Render deploys (ADR 0005), built from the repo root as Render builds them.
+      - run: docker build -f apps/engine/Dockerfile -t builder-engine:ci .
+      - run: docker build -f apps/api/Dockerfile -t builder-api:ci .
+      # The SurrealDB native module loads on Linux, and each app boots in its image.
+      - name: Smoke boot the engine image
+        run: docker run --rm builder-engine:ci npm run smoke
+      - name: Boot the api image and check /health
+        run: |
+          docker run -d --name api -p 127.0.0.1:3001:3001 builder-api:ci
+          timeout 60 sh -c 'until curl -fsS http://127.0.0.1:3001/health; do sleep 1; done'
+          docker rm -f api
+
+  surrealdb:
+    name: Tests and migrations against SurrealDB 3.3.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Dev-only credentials for a throwaway server that lives as long as this job. Not secrets.
+    env:
+      SURREAL_HTTP: http://127.0.0.1:8000
+      SURREAL_ROOT_USER: root
+      SURREAL_ROOT_PASS: ci-only-root-password
+      ENGINE_DB_PASS: ci-only-engine-password-not-secret
+      API_DB_PASS: ci-only-api-password-not-a-secret
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The version SurrealDB Cloud runs (ADR 0011). Started with docker run, not as a job service: a service
+      # container can't be given the image's `start` command.
+      - name: Start SurrealDB
+        run: |
+          docker run -d --name surrealdb -p 127.0.0.1:8000:8000 \
+            -e SURREAL_USER="$SURREAL_ROOT_USER" -e SURREAL_PASS="$SURREAL_ROOT_PASS" \
+            surrealdb/surrealdb:v3.3.2 start
+          timeout 60 sh -c "until curl -fsS $SURREAL_HTTP/health; do sleep 1; done"
+      # The same setup as docker-compose.yml: namespace builder, databases engine and api, a user for each.
+      - run: sh infra/surrealdb/setup.sh
+      # Each app's migrations as its own database user, as Render's pre-deploy command runs them. The first run must
+      # apply at least one file, the second none.
+      - name: Engine migrations, twice
+        env:
+          SURREAL_URL: ws://127.0.0.1:8000
+          SURREAL_USER: engine
+          SURREAL_PASS: ${{ env.ENGINE_DB_PASS }}
+        run: |
+          npm run -s migrate -w @builder/engine | tee /dev/stderr | grep -q '"applied":[1-9]'
+          npm run -s migrate -w @builder/engine | tee /dev/stderr | grep -q '"applied":0'
+      - name: Api migrations, twice
+        env:
+          SURREAL_URL: ws://127.0.0.1:8000
+          SURREAL_USER: api
+          SURREAL_PASS: ${{ env.API_DB_PASS }}
+        run: |
+          npm run -s migrate -w @builder/api | tee /dev/stderr | grep -q '"applied":[1-9]'
+          npm run -s migrate -w @builder/api | tee /dev/stderr | grep -q '"applied":0'
+      # The store and db tests, each test on a new database of its own on the server (test/helpers).
+      - name: Engine store and concurrency tests
+        working-directory: apps/engine
+        env:
+          TEST_SURREAL_URL: ws://127.0.0.1:8000
+          TEST_SURREAL_USER: ${{ env.SURREAL_ROOT_USER }}
+          TEST_SURREAL_PASS: ${{ env.SURREAL_ROOT_PASS }}
+        run: node --test test/store.test.ts test/concurrency.test.ts
+      - name: Api db and session tests
+        working-directory: apps/api
+        env:
+          TEST_SURREAL_URL: ws://127.0.0.1:8000
+          TEST_SURREAL_USER: ${{ env.SURREAL_ROOT_USER }}
+          TEST_SURREAL_PASS: ${{ env.SURREAL_ROOT_PASS }}
+        run: node --test test/db-sessions.test.ts test/sessions-create.test.ts test/sessions-read.test.ts
+      - name: SurrealDB logs
+        if: failure()
+        run: docker logs surrealdb
