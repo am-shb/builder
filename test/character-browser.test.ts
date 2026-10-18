@@ -17,7 +17,6 @@ const doc = (decisions: unknown[], openQuestions: unknown[] = []) =>
 const LOOK = `(() => {
   const out = {};
   for (const el of document.querySelectorAll(".builder [class*='bot-']")) {
-    if (el.classList.contains("bot-label")) continue;
     const cs = getComputedStyle(el);
     const anims = el.getAnimations().map((a) => a.animationName || "js").sort();
     out[el.className] = { anims, opacity: anims.length ? "anim" : cs.opacity, transform: anims.length ? "anim" : cs.transform };
@@ -36,13 +35,11 @@ test("each mood sets data-mood and distinct computed styles", async (t) => {
   await withStage(t, async ({ page, script }) => {
     assert.equal(await page.eval(`document.querySelector(".builder").dataset.mood`), "listening", "snapshot mood");
     const looks = new Map<string, Look>();
-    const labels = new Map<string, string>();
     for (const mood of MOODS) {
       await script([{ mood }]);
       await page.waitFor(`document.querySelector(".builder").dataset.mood === "${mood}"`, 2000);
       await sleep(600); // mood transitions are 250-400 ms
       looks.set(mood, await page.eval<Look>(LOOK));
-      labels.set(mood, await page.eval<string>(`document.querySelector(".bot-label").textContent`));
       if (mood === "speaking") {
         const scaleAt = async (level: number) => {
           await page.eval(`window.stageCharacter.setMouth(${level})`);
@@ -56,12 +53,12 @@ test("each mood sets data-mood and distinct computed styles", async (t) => {
       }
     }
 
-    // Seven different looks, and seven different labels.
+    // Seven different looks, and no text label: the stage shows a to-do list instead.
     const keys = MOODS.map((m) => JSON.stringify(looks.get(m)));
     for (let i = 0; i < MOODS.length; i++) {
       for (let j = i + 1; j < MOODS.length; j++) assert.notEqual(keys[i], keys[j], `${MOODS[i]} and ${MOODS[j]} look the same`);
     }
-    assert.equal(new Set(labels.values()).size, MOODS.length, JSON.stringify([...labels]));
+    assert.equal(await page.eval("document.querySelectorAll('.bot-label').length"), 0);
 
     // Each mood shows what the mockup says it shows.
     const part = (mood: string, cls: string) => {
@@ -118,7 +115,6 @@ test("placement switches to dock when first node is added", async (t) => {
     assert.equal(await page.eval(`document.querySelector(".bot").getAnimations().length`), 0);
     const dock = await box("#dock");
     assert.ok(inside(await box(".bot-head"), dock), "head in the dock");
-    assert.ok(inside(await box(".bot-label"), dock), "label in the dock");
     assert.equal(await page.eval(`document.getElementById("placeholder").hidden`), true);
 
     // Back to centre stage once nothing is left on the screens.

@@ -76,15 +76,28 @@
   .builder[data-mood="unsure"]   { --mood:#ffb366; }
   .builder[data-mood="pleased"]  { --mood:#ff8fa3; }
   .bot { position:absolute; left:0; top:0; width:150px; height:220px; transform-origin:0 0; }
-  .bot-label { position:absolute; left:0; top:0; width:220px; text-align:center; font:800 32px/44px var(--font); color:var(--mood); transform-origin:0 0; }
-  /* Centre stage: centred on the prototype area. Dock: bottom-right, label to its left. */
+  /* Centre stage: centred on the prototype area. Dock: bottom-right, the to-do list to its left. */
   #builder[data-placement="center"] .bot { transform:translate(345px, 165px) scale(1.4); }
-  #builder[data-placement="center"] .bot-label { transform:translate(340px, 477px); }
   #builder[data-placement="dock"] .bot { transform:translate(1146px, 563px) scale(0.72); }
-  #builder[data-placement="dock"] .bot-label { transform:translate(916px, 601px); }
   /* Comparing: small, top-right, clear of the options (which start at y 112). */
   #builder[data-placement="corner"] .bot { transform:translate(1196px, 18px) scale(0.4); }
-  #builder[data-placement="corner"] .bot-label { transform:translate(1000px, 34px) scale(0.8); }
+
+  /* ---------- Builder's to-do list (todo.js): where the mood word used to be ---------- */
+  #todo { position:absolute; z-index:50; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+  #todo li { display:flex; align-items:center; gap:8px; font:600 17px/1.2 var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; will-change:transform, opacity; }
+  #todo .t { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #todo .dot { flex:none; width:16px; height:16px; border-radius:50%; border:2px solid var(--track); }
+  #todo li.more .dot { display:none; }
+  #todo li.now { color:var(--ink); font-weight:800; font-size:19px; }
+  #todo li.now .dot { border:3px solid #5ee6a8; border-right-color:transparent; }
+  #todo li.done { color:var(--agreed); text-decoration:line-through; }
+  #todo li.done .dot { background:var(--agreed); border-color:var(--agreed); }
+  #builder[data-placement=dock] ~ #todo { left:916px; top:572px; width:224px; }
+  /* Centre stage, nothing built yet: only what Builder is doing now, under the robot. */
+  #builder[data-placement=center] ~ #todo { left:240px; top:477px; width:420px; text-align:center; }
+  #builder[data-placement=center] ~ #todo li { justify-content:center; }
+  #builder[data-placement=center] ~ #todo li:not(.now) { display:none; }
+  #builder[data-placement=corner] ~ #todo { display:none; }
 
   .bot div { position:absolute; }
   .bot-rig, .bot-pose, .bot-act, .bot-eye, .bot-eyeball, .bot-arc, .bot-cheek, .bot-mouth, .bot-bulb, .bot-ring,
@@ -184,6 +197,7 @@
   <section><h2>Open questions<span class="more" id="open-more"></span></h2><ul id="open"></ul></section>
 </aside>
 <div id="builder"></div>
+<ul id="todo"></ul>
 <div id="dock"></div>
 <div id="comparison"></div>
 <script type="module">
@@ -194,12 +208,14 @@ import { startClock, onFrame, animate } from "@renderer/clock.js";
 import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
+import { renderTodo } from "@renderer/todo.js";
 import { showComparison, resolveComparison } from "@renderer/comparison.js";
 import { createAudioPlayer } from "@renderer/audio.js";
 
 const EASE = "ease-out";
 const protoEl = document.getElementById("proto");
 const character = createCharacter(document.getElementById("builder"));
+const todoEl = document.getElementById("todo");
 let proto = null;
 let ui = null;
 let nodes = new Map();
@@ -482,6 +498,7 @@ function onEvent(ev) {
       reportScreen(true); // every (re)connect starts with a snapshot
       if (ev.doc) renderDoc(ev.doc);
       if (ev.mood) character.setMood(ev.mood);
+      renderTodo(todoEl, ev.tasks ?? []);
       presentComparison(ev.comparison ?? null);
       break;
     }
@@ -514,6 +531,9 @@ function onEvent(ev) {
       break;
     case "mood":
       character.setMood(ev.mood);
+      break;
+    case "tasks":
+      renderTodo(todoEl, ev.tasks);
       break;
     case "comparison":
       presentComparison(ev.view);

@@ -3,21 +3,12 @@
 // Moods only switch classes and data attributes: each part's pose comes in through a CSS
 // transition and its idle motion is a CSS animation, both stepped by the shared 15 fps clock.
 // Placement (centre stage, the dock, or a corner while comparing) is a FLIP between CSS-defined spots.
+// The to-do list next to it (todo.js) says what it is working on; the character has no text of its own.
 import { animate, logMotion, onFrame } from "@renderer/clock.js";
 
 export const MOODS = ["listening", "thinking", "building", "speaking", "curious", "unsure", "pleased"];
-export const MOOD_LABELS = {
-  listening: "Listening",
-  thinking: "Thinking",
-  building: "Building",
-  speaking: "Speaking",
-  curious: "Curious",
-  unsure: "Unsure",
-  pleased: "Pleased",
-};
 const PLACEMENTS = ["center", "dock", "corner"];
 export const PLACEMENT_MS = 500;
-const LABEL_FADE_MS = 300;
 const HEARING_MS = 1800; // rings keep pulsing this long after the last human caption
 const MOUTH_REST = 0.3; // open-mouth scale at level 0, so "speaking" reads even between words
 const MOUTH_EASE = 0.5; // per 15 fps frame, toward the target level
@@ -49,7 +40,7 @@ function build() {
   ]);
   const rig = part("bot-rig", [part("bot-pose", [act])]);
   const blocks = part("bot-blocks", [part("bot-block b1"), part("bot-block b2"), part("bot-block b3")]);
-  return { bot: part("bot", [rig, blocks]), label: part("bot-label") };
+  return part("bot", [rig, blocks]);
 }
 
 /**
@@ -60,10 +51,10 @@ function build() {
  * - hear(): a participant is speaking; the listening rings pulse for a moment.
  */
 export function createCharacter(el) {
-  const { bot, label } = build();
+  const bot = build();
   const mouth = bot.querySelector(".bot-mouth.open");
   el.classList.add("builder");
-  el.replaceChildren(bot, label);
+  el.replaceChildren(bot);
 
   let moves = [];
   let hearingTimer = null;
@@ -82,10 +73,7 @@ export function createCharacter(el) {
   const character = {
     setMood(mood) {
       if (!MOODS.includes(mood) || el.dataset.mood === mood) return;
-      const first = !el.dataset.mood;
       el.dataset.mood = mood;
-      label.textContent = MOOD_LABELS[mood];
-      if (!first) animate(label, [{ opacity: 0.15 }, { opacity: 1 }], { duration: LABEL_FADE_MS, easing: EASE });
       logMotion({ fn: "setMood", mood });
     },
 
@@ -100,14 +88,11 @@ export function createCharacter(el) {
         el.dataset.placement = placement; // first draw: no move
         return;
       }
-      const parts = [bot, label];
-      const from = parts.map((p) => getComputedStyle(p).transform); // mid-move, this is where it is now
+      const from = getComputedStyle(bot).transform; // mid-move, this is where it is now
       for (const a of moves) a.cancel();
       el.dataset.placement = placement;
-      moves = parts.map((p, i) => {
-        const to = getComputedStyle(p).transform;
-        return animate(p, [{ transform: from[i] }, { transform: to }], { duration: PLACEMENT_MS, easing: EASE });
-      });
+      const to = getComputedStyle(bot).transform;
+      moves = [animate(bot, [{ transform: from }, { transform: to }], { duration: PLACEMENT_MS, easing: EASE })];
       logMotion({ fn: "setPlacement", placement });
     },
 
