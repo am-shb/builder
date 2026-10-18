@@ -3,6 +3,8 @@ export type { EngineEvent, SessionLimits, SessionStatus, StartSessionRequest, St
 export {
   EngineEvent as EngineEventSchema,
   parseEngineEvent,
+  SessionLimits as SessionLimitsSchema,
+  SessionStatus as SessionStatusSchema,
   StartSessionRequest as StartSessionRequestSchema,
   StartSessionResponse as StartSessionResponseSchema,
 } from "@builder/contracts";
