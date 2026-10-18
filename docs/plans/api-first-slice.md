@@ -1,19 +1,23 @@
-# Plan: the api's first slice (Clerk auth, sessions, engine client, Postgres)
+# Plan: the api's first slice (Clerk auth, sessions, engine client, SurrealDB)
 
 > **2026-10-18:** the database is now SurrealDB, not Postgres ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 writes
 > the schema in SurrealQL, in database `api` on SurrealDB Cloud, with `@surrealdb/node` in memory for tests. That also settles "Postgres
-> or SQLite for the hackathon": neither. The Drizzle, PGlite and `engine/postgres` notes below are out of date.
+> or SQLite for the hackathon": neither.
 
 - **Status:** agreed by the api owner on 2026-10-17, except D5 (open, for the repo owner) and the engine and
-  contracts items, which need their owners. No code yet.
-- **Date:** 2026-10-17
+  contracts items, which need their owners. Steps 0, 1, 2 and 4 are merged. On 2026-10-18 the repo owner chose
+  SurrealDB on SurrealDB Cloud for both apps, one database each ([ADR 0011](../adr/0011-surrealdb.md)). Step 3 below
+  is rewritten for it, and isn't started. Later on 2026-10-18 the engine's move to SurrealDB landed on `main`
+  (PR #6), so step 3 now follows the engine's connection and migration code.
+- **Date:** 2026-10-17, updated 2026-10-18
 - **Deadline:** hackathon submission due 2026-10-25, 11:59 PM ET. Where there's a choice, take the simplest option.
   See [Timeline](#timeline).
 - **Area:** `apps/api`. Changes needed in `apps/engine` and `contracts/` are listed separately in
   [Changes outside apps/api](#changes-outside-appsapi) and need their owners' approval.
 - **Built on:** ADRs [0004](../adr/0004-workspaces-and-repo-layout.md), [0005](../adr/0005-hosting-on-render.md),
-  [0006](../adr/0006-identity-and-tenancy.md), [0007](../adr/0007-database.md),
-  [0008](../adr/0008-api-engine-boundary.md), [0009](../adr/0009-pricing-model.md).
+  [0006](../adr/0006-identity-and-tenancy.md), [0008](../adr/0008-api-engine-boundary.md),
+  [0009](../adr/0009-pricing-model.md), [0010](../adr/0010-api-stack.md) and
+  [0011](../adr/0011-surrealdb.md), which replaced [0007](../adr/0007-database.md).
 
 ## Goal
 A signed-in member of an org can start a meeting session and list their org's sessions:
@@ -27,7 +31,7 @@ web --(Clerk session token)--> GET  /v1/sessions  -> this org's sessions only
 Out of this slice: `POST /internal/engine-events` (the next slice), Clerk webhooks and the users and memberships
 mirror, billing and plans, rate limits, the web app.
 
-## Where things stand today (read on 2026-10-17)
+## Where things stand today (read on 2026-10-17, the engine re-read on 2026-10-18)
 - `apps/api` serves `GET /health` on plain `node:http`, with `createServer()` exported for tests. It has no
   dependencies except `@builder/contracts`, and no config, auth or database.
 - `contracts/` already has `StartSessionRequest`, `StartSessionResponse`, `SessionLimits`, `SessionStatus`, the three
@@ -37,12 +41,19 @@ mirror, billing and plans, rate limits, the web app.
   - makes its own `randomUUID()` id. The stage and hand-off routes only match 36-character UUIDs.
   - writes an intent row first, then calls Recall. A Recall rejection gives 502. A network failure gives 504 and
     leaves the intent row for a person to reconcile. It never retries, because a retry can send a second bot.
-  - reuses any active session for the same meeting URL, **across everyone** (`store.findActiveForMeeting`). Once there
-    are orgs, this would hand org A's session to org B.
+  - reuses any active session for the same meeting URL, **across everyone** (`store.findActiveForMeeting`, called at
+    `apps/engine/src/app.ts:132`). Once there are orgs, this would hand org A's session to org B.
   - has no `org_id` or limits on its `sessions` table.
-- `origin/engine/postgres` (commit `77af421`) is a WIP port of the engine's store to Drizzle + PGlite/`pg`. Its own
-  message says the test suite hangs and not to merge it. It puts the engine's tables and its migrations table in the
-  `engine` schema, which leaves the `api` schema free for us.
+- **The engine is on SurrealDB** (ADR 0011, `engine/surrealdb`, merged to `main` on 2026-10-18 as PR #6, from the
+  [engine plan](../superpowers/plans/2026-10-18-surrealdb-render.md)'s Task 1):
+  - Its store is async, in database `engine`, with the schema in `apps/engine/db/0001_init.surql`.
+  - `src/db/connect.ts` and `src/db/migrate.ts` are the pattern the api's step 3 follows.
+  - `npm run migrate -w @builder/engine` migrates a server.
+  - It pins `surrealdb` 2.1.1, `@surrealdb/node` 3.1.0 and `@surrealdb/node-native` 3.3.2.
+  - The root `package.json` has the TypeScript override (O1).
+  - Its routes didn't change, so nothing above is different.
+- The engine plan's Task 2 (`infra/render`: Dockerfiles, `docker-compose.yml`, `render.yaml`, the Cloud setup
+  script and runbook) isn't on GitHub yet.
 
 ## Design
 
@@ -71,33 +82,115 @@ log, clock }`. Tests pass fakes. `server.ts` builds the real ones.
 - No Clerk webhooks in this slice. The `orgs` row is created on the org's first authenticated request (an idempotent
   upsert of the id only, decision D4). The webhook mirror from ADR 0006 comes in a later slice and fills in the rest.
 
-### Data (`src/db/`, Postgres per ADR 0007)
-- Use the same tool as the engine branch: Drizzle ORM, drizzle-kit, `pg` in staging and production, and PGlite in
-  tests and on a laptop. Use the same package versions as `origin/engine/postgres`, so the lockfile has one copy of
-  each.
-- Everything goes in the `api` Postgres schema (`pgSchema("api")`). The migrations table is in `api` too
-  (`migrationsSchema: "api"`), so it never collides with the engine's. Migrations are in `apps/api/drizzle/`. Add
-  `npm run migrate -w @builder/api` for Render's pre-deploy step.
-- Tables in this slice:
-  - `api.orgs`: `id` (the Clerk org id, primary key) and `created_at`.
-  - `api.sessions`: `id` (uuid, made by the api, primary key), `org_id` (references orgs, not null),
-    `created_by` (Clerk user id), `meeting_url`, `status`, `error_code`, `stage_url`, `max_usd`, `max_minutes`,
-    `created_at` and `updated_at`. Index on `(org_id, created_at desc, id)`.
-- `status` holds the contract's `SessionStatus` plus three api-only states: `starting` (row written, engine not yet
-  answered), `start_failed` (the engine said no) and `start_unknown` (no answer, so we don't know whether a bot was
-  sent). The web app shows the last one as "check before retrying". Decision D6.
-- `connect.ts` follows the engine branch's pattern but is a copy, not an import (ADR 0004: the apps share no db
-  code). That pattern is: `DATABASE_URL` → `pg` pool, otherwise PGlite, plus a migrated in-memory template so each
-  test opens a fresh database fast.
-- **Relation to `engine/postgres`.** The two don't depend on each other. Each app has its own schema, migrations,
-  migrations table and connection, and in tests its own PGlite. Neither app reads the other's tables. Two things
-  touch both:
-  1. `package-lock.json`. Whichever branch lands second regenerates the lockfile on top of the first. Matching
-     versions keeps this to a clean regenerate.
-  2. Production roles. ADR 0007 gives each app a role limited to its own schema. That's infra work (D9). Until then,
-     staging can use one role. The schemas still keep the tables apart.
-  This slice doesn't wait for `engine/postgres`. The engine changes it needs (E1–E3 below) can land on SQLite and be
-  ported, or land after the port. The engine owner chooses which.
+### Data (`src/db/`, SurrealDB per ADR 0011)
+ADR 0011 decides SurrealDB on SurrealDB Cloud, namespace `builder` with one database per app, database-level users,
+`.surql` schema files with a small migration runner, and the in-process engine for tests. This section is the api's
+part of that.
+
+- **Packages:** the same three the engine pins, at the same exact versions:
+  - `surrealdb` 2.1.1, the client
+  - `@surrealdb/node` 3.1.0, the in-process engine for tests and laptops
+  - `@surrealdb/node-native` 3.3.2, its native part, listed directly so it's pinned. It reports itself as
+    `surrealdb-3.3.2`, the version SurrealDB Cloud runs (ADR 0011).
+
+  Same versions as the engine means one copy in the lockfile, and the in-process engine matches Cloud. The prebuilt
+  native binaries cover Linux, macOS and Windows on x64 and arm64. They're already in the lockfile for the engine.
+- **TypeScript 7.** `surrealdb` 2.1.1 declares a TypeScript `^5 || ^6` peer, so without the override a plain
+  `npm install` fails with `ERESOLVE`. The root `package.json` on `main` already has the scoped override (O1, done),
+  for `surrealdb` and `@surrealdb/sqon`, so step 3 just adds its dependencies.
+- **A spike on 2026-10-18,** outside the repo, ran on Node 24 with type stripping and passed `tsc` 7 with the repo's
+  `tsconfig.base.json`. It ran on `@surrealdb/node-native` 3.3.4, before the pin moved to 3.3.2. It covered:
+  - the schema below, upserts, UUID record ids and bound parameters
+  - org-scoped list and get. Another org's id returned nothing.
+  - a find-or-create transaction
+  - `DEFINE ... IF NOT EXISTS` run twice
+
+  A fresh in-memory database with the schema took about 3 ms. A duplicate id threw `AlreadyExistsError`.
+- **Where:** database `api` in namespace `builder`. The api signs in as a user defined on that database only
+  (`DEFINE USER api ON DATABASE ... ROLES OWNER`), so it can't read the engine's database.
+  - The user is created once, when the Cloud instance is set up (I-2). App code never creates users.
+  - `PASSWORD` accepts only a literal string. A bound parameter (`PASSWORD $p`) is a parse error, checked on 2026-10-18
+    on both 3.3.4 and 3.3.2. So creating users from code would mean building query text from a secret, and a setup
+    script can't take the password as a parameter either (see I-2).
+- **Tables** (`apps/api/db/0001_init.surql`). Plain `DEFINE`, as in the engine's `0001_init.surql`, because the
+  runner applies each file only once:
+
+  ```surql
+  DEFINE TABLE org SCHEMAFULL;
+  DEFINE FIELD created_at ON org TYPE datetime DEFAULT time::now() READONLY;
+
+  DEFINE TABLE session SCHEMAFULL;
+  DEFINE FIELD org         ON session TYPE record<org>;
+  DEFINE FIELD created_by  ON session TYPE string;          -- Clerk user id
+  DEFINE FIELD meeting_url ON session TYPE string;
+  DEFINE FIELD status      ON session TYPE string
+    ASSERT $value IN ["starting", "start_failed", "start_unknown", "joining", "in_meeting", "ended", "failed"];
+  DEFINE FIELD error_code  ON session TYPE option<string>;
+  DEFINE FIELD stage_url   ON session TYPE option<string>;
+  DEFINE FIELD max_usd     ON session TYPE number;
+  DEFINE FIELD max_minutes ON session TYPE number;
+  DEFINE FIELD created_at  ON session TYPE datetime DEFAULT time::now() READONLY;
+  DEFINE FIELD updated_at  ON session TYPE datetime VALUE time::now();
+  DEFINE INDEX session_org_created ON session FIELDS org, created_at;
+  DEFINE INDEX session_org_meeting ON session FIELDS org, meeting_url;
+  ```
+
+  - An org's record id is the Clerk org id (`org:⟨org_…⟩`).
+  - A session's record id is the api's `randomUUID()`, the same id it sends the engine.
+  - The SDK's `RecordId` builds both, so ids are never pasted into query text.
+- `status` holds the contract's `SessionStatus` plus three api-only states (decision D6):
+  - `starting`: row written, the engine hasn't answered yet
+  - `start_failed`: the engine said no
+  - `start_unknown`: no answer, so we don't know whether a bot was sent. The web app shows this one as "check before
+    retrying".
+
+  The schema's `ASSERT` rejects any other value.
+- **The `Db` functions are the only way in.** Steps 5 and 6 only ever see these, so they don't care which database
+  is underneath:
+  - `upsertOrg(orgId)`
+  - `createSessionUnlessActive(orgId, s)`: reuse (D7) and insert in one transaction
+  - `setSessionStart(orgId, id, result)`
+  - `getSession(orgId, id)`
+  - `listSessions(orgId, limit)`
+  - `close()`
+
+  All of them:
+  - take `orgId` first
+  - put `WHERE org = $org` on every session query, including reads by id
+  - use bound parameters only
+  - return plain objects, with string ids and ISO-string times. Queries convert with `record::id(id)` and
+    `<string> created_at`, so no SDK type (`RecordId`, `DateTime`) gets past `src/db/`.
+
+  Nothing outside `src/db/` imports `surrealdb`.
+- **Files: follow the engine.** Copy the engine's `src/db/connect.ts`, `src/db/migrate.ts` and `src/error-code.ts`
+  into `apps/api` and change the database to `api`. ADR 0004 says not to make a shared package for code that only
+  looks alike. What they do:
+  - `apps/api/db/*.surql`: the schema, applied in name order
+  - `src/db/connect.ts`: namespace `builder`, database `api`, as constants.
+    - **`SURREAL_URL` set:** connect over `ws://` or `wss://`. Sign in with `SURREAL_USER` and `SURREAL_PASS`, as a
+      database user of `builder`/`api` by default, or as root with `SURREAL_AUTH=root` (a local `surreal start` or
+      docker compose only).
+    - **Startup:** a 10 s connect timeout that fails with the code `SURREAL_UNREACHABLE`. After that, a dropped
+      connection is retried for as long as it takes.
+    - **`SURREAL_URL` unset:** the in-process engine, on `surrealkv://` at `SURREAL_PATH` (default `data/surreal`,
+      under `apps/api/`, git-ignored). Tests use `mem://`.
+    - **Write conflicts:** the SDK's `retry` option is on, and each query that's safe to resend is marked `.retry()`.
+      The reuse transaction (`createSessionUnlessActive`) is safe to retry whole: it either commits or changes
+      nothing, and a retry checks for an active session again.
+  - `src/db/migrate.ts`:
+    - It keeps a `migration` table whose record ids are the file names.
+    - It applies each file not yet recorded in one `db.transaction([...])` together with its `migration` row, so a
+      file is applied whole or not at all.
+    - Running it twice does nothing.
+    - In-process databases are migrated when they're opened.
+    - A server is migrated by `npm run migrate -w @builder/api` (the file runs itself through `import.meta.main`),
+      which is the api's pre-deploy command (I-1).
+  - `src/error-code.ts`: reads a code from an error or its `cause`, never the message. Database errors are logged by
+    code only, because a message can echo query values.
+  - `src/db/sessions.ts`, `src/db/orgs.ts`, `src/db/types.ts`
+- **Relation to the engine.** The api doesn't use the engine's database, and the engine doesn't use the api's. Each
+  has its own database, user, schema files and migration table in the same Cloud instance. The engine's E4 (org and
+  limits on its sessions) is a new migration file in the engine's `db/` folder and doesn't touch the api's.
 
 ### Calling the engine (`src/engine/`)
 - `createEngineClient({ baseUrl, token, fetch, timeoutMs })` returns `startSession(req: StartSessionRequest)`. It
@@ -147,10 +240,28 @@ They move to `contracts/` when `apps/web` starts importing them (ADR 0004: share
 Decision D2.
 
 ### Config (`src/config.ts`)
-`PORT`, `DATABASE_URL` (optional, PGlite otherwise), `PGLITE_DIR` (default `data/pg`, already git-ignored by
-`data/`), `CLERK_JWT_KEY`, `CLERK_AUTHORIZED_PARTIES` (comma-separated origins), `ENGINE_INTERNAL_URL`,
-`ENGINE_INTERNAL_TOKEN`, `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES`. Add `apps/api/.env.example` with names only.
-`apps/api/.env` is already git-ignored by the root `.env` rule. Config never logs values.
+Built in step 1:
+- `PORT`
+- `CLERK_JWT_KEY`, `CLERK_AUTHORIZED_PARTIES` (comma-separated origins)
+- `ENGINE_INTERNAL_URL`, `ENGINE_INTERNAL_TOKEN`
+- `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES`
+
+Step 3 adds the database variables. They're the engine's five, with the same names and rules (its
+`surrealSettings()` in `apps/engine/src/config.ts`):
+- `SURREAL_URL`: a `ws://` or `wss://` URL; the SurrealDB Cloud URL in production.
+- `SURREAL_USER`, `SURREAL_PASS`: the api's database user. Required together whenever `SURREAL_URL` is set.
+- `SURREAL_AUTH`: `database` (the default) or `root`. Anything else is a config error.
+- `SURREAL_PATH`: the local folder when `SURREAL_URL` is unset. Default `data/surreal` (under `apps/api/data/`,
+  already git-ignored).
+
+The namespace and database are constants in `connect.ts`, not settings, as in the engine.
+
+One rule is stricter than the engine's: `SURREAL_URL` is required when `NODE_ENV=production`. Without it, production
+would silently write to a local folder that disappears on the next deploy. The Blueprint sets `NODE_ENV=production`
+on the api (I-1). The engine has the same gap, which is worth raising with its owner.
+
+`apps/api/.env.example` lists names only. `apps/api/.env` is git-ignored by the root `.env` rule. Config never logs
+values.
 
 ## Testing without real Clerk, Recall or models
 - **Clerk:** each test run makes an RSA key pair with `node:crypto`, signs session tokens with it (claims `sub`,
@@ -163,8 +274,12 @@ Decision D2.
   with `StartSessionRequest` from `@builder/contracts`, records what it got, and answers with something built from
   `StartSessionResponse`. Each test can script it to answer 4xx, 5xx, hang until the timeout, or send a malformed
   body. Because both sides use the contract schemas, a contract change that breaks the api fails these tests.
-- **Postgres:** PGlite in memory, one fresh database per test from a migrated template. CI needs no secrets and no
-  database service. Later, add a CI job against a real Postgres (ADR 0007), together with infra.
+- **SurrealDB:** the embedded in-memory engine (`mem://` from `@surrealdb/node`), running inside the test process.
+  `test/helpers/db.ts` opens one instance per test file. Each test gets a fresh, randomly named database with the
+  migrations applied, which took about 3 ms in the spike. There's no server and no network, and CI needs no secrets
+  and no database service. Close every database a test opens, so the suite exits on its own, as the engine's
+  `test/helpers/store.ts` does. The engine plan's Task 2 adds a CI job against the real `surrealdb/surrealdb:v3.3.2`
+  image. Add the api's db tests and `npm run migrate -w @builder/api` to it.
 - **Tenant isolation (ADR 0006):** two orgs, each with sessions. Check that list and get never return the other org's
   rows, that an `orgId` in the request body or query is ignored, and that `GET /v1/sessions/:id` for another org's id
   gives 404.
@@ -176,11 +291,11 @@ None of them needs the engine side to exist.
 
 | # | Branch | What | Tests | Safe alone because |
 |---|---|---|---|---|
-| 0 | `api/adr-stack` | ADR 0010: the api stack. `node:http` + small router, `@clerk/backend` with `jwtKey`, Drizzle + PGlite/`pg` in schema `api`, uuid ids, error shape, no auto-retry to the engine. Settles D1–D2 and D5–D8 | none (docs) | docs only |
-| 1 | `api/config-router` | `src/config.ts`, `.env.example`, router and JSON/error helpers, `createServer(deps)`. `/health` unchanged | config parsing (missing and bad values, no values in errors); router 404/405; error shape | no new routes |
-| 2 | `api/clerk-auth` | `src/auth/`: `verifyRequest`, `requireOrg`, `requireOrgRole`. Adds `@clerk/backend`. Adds `GET /v1/me` → `{ userId, orgId, role }` so auth is used and testable (D10) | the Clerk cases above | read-only route, no data |
-| 3 | `api/db` | `src/db/`: schema, first migration, `connect.ts`, `migrate.ts`, org upsert, session functions that all take `orgId`. Adds `drizzle-orm`, `pg`, `@electric-sql/pglite`, `drizzle-kit` | migration applies to an empty PGlite; functions; isolation at the db level | not wired to routes yet |
-| 4 | `api/engine-client` | `src/engine/client.ts` and the fake engine helper | ok, 4xx, 5xx, timeout, malformed reply, bearer sent, request parsed before sending | not called by any route yet |
+| 0 | `api/adr-stack` | ADR 0010: the api stack. `node:http` + small router, `@clerk/backend` with `jwtKey`, uuid ids, error shape, no auto-retry to the engine. Settles D1–D2 and D5–D8. (Its data bullet is superseded by ADR 0011) | none (docs) | docs only. **Merged** |
+| 1 | `api/config-router` | `src/config.ts`, `.env.example`, router and JSON/error helpers, `createServer(deps)`. `/health` unchanged | config parsing (missing and bad values, no values in errors); router 404/405; error shape | no new routes. **Merged** |
+| 2 | `api/clerk-auth` | `src/auth/`: `verifyRequest`, `requireOrg`, `requireOrgRole`. Adds `@clerk/backend`. Adds `GET /v1/me` → `{ userId, orgId, role }` so auth is used and testable (D10) | the Clerk cases above | read-only route, no data. **Merged** |
+| 3 | `api/db` | Per ADR 0011, following the engine's code: `apps/api/db/0001_init.surql`; in `src/db/`: `connect.ts` and `migrate.ts` (from the engine's), `orgs.ts`, `sessions.ts`, the `Db` type; `src/error-code.ts`. The five `SURREAL_*` variables in `config.ts` and `.env.example`. A `migrate` script in `apps/api/package.json`. Adds `surrealdb` 2.1.1, `@surrealdb/node` 3.1.0 and `@surrealdb/node-native` 3.3.2, pinned as in the engine. O1 is already on `main` | on embedded `mem://`: migration applies to an empty db and is safe to re-run; a failing file leaves no row; each function; unknown status rejected; duplicate id; reuse in one transaction; list and get never cross orgs; config rules for the new variables | not wired to routes yet |
+| 4 | `api/engine-client` | `src/engine/client.ts` and the fake engine helper | ok, 4xx, 5xx, timeout, malformed reply, bearer sent, request parsed before sending | not called by any route yet. **Merged** |
 | 5 | `api/sessions-read` | `GET /v1/sessions` and `GET /v1/sessions/:id` | newest first, capped at 50; isolation; 401 and 403 | read-only |
 | 6 | `api/sessions-create` | `POST /v1/sessions` | each engine outcome → row status and HTTP code; intent row exists before the engine call; reuse of an active session; validation; 503 with no engine config; body `orgId` ignored | answers 503 until the engine URL and token are set |
 
@@ -191,21 +306,25 @@ id, usage stored as the latest cumulative value). Then the Clerk webhook mirror 
 check). Then billing.
 
 ## Changes outside apps/api
-These need approval before anyone builds them. Nothing in steps 0–6 waits on them. Until they land, the api is only
-ever tested against the fake engine.
+These need approval before anyone builds them. None of them blocks a step: O1, the only one that did, is on `main`.
+Until the rest land, the api is only ever tested against the fake engine.
 
-**Engine (engine owner):**
-- **E1.** `POST /internal/sessions`, as ADR 0008 describes. It requires the bearer token (`ENGINE_INTERNAL_TOKEN`,
+**Engine (engine owner; E1 built by the api owner):**
+- **E1.** `POST /internal/sessions`, as ADR 0008 describes. **The engine owner asked the api owner to build it
+  (2026-10-18).** It's still engine code, so it goes on its own `engine/` branch with the engine owner's review
+  (AGENTS.md). Not started; the route doesn't exist on `main` yet. It requires the bearer token (`ENGINE_INTERNAL_TOKEN`,
   compared in constant time, as `tokenMatches` already does). It refuses requests with proxy headers, using the
   existing `viaProxy`. It parses the body with `StartSessionRequest`, uses the api's `sessionId` instead of making
   its own, stores `orgId` and `limits`, and answers with `StartSessionResponse`.
 - **E2.** Make E1 idempotent on `sessionId`. A second call with the same id returns the first result and doesn't send
   a second bot. That makes a retry from the api safe.
-- **E3.** Scope "reuse the active session for this meeting" to the org (`findActiveForMeeting(orgId, url)`). Without
-  this, one org could get another org's session and stage URL. **This is a security fix and is needed before E1 goes
-  live.**
-- **E4.** Add `org_id`, `max_usd` and `max_minutes` columns to the engine's `sessions` table, on SQLite now or in the
-  Drizzle schema on `engine/postgres`. The engine owner chooses the order.
+- **E3.** Scope "reuse the active session for this meeting" to the org (`findActiveForMeeting(orgId, url)`, today at
+  `apps/engine/src/store.ts:136`). Without this, one org could get another org's session and stage URL. **This is a
+  security fix and is needed before E1 goes live.**
+- **E4.** Add `org_id`, `max_usd` and `max_minutes` to the engine's sessions. The engine is on SurrealDB now, so this
+  is a new migration file, `apps/engine/db/0002_session_org_limits.surql`. Its `DEFINE FIELD`s are `option<...>` so
+  existing rows stay valid, and it adds an index on `org_id, meeting_url` for E3. `store.ts` then writes and reads
+  the fields. E1 needs E4, so they can land together.
 - Later, not needed for this slice: enforce the limits, send `/internal/engine-events`, the org-deletion route, and
   turning off `/` and `/api/*` in production (all from ADR 0008).
 
@@ -218,10 +337,52 @@ ever tested against the fake engine.
   always send `randomUUID()`. Alternatively, tighten it to `z.uuid()` now while nothing sends it yet. Decision D11.
 - **C3 (later).** Move `CreateSessionBody`, `SessionView` and `SessionList` here when `apps/web` imports them.
 
-**Infra (infra owner):**
-- **I-1.** An `api` service in `render.yaml` (pre-deploy: `npm run migrate -w @builder/api`), an environment group
-  for the Clerk key and the engine token (`sync: false`), and the shared `ENGINE_INTERNAL_TOKEN` in both services.
-- **I-2.** Two Postgres roles, each with rights only on its own schema (ADR 0007).
+**Repo root (repo owner):**
+- **O1. Done.** The root `package.json` overrides the TypeScript peer of `surrealdb` and `@surrealdb/sqon` with
+  `"$typescript"`. It landed with the engine's move to SurrealDB (PR #6). `surrealdb` 2.1.1 declares a TypeScript
+  `^5 || ^6` peer, and the override is the smallest fix; `--legacy-peer-deps` would loosen peer checks for every
+  package. Remove it when `surrealdb` accepts TypeScript 7.
+
+**Infra (infra owner, in the engine plan's Task 2):**
+- **I-1.** The api service in `render.yaml`. The engine plan's Task 2 (`infra/render`, not on GitHub yet) covers most
+  of it:
+  - `builder-api`, a Docker web service with health check `/health`
+  - `ENGINE_INTERNAL_URL` from the engine's private address
+  - an environment group with `ENGINE_INTERNAL_TOKEN`, shared with the engine
+  - the Clerk variables as secrets (`sync: false`)
+  - an `api` service in `docker-compose.yml` on port 3001
+
+  Missing from it, and needed for the api:
+  - the pre-deploy command `npm run migrate -w @builder/api`. Task 2 gives one to the engine only.
+  - the api's own `SURREAL_URL`, `SURREAL_USER` and `SURREAL_PASS` as secrets, `SURREAL_AUTH=database`
+  - `NODE_ENV=production`
+- **I-2.** The SurrealDB Cloud instance (ADR 0011). Task 2's setup script `infra/surrealdb/setup.surql` already
+  defines database `api` and its user (`api`, role `OWNER` on that database only), and the runbook stores the
+  credentials as Render secrets.
+  - **One problem:** the script plans to take the passwords as parameters (`$api_pass`), and SurrealDB 3.3.2 rejects
+    `DEFINE USER ... PASSWORD $p` with a parse error (tested 2026-10-18). The password must be a literal. So the
+    script needs another way in: run in Surrealist with the password typed in, or have compose fill a template.
+
+## Effects on the rest of the project
+What ADR 0011 means for the api's neighbours, and where the api's work meets the engine plan
+([2026-10-18-surrealdb-render.md](../superpowers/plans/2026-10-18-surrealdb-render.md)). Nothing here is done by
+this plan's steps.
+
+- **The engine** is on SurrealDB (engine plan, Task 1, on `main` since PR #6). It uses database `engine` with its own
+  user, so the two apps never share tables. Its `connect.ts` and `migrate.ts` are the model for the api's (step 3).
+- **The Postgres work** (`engine/postgres`, and the archive branches the engine plan reuses) is the
+  engine owner's. The api never depended on it.
+- **`render.yaml`, `docker-compose.yml` and the Cloud setup script** are written in the engine plan's Task 2
+  (`infra/render`), with no database on Render. They already plan an api service and the api's database and user.
+  I-1 and I-2 list what the api still needs from them.
+- **Root `package.json` and the lockfile:**
+  - The `surrealdb` override (O1) is on `main` and serves both apps.
+  - Pin the same `surrealdb`, `@surrealdb/node` and `@surrealdb/node-native` versions in both apps, so the lockfile
+    has one copy and both apps match the Cloud server's version (ADR 0011). Step 3 regenerates the lockfile with
+    `npm install`.
+- **`docs/security/`.** ADR 0011 puts customer data on SurrealDB Cloud. ADR 0007's follow-up (a retention period for
+  session data) still applies.
+- **`contracts/`:** no change.
 
 ## Decisions
 
@@ -237,18 +398,27 @@ ever tested against the fake engine.
 - **D8.** `GET` and `POST` return the stage URL to members of the owning org. It's never logged.
 - **D10.** `GET /v1/me` ships with auth in step 2.
 
+**Answered by the repo owner in [ADR 0011](../adr/0011-surrealdb.md) (2026-10-18):**
+- ~~Postgres or SQLite for the hackathon.~~ Neither: SurrealDB.
+- **D15. The engine's database:** SurrealDB too, database `engine`. Landed on `main` (PR #6).
+- **D16. Where it runs:** SurrealDB Cloud, one instance, created by the engine plan's runbook. The free instance at
+  launch.
+- **D17. The TypeScript peer conflict:** a scoped `overrides` entry in the root `package.json`, not
+  `legacy-peer-deps` (O1). On `main`.
+
 **Still open:**
 - **D5 (repo owner).** Default per-session limits until billing exists: values for `DEFAULT_MAX_USD` and
   `DEFAULT_MAX_MINUTES`.
-- **Postgres or SQLite for the hackathon (repo owner).** ADR 0007 says Postgres for both apps, but
-  `engine/postgres` isn't finished. If we stay on SQLite until after the submission, step 3 uses `node:sqlite` (no
-  new dependencies) behind the same db functions, and moves to Postgres afterwards. See [Timeline](#timeline).
+- **D18 (repo owner, engine owner).** Memory across meetings for the prize: whether to build it before 2026-10-25,
+  and with SurrealDB Agent Memory or our own tables. See
+  [Later: memory across meetings](#later-memory-across-meetings-surrealdb).
 - The Clerk instance: which Clerk application and environment to use for staging, and who holds `CLERK_JWT_KEY`.
   Tests don't need it.
 
 **From the engine owner (with you where noted):**
 - **D11.** C2: document the uuid rule only, or tighten `sessionId` to `z.uuid()` now. Both owners.
-- **D12.** Approve E1–E4, and choose whether E4 lands on SQLite now or after `engine/postgres`.
+- **D12.** Approve E2–E4 and review E1. The engine owner asked the api owner to build E1 (2026-10-18). The question of
+  whether E4 lands before or after `engine/surrealdb` no longer applies, since that branch has landed.
 - **D13.** C1's error codes, and which HTTP statuses the engine uses for "Recall rejected" versus "outcome unknown".
   Both owners.
 - **D14.** The engine's timeout budget for `/internal/sessions`. Recall's create-bot call is a few seconds. The api's
@@ -258,14 +428,71 @@ ever tested against the fake engine.
 The submission is due 2026-10-25, 11:59 PM ET, eight days from this plan. Steps 0, 1, 2, 4 and 5 are small, about
 half a day to a day each. Two parts are at risk:
 
-- **Step 3 (database) is the biggest step.** Drizzle, PGlite, `pg` and migrations are four new dependencies and a
-  setup the engine's own attempt (`engine/postgres`) hasn't finished yet. The simplest choice for the hackathon is
-  `node:sqlite` in the api, which the engine already uses and which needs no new dependency. It goes behind the same
-  `orgId`-first db functions, so moving to Postgres afterwards changes only `src/db/`. This needs the repo owner's
-  answer (see Decisions, still open).
+- **Step 3 (database), now on SurrealDB, is about a day.** It's two packages instead of Postgres's four. A spike on
+  2026-10-18 showed everything step 3 needs working on the embedded engine, on Node 24 and TypeScript 7:
+  - the schema, upserts, org-scoped reads and a transaction for reuse
+  - a fresh test database in about 3 ms
+
+  The risk is a new query language. It's smaller now: the engine's connection and migration code is on `main` to
+  copy, and the TypeScript override (O1) is already there. Steps 5 and 6 only see the `Db` functions, so they aren't
+  affected.
+- **A demo needs the Cloud instance** with database `api` and its user (I-2). It takes minutes to set up, as part of
+  the engine plan's runbook. Have it by about 2026-10-22, together with the engine items below.
 - **A real end-to-end meeting depends on work outside the api:** E1–E4 in the engine, C1 in contracts, and the
   infra items for a deploy. The api can be finished and tested against the fake engine without them. But a demo where
   the web app starts a real bot needs E1 and E3 by about 2026-10-22 to leave time to test with real meetings.
+  E1 is now the api owner's to build (with E4, which it needs), on top of steps 3, 5 and 6.
 
 If time runs short, the order to cut is: `GET /v1/sessions/:id`, then session reuse (D7), then `GET /v1/me`. Auth,
 create and list stay.
+
+## Later: memory across meetings (SurrealDB)
+Not in this slice and not scheduled. There's a hackathon prize for agent memory, so this is a sketch of how Builder
+could remember things from one meeting to the next. It needs the repo owner's go-ahead, and it's mostly engine work.
+ADR 0011 already places memory in the same SurrealDB Cloud instance, in a design of its own later.
+
+**What's worth remembering.** Each session already ends with a decision document (spec §11):
+- `decisions[]`, which records who proposed and who agreed
+- `open_questions[]`
+- the prototype's component tree
+- rejected options
+
+Remembering these per org lets the next meeting start with "last time you agreed X, and Y was still open", and lets
+the build loop reuse components the org already approved.
+
+**Two ways to build it:**
+1. **SurrealDB Agent Memory**, SurrealDB's hosted memory layer.
+   - `remember` stores text with scopes. `recall` returns the top hits for a query within a "lens" of scopes. Behind
+     it are a knowledge graph, hybrid search, and facts that record where they came from and when they held.
+   - The TypeScript client is `@surrealdb/memory`. It's still an alpha (1.0.0-alpha.11 on 2026-10-18) and has no
+     runtime dependencies.
+   - It runs only on SurrealDB Cloud, reached with an endpoint and an `sp-…` API key. The docs say there's no
+     in-process version, so tests would need a fake of its HTTP API, like our fake engine.
+   - Least code, and the most direct fit for the prize.
+2. **Our own memory tables in SurrealDB**, in the engine's database.
+   - Store each agreed decision with an embedding.
+   - Use an `HNSW` vector index, a `FULLTEXT ... BM25` index, and `search::rrf()` to combine the two.
+   - Use `RELATE` edges such as decision → affects → component.
+   - It runs on the embedded engine in tests and needs no alpha package. It's more code, and we choose the embedding
+     model ourselves.
+
+**Rules either way:**
+- **Scoped to one org, always.** Every write and every recall carries `org/<orgId>` from the engine's session, never
+  from the model. Test that one org's recall never returns another org's memory. This is the same rule as E3.
+- **Memory is context, not agreement.** A recalled decision is shown as "from an earlier meeting". It's never marked
+  agreed in the current meeting. Agreement still has to come from what people say in this meeting (spec §4, "the
+  agent invents agreement").
+- **Only agreed decisions and open questions are stored**, not raw transcript text. Logs record ids and counts only
+  (AGENTS.md).
+- **Orgs can turn it off, and deleting an org deletes its memory** (ADR 0006, ADR 0008). With option 1, meeting
+  content goes to SurrealDB Cloud, so `docs/security/` has to say so.
+- **The engine owns memory.** ADR 0008 keeps transcripts and decision documents out of the api. The api would only
+  hold the org's on/off setting and ask the engine to delete memory when an org is deleted.
+
+**A small version for the demo**, if the owner wants a shot at the prize:
+1. When a session ends, the engine writes its agreed decisions and open questions to memory, scoped to the org.
+2. When the next session in that org starts, it recalls the top few for the meeting's first topic.
+3. The conversation model gets them as "from earlier meetings". The stage can show one line for it.
+
+This needs E1 and E3 first. Building it is D18 (repo owner): option 1 or option 2, and whether it's worth doing
+before 2026-10-25.
