@@ -30,12 +30,12 @@ export function costOf(model: string, usage: Usage): number {
 }
 
 // Wraps a port so every call lands in model_calls for the session.
-export function withCostRecording(port: ModelPort, ctx: { store: Store; sessionId: string }): ModelPort {
+export function withCostRecording(port: ModelPort, ctx: { store: Pick<Store, "addModelCall">; sessionId: string }): ModelPort {
   return {
     async runTools(req) {
       const result = await port.runTools(req);
       const model = MODELS[req.loop];
-      ctx.store.addModelCall({
+      await ctx.store.addModelCall({
         sessionId: ctx.sessionId, loop: req.loop, model,
         inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
         cacheReadTokens: result.usage.cacheReadTokens, cacheWriteTokens: result.usage.cacheWriteTokens,
