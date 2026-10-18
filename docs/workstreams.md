@@ -24,12 +24,17 @@ put your name in the Owner column and open a small PR. One owner per area. Anyon
 Settle these first, as ADRs in `docs/adr/`:
 
 1. Repo tooling: workspaces, package manager, lint and format. This blocks every new package. CI and type checking
-   are proposed in [ADR 0001](adr/0001-ci-and-type-checking.md); workspaces and lint/format are still open.
-2. Hosting platform and environments. This blocks staging, live tests and webhooks.
-3. Identity provider and tenancy model. This blocks the API, the apps and billing.
-4. Database engine. This blocks the API, billing and the worker.
-5. The boundary between the API and the meeting engine. This blocks the API and the engine's move.
-6. Pricing model. This blocks billing.
+   are proposed in [ADR 0001](adr/0001-ci-and-type-checking.md); workspaces, layout and lint in
+   [ADR 0004](adr/0004-workspaces-and-repo-layout.md).
+2. Hosting platform and environments. This blocks staging, live tests and webhooks. Proposed in
+   [ADR 0005](adr/0005-hosting-on-render.md) (Render).
+3. Identity provider and tenancy model. This blocks the API, the apps and billing. Proposed in
+   [ADR 0006](adr/0006-identity-and-tenancy.md) (Clerk, org as tenant).
+4. Database engine. This blocks the API, billing and the worker. Proposed in [ADR 0007](adr/0007-database.md)
+   (Render Postgres for both apps, one schema each).
+5. The boundary between the API and the meeting engine. This blocks the API and the engine's move. Proposed in
+   [ADR 0008](adr/0008-api-engine-boundary.md).
+6. Pricing model. This blocks billing. Proposed in [ADR 0009](adr/0009-pricing-model.md) (per meeting hour).
 
 ## Before any shared deployment
 
@@ -41,6 +46,5 @@ stand between v0 and a deployment other people can reach:
    including sending bots, which costs money. This needs `services/auth`, or an interim operator token decided in an
    ADR.
 2. **The engine runs as one process.** Session state is held in memory and storage is SQLite, so run a single
-   instance with a persistent disk until the scaling ADR in `services/meeting-engine/` is settled.
-3. **There's no stable public URL.** Recall needs one for webhooks and the stage (decision 2 above).
+   instance with a persistent disk until the scaling ADR in `services/meeting-engine/` is settled. Proposed in [ADR 0005](adr/0005-hosting-on-render.md).3. **There's no stable public URL.** Recall needs one for webhooks and the stage (decision 2 above).
 4. **Nothing caps spend.** No per-session or per-org cost cap exists yet (`services/billing/`).
