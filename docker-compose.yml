@@ -1,0 +1,138 @@
+# The whole stack on a laptop, from the same images Render runs (ADR 0005): SurrealDB, its one-shot setup, the
+# engine and the api. See "Run the stack with Docker" in README.md.
+#
+#   docker compose up --build    engine on http://localhost:3000 (local mode), api on http://localhost:3001
+#   docker compose down -v       stop, and delete the database volumes
+#
+# For development only. The passwords and the token below are public defaults: never use them anywhere else. To
+# change one, set the variable in your shell or in a root .env file (git ignores it).
+name: builder-local
+
+x-dev-secrets:
+  root-user: &root-user ${SURREAL_ROOT_USER:-root}
+  root-pass: &root-pass ${SURREAL_ROOT_PASS:-dev-only-root-password}
+  engine-pass: &engine-pass ${ENGINE_DB_PASS:-dev-only-engine-password-not-secret}
+  api-pass: &api-pass ${API_DB_PASS:-dev-only-api-password-not-a-secret}
+  internal-token: &internal-token ${ENGINE_INTERNAL_TOKEN:-dev-only-internal-token-not-a-secret}
+
+services:
+  surrealdb:
+    # The version SurrealDB Cloud runs (ADR 0011). Never latest.
+    image: surrealdb/surrealdb:v3.3.2
+    # The image's own user can't write to a new named volume (SurrealDB's Docker docs).
+    user: root
+    command: ["start", "surrealkv:///data/builder"]
+    environment:
+      # The server's first root user, read from its environment.
+      SURREAL_USER: *root-user
+      SURREAL_PASS: *root-pass
+    volumes:
+      - surrealdb-data:/data
+    ports:
+      - "127.0.0.1:${SURREAL_PORT:-8000}:8000"
+    healthcheck:
+      # The image has no shell, so the check is its own binary, as in the image's default health check.
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # Runs infra/surrealdb/setup.surql once SurrealDB is healthy: namespace builder, databases engine and api, and a
+  # database user for each app. Safe to run again, so it runs on every `up`.
+  surrealdb-setup:
+    image: curlimages/curl:8.23.0
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/setup/setup.sh"]
+    environment:
+      SURREAL_HTTP: http://surrealdb:8000
+      SURREAL_ROOT_USER: *root-user
+      SURREAL_ROOT_PASS: *root-pass
+      ENGINE_DB_PASS: *engine-pass
+      API_DB_PASS: *api-pass
+    volumes:
+      - ./infra/surrealdb:/setup:ro
+    restart: "no"
+
+  engine:
+    build:
+      context: .
+      dockerfile: apps/engine/Dockerfile
+    depends_on:
+      surrealdb-setup:
+        condition: service_completed_successfully
+    # Optional. Your Recall and OpenRouter settings for a real run (ENGINE_MODE=start). The SurrealDB settings and the
+    # internal token below always win over it.
+    env_file:
+      - path: apps/engine/.env
+        required: false
+    environment:
+      PORT: "3000"
+      SURREAL_URL: ws://surrealdb:8000
+      SURREAL_AUTH: database
+      SURREAL_USER: engine
+      SURREAL_PASS: *engine-pass
+      ENGINE_INTERNAL_TOKEN: *internal-token
+      # local (default): `npm run local`, no Recall, and sessions in the engine's own in-process database, as local
+      # mode always does (ADR 0003). start: `npm start`, a real run with apps/engine/.env, on this SurrealDB.
+      ENGINE_MODE: ${ENGINE_MODE:-local}
+    # Migrations first, as Render's pre-deploy command does, then the server. exec, so the server gets SIGTERM.
+    command:
+      - sh
+      - -c
+      - >-
+        npm run -s migrate &&
+        case "$$ENGINE_MODE" in
+        local) exec node src/server.ts --local ;;
+        start) exec node src/server.ts ;;
+        *) echo "ENGINE_MODE must be local or start" >&2; exit 2 ;;
+        esac
+    volumes:
+      # Local mode's in-process database, kept across restarts.
+      - engine-data:/app/apps/engine/data
+    ports:
+      - "127.0.0.1:${ENGINE_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      surrealdb-setup:
+        condition: service_completed_successfully
+      engine:
+        condition: service_healthy
+    # Optional. Clerk settings and session limits, for trying the /v1 routes. The settings below always win over it.
+    env_file:
+      - path: apps/api/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      SURREAL_URL: ws://surrealdb:8000
+      SURREAL_AUTH: database
+      SURREAL_USER: api
+      SURREAL_PASS: *api-pass
+      ENGINE_INTERNAL_URL: http://engine:3000
+      ENGINE_INTERNAL_TOKEN: *internal-token
+    command: ["sh", "-c", "npm run -s migrate && exec node src/server.ts"]
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  surrealdb-data:
+  engine-data:

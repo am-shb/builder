@@ -87,7 +87,7 @@ have an older `.env` or `data/` at the repo root, move them into `apps/engine/` 
 | `RECALL_REGION` | yes | Recall region, e.g. `us-west-2`. The API key and secret must be from the same region. |
 | `RECALL_API_KEY` | yes | Recall REST API key. |
 | `RECALL_WEBHOOK_VERIFICATION_SECRET` | yes | Workspace verification secret (`whsec_...`) that signs realtime webhooks. |
-| `PUBLIC_API_BASE_URL` | yes | Public HTTPS origin that routes to this server (the tunnel URL). No trailing slash. |
+| `PUBLIC_API_BASE_URL` | yes | Public HTTPS origin that routes to this server (the tunnel URL). No trailing slash. On Render it can stay unset: the engine uses `RENDER_EXTERNAL_URL`, which Render sets. |
 | `OPENROUTER_API_KEY` | no | One key for every model call (conversation, build, TTS). Unset means listen-only: transcript only, no agent. |
 | `TTS_VOICE` | no | ElevenLabs voice for Builder. Unset means Builder's lines go to meeting chat. One of: george, sarah, adam, alice, bella, bill, brian, callum, charlie, chris, daniel, eric, harry, jessica, laura, liam, lily, matilda, river, roger, will. |
 | `BOT_VARIANT` | no | `web_4_core` (default), `web_gpu`, or `web` for Recall's plain web bot. Larger variants cost more per hour. |
@@ -142,6 +142,27 @@ which must match the target server. Open the stage in Chrome to watch.
 `--live-models` means the target server's real models answer, which costs real money. Without it, the
 fixture's `fakeModel` scripts are what `apps/engine/test/e2e-replay.test.ts` feeds the app (through
 `createRoutedFakePort`, with a virtual clock so the 30 s and 25 s waits cost nothing).
+
+### Run the stack with Docker
+
+`docker compose up --build` runs SurrealDB, the engine and the api in containers, from the same images Render runs
+([ADR 0005](docs/adr/0005-hosting-on-render.md)). It needs Docker with Compose 2.24 or newer, and works on a fresh
+clone with no `.env` file.
+
+- `surrealdb`: SurrealDB 3.3.2, the version SurrealDB Cloud runs, on `localhost:8000`. Its data is in a Docker volume.
+- `surrealdb-setup`: runs `infra/surrealdb/setup.surql` once SurrealDB is up, then exits. It creates the namespace
+  `builder`, the databases `engine` and `api`, and a database user for each app.
+- `engine`: on http://localhost:3000. It runs its migrations, then starts in local mode (no Recall). Local mode keeps
+  its sessions in its own in-process database, as `npm run local` does.
+- `api`: on http://localhost:3001. It runs its migrations, then starts. It reaches the engine's `/internal/*` routes
+  with a shared dev token.
+
+The passwords and the token in `docker-compose.yml` are public dev defaults. Never use them anywhere else.
+
+For a real run, put your Recall and OpenRouter settings in `apps/engine/.env` and start with
+`ENGINE_MODE=start docker compose up`. The engine then stores sessions in the compose SurrealDB. Compose always uses
+its own SurrealDB and token, whatever the `.env` files say. Put Clerk settings and session limits in `apps/api/.env`
+to try the api's `/v1` routes. To start over, `docker compose down -v` deletes the volumes.
 
 ## Measured live results (2026-10-17)
 
