@@ -17,7 +17,7 @@ Google Meet ──(Recall.ai bot)──► realtime transcript webhooks ──�
 Models and TTS go through OpenRouter. Everything runs in one process.
 
 ## Production target (to fill in)
-- [ ] A diagram of the services: api, auth, billing, worker, notifications, meeting-engine, apps
+- [ ] A diagram of the apps: engine, api and web, and the contracts between them
 - [ ] Where state lives, and how a meeting session is routed to the process that runs it
 - [ ] Trust boundaries: what the bot, the stage, users and staff can each reach
 

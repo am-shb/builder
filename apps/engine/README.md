@@ -1,9 +1,10 @@
-# services/meeting-engine: the Builder core (v0)
+# apps/engine: the Builder core (v0)
 
 **Status:** working v0. **Owner:** TBD. Claim it in [docs/workstreams.md](../../docs/workstreams.md).
 
 ## Where the code is today
-The v0 engine hasn't moved here yet. It lives at the repo root:
+The v0 engine hasn't moved here yet. It lives at the repo root, and moves here in the next PR (one PR that only moves
+files and fixes paths, per [ADR 0004](../../docs/adr/0004-workspaces-and-repo-layout.md)):
 
 | Path | What it does |
 |---|---|
@@ -27,12 +28,14 @@ agreement-correctness items I2 and I3, and the minor and visual items were fixed
 ruling, a move of an agreed node, and the live checks.
 
 ## Open decisions
-- When and how to move `src/` and `public/` here. Do it in one PR that only moves files and fixes imports.
-- Scaling. Session state lives in memory and storage is SQLite, so each session is tied to one process. Choose between
-  sticky routing and shared state before running more than one instance.
-- Whether usage events reach billing directly or through the worker
+- Scaling. Session state lives in memory and storage is SQLite, so each session is tied to one process. This is
+  tracked by [ADR 0005](../../docs/adr/0005-hosting-on-render.md) (hosting) and
+  [ADR 0007](../../docs/adr/0007-database.md) (database).
+- Usage events reach billing through the api, not a worker. Settled in
+  [ADR 0008](../../docs/adr/0008-api-engine-boundary.md).
 
 ## First tasks
 - [x] Fix known issues I1, I5, I6 and I7
 - [x] Fix I2 and I3 together (agreement correctness)
-- [ ] An ADR on scaling and state
+- [ ] Move `src/`, `public/`, `test/` and `scripts/` here
+- [ ] Accept `orgId` and `limits`, stop at the limits, and send events to the api (ADR 0008)

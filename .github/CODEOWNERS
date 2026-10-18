@@ -1,16 +1,13 @@
 # Owners for each area. Replace each commented line with a real owner once someone claims the area in
 # docs/workstreams.md. Format: <path> @github-user
-# /src/                       @owner-meeting-engine
-# /public/                    @owner-meeting-engine
-# /services/meeting-engine/   @owner-meeting-engine
-# /services/api/              @owner-api
-# /services/auth/             @owner-auth
-# /services/billing/          @owner-billing
-# /services/worker/           @owner-worker
-# /services/notifications/    @owner-notifications
+# /src/                       @owner-engine
+# /public/                    @owner-engine
+# /apps/engine/               @owner-engine
+# /apps/api/                  @owner-api
 # /apps/web/                  @owner-web
-# /apps/admin/                @owner-admin
-# /packages/shared/           @owner-shared
-# /db/                        @owner-db
-# /infra/                     @owner-infra
+# /contracts/                 @owner-engine @owner-api
+# /render.yaml                @owner-infra
+# /.github/                   @owner-infra
+# /e2e/                       @owner-infra
+# /docs/runbooks/             @owner-infra
 # /docs/security/             @owner-security

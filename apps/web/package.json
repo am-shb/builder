@@ -1,0 +1,10 @@
+{
+  "name": "@builder/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The customer app and staff pages. No framework yet (see README).",
+  "type": "module",
+  "scripts": {
+    "check": "echo 'apps/web: no code yet, nothing to check'"
+  }
+}

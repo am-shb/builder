@@ -4,7 +4,7 @@
 ```
 nvm use            # Node 24, from .nvmrc
 npm ci
-npm run check      # typecheck + tests + smoke; no keys or network needed
+npm run check      # engine typecheck, tests and smoke, then every workspace; no keys or network needed
 ```
 To run the real server you need `.env` (see `.env.example` and the root README). Ask before running anything that
 costs money (see [AGENTS.md](AGENTS.md)).
@@ -20,7 +20,7 @@ costs money (see [AGENTS.md](AGENTS.md)).
 5. **Commit.** Use Conventional Commits with the area as the scope, as the history does: `feat(agent): ...`,
    `fix(stage): ...`, `docs: ...`.
 6. **Open a PR.** Fill in the template. CI runs `npm run check` and the browser tests, and **check** must be green.
-   The area owner reviews. Changes to shared shapes also need the owner of `packages/shared`.
+   The area owner reviews. Changes to `contracts/` also need both the engine owner and the api owner.
 7. **Keep docs current.** Update your area's README (status, decisions, first tasks) in the same PR.
 
 ## For maintainers

@@ -39,7 +39,7 @@ Live tests cost money (Recall bot minutes, models, TTS). Run one only when the m
    for that session and makes no more model calls (I5).
 3. If that doesn't stop it, stop the process. To keep transcripts flowing with no model spend, restart without
    `OPENROUTER_API_KEY` (listen-only).
-4. Nothing caps spend automatically yet. That's tracked in `services/billing/`.
+4. Nothing caps spend automatically yet. The api will enforce limits per session and per org ([ADR 0008](../adr/0008-api-engine-boundary.md)).
 
 ## Rotating secrets
 
@@ -54,3 +54,18 @@ Never paste a secret into an issue, a PR, a log or a chat. Edit `.env` (or the h
   line Builder is speaking (known issue M2), so rotate between meetings.
 - **Stage or handoff tokens:** they can't be revoked yet (see [../security/](../security/)). To cut off a leaked
   handoff link today, you'd have to change that session's `handoff_token` in the database.
+
+## Deploy and environments
+
+Nothing is deployed yet. The plan is in [ADR 0005](../adr/0005-hosting-on-render.md): Render, with a persistent public
+URL per environment (dev, staging and production) so Recall webhooks and the stage no longer depend on a tunnel.
+
+- Secrets live in the host's secret store: the Recall keys and webhook secret, the OpenRouter key, and the auth and
+  payment provider keys. Never in the repo.
+- CI is in `.github/workflows/ci.yml` ([ADR 0001](../adr/0001-ci-and-type-checking.md)). Dependabot is in
+  `.github/dependabot.yml`.
+- The engine logs one JSON object per line to stdout, and `GET /healthz` returns `{"ok":true}` with no auth. The api
+  serves `GET /health`.
+- Logs carry only ids and codes, never transcript text, prompts or model output.
+- Still to do: a staging environment, branch protection on `main` (require the **check** job and one review), and
+  alerts and uptime checks.

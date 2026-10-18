@@ -1,0 +1,16 @@
+{
+  "name": "@builder/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Accounts, sessions, billing and jobs (ADR 0004, ADR 0008).",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.ts",
+    "typecheck": "tsc -p .",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@builder/contracts": "*"
+  }
+}

@@ -4,6 +4,10 @@
   "private": true,
   "description": "Builder: a Recall.ai meeting bot that listens to a Google Meet, steers the group, and live-builds a clickable prototype on a screenshared stage.",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "contracts"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -14,7 +18,7 @@
     "replay": "node scripts/replay.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
-    "check": "npm run typecheck && npm test && npm run smoke",
+    "check": "npm run typecheck && npm test && npm run smoke && npm run check --workspaces --if-present",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {

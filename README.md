@@ -11,17 +11,18 @@ Full design: `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.m
 
 ## Repository layout
 
-The working v0 engine is in `src/` and `public/`, and the rest of this README describes it. The other top-level
-folders are placeholders for the production product. Each one has a README with its scope, its open decisions and its
-first tasks.
+The repo is npm workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)). The working v0 engine is still
+in `src/` and `public/` at the root, and the rest of this README describes it. It moves to `apps/engine/` in the next
+PR. Each app has a README with its scope, its open decisions and its first tasks.
 
 | Folder | Area |
 |---|---|
-| `src/`, `public/`, `test/`, `scripts/` | Meeting engine v0, planned to move to `services/meeting-engine/` |
-| `services/` | `api`, `auth`, `billing`, `worker`, `notifications`, `meeting-engine` |
-| `apps/` | `web` (the customer app) and `admin` (the internal console) |
-| `packages/shared/` | Types and schemas shared across services |
-| `db/`, `infra/`, `e2e/` | Database, deployment and CI, and tests that cross services |
+| `src/`, `public/`, `test/`, `scripts/` | Engine v0, planned to move to `apps/engine/` |
+| `apps/engine/` | The engine's brief (the code arrives in the move PR) |
+| `apps/api/` | Accounts, sessions, billing and jobs. Today only `GET /health` |
+| `apps/web/` | The customer app and staff pages. No code yet |
+| `contracts/` | zod schemas for what crosses an app boundary (engine and api, api and web) |
+| `e2e/` | Tests that cross apps |
 | `docs/` | Workstreams, ADRs, architecture, product, security, runbooks, known issues |
 
 New contributors should read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md) and
@@ -104,7 +105,7 @@ npm run local           # no Recall: talk to Builder through your own mic at htt
 npm test                # unit, HTTP-boundary and end-to-end replay tests (no network, no ports but ephemeral ones)
 npm run smoke           # boots the real app on a loopback socket with a fake Recall API; prints SMOKE OK
 npm run typecheck       # tsc --noEmit over src, scripts and test
-npm run check           # typecheck + test + smoke: what CI runs, and what must pass before a PR
+npm run check           # engine typecheck + test + smoke, then check in every workspace: what must pass before a PR
 ```
 
 Quick-tunnel URLs change on every restart. Use a reserved ngrok domain or a named Cloudflare tunnel for

@@ -5,12 +5,20 @@ on a screenshared stage while the group decides what they want. The v0 engine wo
 production product with accounts, billing and the rest.
 
 ## Before you start
-1. Read [docs/workstreams.md](docs/workstreams.md), then the README in the folder for your area.
-2. Work inside your area's folder. To change another area, a shared shape (`packages/shared`, `db`), or engine
-   interfaces, write an ADR (`docs/adr/`) or get that area owner's review.
+1. Read [docs/workstreams.md](docs/workstreams.md), then the README in the folder for your area. The repo is npm
+   workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)): three apps and `contracts/`. Until the move
+   PR lands, the engine's code is still at the root (`src/`, `public/`, `test/`, `scripts/`).
+2. Work inside your app's folder: `apps/engine`, `apps/api` or `apps/web`. To change another app, `contracts/`, or the
+   engine's interfaces, write an ADR (`docs/adr/`) or get that owner's review. `contracts/` needs both the engine and
+   api owners.
 3. Settle an area's open decisions with an ADR before writing its code.
 4. Behavior of the engine is set by `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`. Open
    bugs are in `docs/known-issues.md`; claim one by putting your name next to it.
+
+## Layout
+- `apps/engine`, `apps/api`, `apps/web`: one app each, with its own `package.json`, `tsconfig.json` and tests.
+- `contracts/` (`@builder/contracts`): zod schemas for what crosses an app boundary. Schemas only, changes are additive.
+- Code is shared only when two apps import it. Code used by one app is a folder inside that app.
 
 ## Current stack (engine)
 - Node 24 or newer, running TypeScript natively through type stripping, with no build step
@@ -20,7 +28,7 @@ production product with accounts, billing and the rest.
 - New areas can choose differently, but record the choice in an ADR
 
 ## Commands
-- Use Node 24 (`.nvmrc`). `npm run check` runs the type check, all tests and the smoke boot against fakes. It must
+- Use Node 24 (`.nvmrc`). `npm run check` runs the engine's type check, tests and smoke boot against fakes, then `check` in every workspace. It must
   pass before you open a PR, and CI runs it on every PR. You can also run the parts on their own: `npm run typecheck`,
   `npm test`, `npm run smoke`.
 - `npm start` runs the server. It needs `.env`; see `.env.example`.
