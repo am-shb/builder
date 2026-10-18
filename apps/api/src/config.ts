@@ -1,0 +1,107 @@
+// Reads the api's settings from the environment once, at start (docs/adr/0010-api-stack.md).
+// Errors name the variable, never its value. Optional parts are null when their variables are unset; the routes
+// that need them answer 503 instead of the process refusing to start.
+import type { SessionLimits } from "@builder/contracts";
+
+export type ClerkConfig = {
+  // Clerk's PEM public key: tokens are checked offline, with no call to Clerk.
+  jwtKey: string;
+  // The web app's origins. A token minted for any other site is refused.
+  authorizedParties: string[];
+};
+
+export type EngineConfig = {
+  // The engine's private-network origin, e.g. http://engine:10000 on Render.
+  url: string;
+  // Shared bearer token for /internal/* (ADR 0008).
+  token: string;
+};
+
+export type Config = {
+  port: number;
+  clerk: ClerkConfig | null;
+  engine: EngineConfig | null;
+  // Per-session limits until billing exists (decision D5 in docs/plans/api-first-slice.md).
+  defaultLimits: SessionLimits | null;
+};
+
+type Env = Record<string, string | undefined>;
+
+export class ConfigError extends Error {
+  override name = "ConfigError";
+}
+
+const MIN_TOKEN_LENGTH = 32;
+
+export function loadConfig(env: Env): Config {
+  return {
+    port: readPort(env),
+    clerk: readClerk(env),
+    engine: readEngine(env),
+    defaultLimits: readLimits(env),
+  };
+}
+
+const value = (env: Env, name: string) => env[name]?.trim() || undefined;
+
+// Variables that only make sense together: all set, or none.
+function together(env: Env, names: string[]): Record<string, string> | null {
+  const set = names.filter((n) => value(env, n) !== undefined);
+  if (set.length === 0) return null;
+  const missing = names.filter((n) => value(env, n) === undefined);
+  if (missing.length) throw new ConfigError(`${missing.join(", ")} must be set together with ${set.join(", ")}`);
+  return Object.fromEntries(names.map((n) => [n, value(env, n)!]));
+}
+
+function readPort(env: Env): number {
+  const raw = value(env, "PORT");
+  if (raw === undefined) return 3001;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError("PORT must be a whole number from 1 to 65535");
+  return port;
+}
+
+function readClerk(env: Env): ClerkConfig | null {
+  const v = together(env, ["CLERK_JWT_KEY", "CLERK_AUTHORIZED_PARTIES"]);
+  if (!v) return null;
+  // Dashboards often keep a PEM on one line with literal "\n"s.
+  const jwtKey = v.CLERK_JWT_KEY.replace(/\\n/g, "\n");
+  if (!/^-----BEGIN PUBLIC KEY-----\n[\s\S]+\n-----END PUBLIC KEY-----$/.test(jwtKey)) {
+    throw new ConfigError("CLERK_JWT_KEY must be a PEM public key (-----BEGIN PUBLIC KEY----- ...)");
+  }
+  const authorizedParties = v.CLERK_AUTHORIZED_PARTIES.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!authorizedParties.length || !authorizedParties.every(isOrigin)) {
+    throw new ConfigError("CLERK_AUTHORIZED_PARTIES must be comma-separated origins, such as https://app.example.com");
+  }
+  return { jwtKey, authorizedParties };
+}
+
+function readEngine(env: Env): EngineConfig | null {
+  const v = together(env, ["ENGINE_INTERNAL_URL", "ENGINE_INTERNAL_TOKEN"]);
+  if (!v) return null;
+  const url = v.ENGINE_INTERNAL_URL.replace(/\/+$/, "");
+  if (!isOrigin(url)) throw new ConfigError("ENGINE_INTERNAL_URL must be an http or https origin, with no path");
+  if (v.ENGINE_INTERNAL_TOKEN.length < MIN_TOKEN_LENGTH) {
+    throw new ConfigError(`ENGINE_INTERNAL_TOKEN must be at least ${MIN_TOKEN_LENGTH} characters`);
+  }
+  return { url, token: v.ENGINE_INTERNAL_TOKEN };
+}
+
+function readLimits(env: Env): SessionLimits | null {
+  const v = together(env, ["DEFAULT_MAX_USD", "DEFAULT_MAX_MINUTES"]);
+  if (!v) return null;
+  const maxUsd = Number(v.DEFAULT_MAX_USD);
+  const maxMinutes = Number(v.DEFAULT_MAX_MINUTES);
+  if (!Number.isFinite(maxUsd) || maxUsd <= 0) throw new ConfigError("DEFAULT_MAX_USD must be a number above 0");
+  if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) throw new ConfigError("DEFAULT_MAX_MINUTES must be a number above 0");
+  return { maxUsd, maxMinutes };
+}
+
+function isOrigin(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.origin === s;
+  } catch {
+    return false;
+  }
+}
