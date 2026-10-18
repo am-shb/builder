@@ -72,7 +72,9 @@ idempotent (if the `surreal` binary isn't installed, say so in the report instea
 
 ## Task 2: Containers, local docker-compose, Render Blueprint and CD (ADR 0005, ADR 0011)
 Branch `infra/render`, from `engine/surrealdb`. Production only for now (repo owner, 2026-10-18); staging is added to
-the Blueprint later. Render region `oregon`, SurrealDB Cloud region AWS `us-west-2`, next to Recall's `us-west-2`.
+the Blueprint later. Everything in US East, next to each other and near the team in Toronto (repo owner, 2026-10-18):
+Render region `virginia`, SurrealDB Cloud AWS `us-east-1`, Recall `us-east-1` (`RECALL_REGION=us-east-1`, a plain
+value in the Blueprint).
 
 1. **Images.** `apps/engine/Dockerfile` and `apps/api/Dockerfile`, both built with the repo root as context (so
    `contracts/` is there), from `node:24-slim` pinned by minor version and matching `.nvmrc`, installing only that
@@ -93,7 +95,7 @@ the Blueprint later. Render region `oregon`, SurrealDB Cloud region AWS `us-west
    - `api`: the api image, `ENGINE_INTERNAL_URL=http://engine:3000`, a dev internal token, `apps/api/.env` if
      present. Port 3001.
    - `docker compose up` works on a fresh clone with no `.env` files. Document it in the root README.
-4. **`render.yaml`** (Blueprint), production only, region `oregon`, starter plans, `runtime: docker` with the
+4. **`render.yaml`** (Blueprint), production only, region `virginia`, starter plans, `runtime: docker` with the
    Dockerfiles above:
    - `builder-engine`: public web service, `healthCheckPath /healthz`, `preDeployCommand` running the engine's
      migrations, `SURREAL_URL`/`SURREAL_USER`/`SURREAL_PASS` and the Recall and OpenRouter keys as `sync: false`.
@@ -109,7 +111,8 @@ the Blueprint later. Render region `oregon`, SurrealDB Cloud region AWS `us-west
 5. **CI additions** (`.github/workflows/ci.yml`): a job that builds both images, and a job that runs the engine's store
    and concurrency tests and `npm run migrate -w @builder/engine` (twice) against a real `surrealdb/surrealdb:v3.3.4`
    service container, using the same setup script (ADR 0011: test against the real server).
-6. **Runbook** (`docs/runbooks/README.md`): create the SurrealDB Cloud instance (Start plan, free, AWS `us-west-2`),
+6. **Runbook** (`docs/runbooks/README.md`): create the SurrealDB Cloud instance (Start plan, free, AWS `us-east-1`); create the Recall workspace in `us-east-1`
+   and its webhook endpoint pointing at the engine,
    run `setup.surql` in Surrealist with generated passwords, check daily backups are on; create the Blueprint in the
    Render dashboard from `main`; the secrets to enter where; how CD works; how to roll back (Render dashboard,
    redeploy a previous deploy) and what that does not undo (migrations are forward-only); how to check a deploy.
