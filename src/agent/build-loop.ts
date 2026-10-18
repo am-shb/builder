@@ -68,8 +68,8 @@ const TOOLS: PortTool[] = [
 
 // What a topic shows in the to-do list: its own short task line, else its title.
 export function taskText(t: Topic): string {
-  const text = (t.task?.trim() || t.title).trim();
-  return text.length <= TASK_MAX ? text : `${text.slice(0, TASK_MAX - 1)}…`;
+  const text = (t.task?.trim() || t.title.trim());
+  return text.length <= TASK_MAX ? text : `${text.slice(0, TASK_MAX - 1).trimEnd()}…`;
 }
 
 type SnapshotEvent = Extract<StageEvent, { type: "snapshot" }>;
@@ -423,6 +423,8 @@ export function createBuildLoop(deps: {
           if (region) {
             live.pendingRegion(null);
             region = false;
+            buf = "";
+            parentRe.lastIndex = 0;
           }
         } catch (err) {
           log("build.stream_apply_failed", { session_id: sessionId, error: errorName(err) });
@@ -441,8 +443,9 @@ export function createBuildLoop(deps: {
         wait_ms: waitMs, first_patch_ms: firstPatchMs, last_patch_ms: lastPatchMs,
       };
       // A refusal or no usable call leaves the doc as it is; batches already streamed stay on screen.
-      if (result.stopReason === "refusal") log("build.run", { ...base, patches_applied: streamed.applied, patches_rejected: streamed.rejected });
-      else if (result.toolCalls.length === 0) log("build.run", base);
+      if (result.stopReason === "refusal" || result.toolCalls.length === 0) {
+        log("build.run", { ...base, patches_applied: streamed.applied, patches_rejected: streamed.rejected });
+      }
       else {
         const counts = applyResult(sessionId, live, result, speakers, streamed);
         opsApplied = counts.ops;
@@ -490,11 +493,14 @@ export function createBuildLoop(deps: {
       const h: Handoff = { ...parsed.data, topics };
       if (!st.pending) st.pendingSince = clock();
       st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
-      const ids = topics.map((t) => {
+      const ids: string[] = [];
+      for (const t of topics) {
+        const text = taskText(t);
+        if (!text) continue;
         const id = `t${++st.taskSeq}`;
-        st.tasks.push({ id, text: taskText(t), state: "queued" });
-        return id;
-      });
+        st.tasks.push({ id, text, state: "queued" });
+        ids.push(id);
+      }
       st.pendingTaskIds.push(...ids);
       pushTasks(sessionId, st);
       if (resolved) st.bypassFloor = true;

@@ -60,7 +60,9 @@ async function liveCall(req: Parameters<ModelPort["runTools"]>[0]): Promise<RunT
   const defs = req.tools as PortTool[];
   const schemas = new Map(defs.map((t) => [t.name, t.schema] as const));
   const vocab = new Map(defs.map((t) => [t.name, propertyNames(t.input_schema)] as const));
-  const r = await real.runTools({ ...req, tools: defs.map(({ schema: _s, ...wire }) => wire) });
+  // No onToolCall: the conversation loop forwards each hand-off as it streams, and this probe
+  // returns the calls at the end, so streaming here would forward every hand-off twice.
+  const r = await real.runTools({ ...req, onToolCall: undefined, tools: defs.map(({ schema: _s, ...wire }) => wire) });
   computedUsd += costOf(MODELS[req.loop], r.usage);
   const kept: ToolCall[] = [];
   const rows: string[] = [];

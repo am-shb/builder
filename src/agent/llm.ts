@@ -44,6 +44,8 @@ export type RunToolsRequest = {
   onToolInputDelta?: (toolName: string, partialJson: string) => void;
   // Called once per valid tool call, in stream order, as soon as its block closes (the same object
   // that ends up in `toolCalls`). Unknown, incomplete, unparseable or invalid blocks never reach it.
+  // Callers must not throw: a throw rejects `runTools` after the stream ends, and that call's usage
+  // is not recorded.
   onToolCall?: (call: ToolCall) => void;
 };
 // stopReason is the model's stop_reason (null if the stream was cut off); dropped counts

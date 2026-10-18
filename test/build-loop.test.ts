@@ -703,6 +703,44 @@ test("task text falls back to the topic title and is cut to 40 characters", () =
   assert.equal(cut.length, 40);
   assert.equal(cut, `${"x".repeat(39)}…`);
   assert.equal(taskText({ ...base, title: "y".repeat(40) }), "y".repeat(40));
+  // The cut lands on a space: no "word …".
+  assert.equal(taskText({ ...base, title: `${"a".repeat(38)} bcd` }), `${"a".repeat(38)}…`);
+  assert.equal(taskText({ ...base, task: " ", title: "  " }), "");
+});
+
+test("a topic with no task and no title gets no task row", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "hi")], {}, "   "));
+  await flush();
+  assert.deepEqual(lastTasks(s.sent), []);
+});
+
+test("build.run counts streamed patches when the model stops at max_tokens", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+  await flush();
+  held.calls[0].req.onToolCall?.(QUICK_ADD[0]);
+  await flush();
+  await held.release(0, [], "max_tokens");
+  const run = s.logs.find((l) => l.msg === "build.run")!.fields!;
+  assert.equal(run.patches_applied, 1);
+  assert.equal(run.patches_rejected, 0);
+});
+
+test("a streamed batch resets the pending-region scan so the next block starts fresh", async () => {
+  const held = heldPort();
+  const s = setup(held.port);
+  s.loop.handoff(s.sessionId, handoff([s.say("Amir", "quick add")]));
+  await flush();
+  const req = held.calls[0].req;
+  req.onToolInputDelta?.("apply_patches", '{"label":"x","ops":[{"op":"add","parentId":"home","node":{"id":"a"}}]}');
+  req.onToolCall?.(QUICK_ADD[0]);
+  for (const c of ['{"label":"y","ops":[{"op":"add","parentId":"oth', 'er","node":{"id":"b"}}]}']) req.onToolInputDelta?.("apply_patches", c);
+  const regions = s.sent.filter((e): e is Extract<StageEvent, { type: "pending_region" }> => e.type === "pending_region").map((e) => e.parentId);
+  assert.deepEqual(regions, ["home", null, "other"]);
+  await held.release(0, [], "refusal");
 });
 
 test("a hand-off during a run stays queued until the follow-up run", async () => {
