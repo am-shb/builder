@@ -16,12 +16,22 @@ import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tt
 import { createSpeech } from "./voice/speech.ts";
 import { signForTest } from "./verify.ts";
 
+// The settings errors name the variable that is wrong, never its value, so they are shown as they are.
+function loadSettings() {
+  try {
+    return process.argv.includes("--local") ? loadLocalConfig(process.env) : loadConfig(process.env);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+}
+
 async function main() {
   if (process.argv.includes("--smoke")) return smoke();
 
   if (existsSync(".env")) process.loadEnvFile(".env");
   // --local: no Recall and no meeting. You talk into your own mic on /local (docs/adr/0003-local-mode.md).
-  const config = process.argv.includes("--local") ? loadLocalConfig(process.env) : loadConfig(process.env);
+  const config = loadSettings();
   if (!config.agentEnabled) console.warn("OPENROUTER_API_KEY is not set: running listen-only (no agent replies or prototype building).");
   const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   // Last resort. Logs the error's name and stack frames, never its message (which can quote meeting
@@ -129,7 +139,9 @@ async function smoke() {
   process.exit(ok ? 0 : 1);
 }
 
+// A startup failure past the settings (a database read while the app loads, say) is logged by code only: its
+// message can quote stored values. Settings errors are reported by loadSettings() with their message.
 main().catch((err) => {
-  console.error((err as Error).message);
+  console.error(JSON.stringify({ t: new Date().toISOString(), msg: "process.start_failed", error: errorCode(err) }));
   process.exit(1);
 });

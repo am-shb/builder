@@ -52,6 +52,16 @@ test("fake port records calls and costs into model_calls", async () => {
   await store.close();
 });
 
+test("a failed cost write is logged by code and the paid-for result still comes back", async () => {
+  const fake = createFakePort([[{ name: "a", input: { x: 1 } }]]);
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const store = { addModelCall: async () => { throw Object.assign(new Error("index already contains secret text"), { kind: "Internal" }); } };
+  const port = withCostRecording(fake, { store, sessionId: "s1", log: (msg, fields) => logs.push({ msg, fields }) });
+  const r = await port.runTools({ loop: "build", ...REQ, tools: [], effort: "medium" });
+  assert.deepEqual(r.toolCalls, [{ name: "a", input: { x: 1 } }]);
+  assert.deepEqual(logs, [{ msg: "model_call.cost_write_failed", fields: { session_id: "s1", loop: "build", error: "Internal" } }]);
+});
+
 test("sessionCost sums per session", async () => {
   const store = await testStore();
   const row = { loop: "build", model: MODELS.build, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, ms: 5 };

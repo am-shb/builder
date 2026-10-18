@@ -380,6 +380,24 @@ test("snapshotFor throwing terminates only that socket and the server keeps serv
   await good.closed;
 });
 
+test("a stage auth check that fails (a database error, say) rejects the socket and logs the code only", async () => {
+  const server = http.createServer((_q, res) => res.end("ok"));
+  openServers.add(server);
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const dbError = Object.assign(new Error("query quoted secret meeting text"), { kind: "Query", details: { kind: "TimedOut" } });
+  createStageChannel(server, async () => { throw dbError; }, () => {}, () => ({ type: "speech_stop" }), (msg, fields) => logs.push({ msg, fields }));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as any).port;
+  const id = "77777777-7777-7777-7777-777777777777";
+  const ws = connect(`ws://127.0.0.1:${port}/stage/${id}/ws?token=x`);
+  ws.opened.catch(() => {}); // it never opens
+  await ws.closed;
+  assert.equal(ws.queue.length, 0, "nothing was sent");
+  // The client may try the upgrade more than once; each attempt is refused and logged the same way.
+  assert.ok(logs.length >= 1);
+  for (const l of logs) assert.deepEqual(l, { msg: "channel.auth_failed", fields: { session_id: id, error: "Query.TimedOut" } });
+});
+
 test("setTasks pushes a tasks event and the snapshot carries the list", async () => {
   const store = await testStore();
   const s = await store.createIntent("33333333-3333-3333-3333-333333333333", "https://meet.google.com/x");

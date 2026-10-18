@@ -176,7 +176,7 @@ export function createBuildLoop(deps: {
     let st = sessions.get(sessionId);
     if (!st) {
       st = {
-        port: withCostRecording(deps.port, { store, sessionId }),
+        port: withCostRecording(deps.port, { store, sessionId, log }),
         inFlight: false, pending: null, pendingTaskIds: [], tasks: [], taskSeq: 0, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
         received: 0, merged: 0, settled: 0, intake: null, due: new Map(),
       };
@@ -678,10 +678,11 @@ export function createBuildLoop(deps: {
       log("build.ended", { session_id: sessionId, in_flight: st?.inFlight ?? false });
     },
 
-    // Settles once the hand-offs received so far are taken. A pick reads its grounding lines from the store first,
-    // so a conflict it settles is resolved only then; speech that confirms the choice waits for this.
-    taken(sessionId: string): Promise<void> {
-      return sessions.get(sessionId)?.intake ?? Promise.resolve();
+    // While a hand-off is still being taken, a promise that settles once the ones received so far are; null when
+    // nothing is pending. A pick reads its grounding lines from the store first, so the conflict it settles is
+    // resolved (and the winner merged) only then. Commands and speech in the same turn wait for this.
+    taken(sessionId: string): Promise<void> | null {
+      return sessions.get(sessionId)?.intake ?? null;
     },
 
     idle(sessionId: string): boolean {

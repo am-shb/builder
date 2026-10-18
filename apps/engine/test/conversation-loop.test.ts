@@ -11,6 +11,7 @@ import type { Handoff } from "../src/agent/handoff.ts";
 import { createChatSpeech, createConversationLoop, ADDRESSED_MS, FOLLOW_UP_MS, OPENING_MAX, WINDOW } from "../src/agent/conversation-loop.ts";
 import type { CommandOutcome, Speech, UiCommand } from "../src/agent/conversation-loop.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
+import { findNode } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { loadConfig } from "../src/config.ts";
@@ -54,7 +55,7 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
   const handoffs: Handoff[] = [];
   const handoffHooks: ((h: Handoff) => void)[] = [];
-  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> } =
+  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> | null } =
     { handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); } };
   const said: string[] = [];
   const stops: string[] = [];
@@ -479,7 +480,7 @@ test("a pick the build loop resolves only after reading the store still opens co
   }));
   s.rt.setDoc(conflictDoc());
   // As the real build loop does with a pick: the grounding lines are read first, so the conflict resolves later.
-  let taken: Promise<void> = Promise.resolve();
+  let taken: Promise<void> | null = null;
   s.buildLoop.taken = () => taken;
   s.handoffHooks.push((h) => {
     const c = h.topics[0]?.resolvedChoice;
@@ -494,6 +495,51 @@ test("a pick the build loop resolves only after reading the store still opens co
   await flush();
   assert.deepEqual(s.said, ["So: B. Everyone OK?"], "the gate waited for the pick to be taken");
   assert.deepEqual(s.blocked(), []);
+});
+
+for (const streamed of [true, false]) test(`a command in the same turn as a pick runs against the merged winner, even when the pick waits for the store (${streamed ? "streamed" : "after the turn"})`, async () => {
+  // Variant B adds the Done tab; the room picks B and asks to open it, in one turn.
+  const doc = conflictDoc();
+  doc.conflicts[0].variants[1].batch = { label: "B", ops: [{ op: "add", parentId: "home", node: { id: "home.done-tab", type: "Button", props: { label: "Done" }, status: "draft", children: [] } }] };
+  const ran: boolean[] = [];
+  const ref: { rt?: { snapshot(): unknown } } = {};
+  const script = fnPort((i, text) => {
+    if (i !== 1) return [];
+    const ids = [...text.matchAll(/\[(\d+)\] Sara/g)].map((m) => Number(m[1]));
+    return [
+      updateBuild(handoff(ids, { topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }] })),
+      { name: "ui_command", input: { action: "click", target: "Done" } },
+    ];
+  });
+  // Streamed: the calls take effect as they arrive, through onToolCall. Otherwise apply() handles them.
+  const port: ModelPort = streamed
+    ? { async runTools(req) { const r = await script.runTools(req); for (const c of r.toolCalls) req.onToolCall?.(c); return r; } }
+    : script;
+  const s = await setup(port, {
+    uiCommand: () => {
+      const there = !!findNode((ref.rt!.snapshot() as Snapshot).proto, "home.done-tab");
+      ran.push(there);
+      return there ? { ok: true, visible: true } : { ok: false, reason: "not_found" };
+    },
+  });
+  ref.rt = s.rt;
+  s.rt.setDoc(doc);
+  // As the real build loop does with a pick: the grounding lines are read first, so the winner merges later.
+  let taken: Promise<void> | null = null;
+  s.buildLoop.taken = () => taken;
+  s.handoffHooks.push((h) => {
+    const c = h.topics[0]?.resolvedChoice;
+    if (c) taken = new Promise<void>((r) => setTimeout(r, 20)).then(() => { s.rt.resolveComparison(c.conflictId, c.winner); taken = null; });
+  });
+
+  await s.say("Amir", "Hmm, not sure.");
+  await flush();
+  await s.say("Sara", "Let's go with B, open Done.");
+  await flush();
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(ran, [true], "the command ran once, after B was merged");
+  assert.ok(s.logs.some((l) => l.msg === "conversation.command" && l.fields?.ok === true));
 });
 
 test("a failed voice command gets a follow-up turn where command_feedback may speak", async () => {

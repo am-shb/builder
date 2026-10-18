@@ -425,6 +425,24 @@ test("resolving a conflict flips the winning variant's nodes to agreed", async (
   assert.equal(s.patches().length, flipsBefore);
 });
 
+test("taken() is null with nothing pending, and settles once a pick has read its grounding lines and merged", async () => {
+  const s = await setup([[DONE_CONFLICT], []]);
+  assert.equal(s.loop.taken(s.sessionId), null, "a session the loop hasn't seen");
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "toggle"), await s.say("Sara", "tab")]));
+  assert.equal(s.loop.taken(s.sessionId), null, "a hand-off without a pick is taken at once");
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "fine, B")], {
+    topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
+  }));
+  const pending = s.loop.taken(s.sessionId);
+  assert.ok(pending, "the pick is still reading its grounding lines");
+  assert.equal(findNode(s.proto(), "home.tabs"), undefined, "not merged yet");
+  await pending;
+  assert.ok(findNode(s.proto(), "home.tabs"), "B is merged once taken() settles");
+  assert.equal(s.doc().conflicts.find((c) => c.id === "c-done")?.status, "resolved");
+  assert.equal(s.loop.taken(s.sessionId), null, "nothing pending afterwards");
+});
+
 const RESOLVE_B = (groundingIds: number[]) => handoff(groundingIds, {
   topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
 });

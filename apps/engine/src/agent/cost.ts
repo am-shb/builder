@@ -2,6 +2,7 @@
 import { MODELS } from "./llm.ts";
 import type { ModelPort, Usage } from "./llm.ts";
 import type { Store } from "../store.ts";
+import { errorCode } from "../error-code.ts";
 
 export type Price = { input: number; output: number; cacheRead: number; cacheWrite: number };
 
@@ -30,17 +31,25 @@ export function costOf(model: string, usage: Usage): number {
 }
 
 // Wraps a port so every call lands in model_calls for the session.
-export function withCostRecording(port: ModelPort, ctx: { store: Pick<Store, "addModelCall">; sessionId: string }): ModelPort {
+export function withCostRecording(
+  port: ModelPort,
+  ctx: { store: Pick<Store, "addModelCall">; sessionId: string; log?: (msg: string, fields?: Record<string, unknown>) => void },
+): ModelPort {
   return {
     async runTools(req) {
       const result = await port.runTools(req);
       const model = MODELS[req.loop];
-      await ctx.store.addModelCall({
-        sessionId: ctx.sessionId, loop: req.loop, model,
-        inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
-        cacheReadTokens: result.usage.cacheReadTokens, cacheWriteTokens: result.usage.cacheWriteTokens,
-        usd: costOf(model, result.usage), ms: result.ms,
-      });
+      // The call is paid for already: a failed cost write is logged, and the turn still gets its result.
+      try {
+        await ctx.store.addModelCall({
+          sessionId: ctx.sessionId, loop: req.loop, model,
+          inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
+          cacheReadTokens: result.usage.cacheReadTokens, cacheWriteTokens: result.usage.cacheWriteTokens,
+          usd: costOf(model, result.usage), ms: result.ms,
+        });
+      } catch (err) {
+        ctx.log?.("model_call.cost_write_failed", { session_id: ctx.sessionId, loop: req.loop, error: errorCode(err) });
+      }
       return result;
     },
   };

@@ -220,7 +220,7 @@ function describeCommand(c: CommandRecord, now: number): string {
 export function createConversationLoop(deps: {
   port: ModelPort;
   runtime: (sessionId: string) => SessionRuntime;
-  buildLoop: { handoff(sessionId: string, h: Handoff): void; taken?(sessionId: string): Promise<void> };
+  buildLoop: { handoff(sessionId: string, h: Handoff): void; taken?(sessionId: string): Promise<void> | null };
   speech: Speech;
   store: Store;
   clock: () => number;
@@ -244,7 +244,7 @@ export function createConversationLoop(deps: {
     let st = sessions.get(sessionId);
     if (!st) {
       st = {
-        port: withCostRecording(deps.port, { store, sessionId }),
+        port: withCostRecording(deps.port, { store, sessionId, log }),
         detector: createStuckDetector({ clock }),
         lines: [], humanIds: new Set(), present: new Set(), heard: new Set(),
         recording: already, opened: already, openingTried: already, openingPending: false,
@@ -420,8 +420,9 @@ export function createConversationLoop(deps: {
   }
 
   // What a turn has done so far. Hand-offs and commands take effect as their tool calls stream in,
-  // so `handled` lets apply() skip them and `handoffMs` is when the first hand-off went out.
-  type TurnWork = { handled: Set<ToolCall>; handoffs: number; commands: number; handoffMs: number | null };
+  // so `handled` lets apply() skip them and `handoffMs` is when the first hand-off went out. `queued`
+  // holds the turn's commands that wait for a pick being taken, in arrival order.
+  type TurnWork = { handled: Set<ToolCall>; handoffs: number; commands: number; handoffMs: number | null; queued: Promise<void> | null };
 
   function handleCall(sessionId: string, st: SessionState, call: ToolCall, work: TurnWork, startedAt: number) {
     if (work.handled.has(call)) return;
@@ -433,7 +434,17 @@ export function createConversationLoop(deps: {
       }
     } else if (call.name === "ui_command") {
       work.handled.add(call);
-      if (runCommand(sessionId, st, call.input)) work.commands++;
+      // A pick merges its winner only once the build loop has read its grounding lines from the store. A command
+      // may aim at the winner's nodes, so while a hand-off is being taken it runs after that, as it did when picks
+      // resolved synchronously; and a command behind it waits too, to keep their order.
+      const pending = buildLoop.taken?.(sessionId) ?? null;
+      if (!pending && !work.queued) {
+        if (runCommand(sessionId, st, call.input)) work.commands++;
+        return;
+      }
+      work.queued = (work.queued ?? Promise.resolve()).then(() => pending).then(() => {
+        if (!ended.has(sessionId) && runCommand(sessionId, st, call.input)) work.commands++;
+      }).catch((err) => log("conversation.command_failed", { session_id: sessionId, error: errorCode(err) }));
     }
   }
 
@@ -442,11 +453,11 @@ export function createConversationLoop(deps: {
     // speech. Anything still unhandled goes now: hand-offs first (a settled choice resolves
     // synchronously, which confirm_conflict depends on), then commands, then at most one line of speech.
     for (const call of result.toolCalls) if (call.name === "update_build") handleCall(sessionId, st, call, work, startedAt);
+    // A pick resolves its conflict only once the build loop has read its grounding lines from the store. Commands
+    // and confirm_conflict depend on the resolution, so they wait for it, as the old synchronous store let them.
+    await buildLoop.taken?.(sessionId);
     for (const call of result.toolCalls) if (call.name === "ui_command") handleCall(sessionId, st, call, work, startedAt);
-    // A pick resolves its conflict only once the build loop has read its grounding lines from the store, and
-    // confirm_conflict is open only after that. Wait for it, so the gate sees the resolution as the old
-    // synchronous store let it.
-    if (result.toolCalls.some((c) => c.name === "speak")) await buildLoop.taken?.(sessionId);
+    await work.queued;
     let spoke: SpeakReason | null = null;
     let first = true;
     for (const call of result.toolCalls) {
@@ -495,7 +506,7 @@ export function createConversationLoop(deps: {
   async function modelTurn(sessionId: string, st: SessionState, turn: Turn, now: number) {
     const snap = view(sessionId);
     const open = openReasons(st, turn, snap.doc, now);
-    const work: TurnWork = { handled: new Set(), handoffs: 0, commands: 0, handoffMs: null };
+    const work: TurnWork = { handled: new Set(), handoffs: 0, commands: 0, handoffMs: null, queued: null };
     const result = await st.port.runTools({
       loop: "conversation", system: SYSTEM, tools: TOOLS, effort: "low",
       messages: [{ role: "user", content: userTurn(st, snap, turn, open, now) }],

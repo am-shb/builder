@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Prototype, Change, Interaction } from "../ui/schema.ts";
 import type { ConsensusDoc } from "../consensus/doc.ts";
 import type { Mood } from "../session/mood.ts";
+import { errorCode } from "../error-code.ts";
 
 // Someone is talking: all the stage needs to animate the character. It carries no speaker or text,
 // because the stage token is handed to the bot and the stage shows no transcript (spec §10a).
@@ -74,7 +75,7 @@ export function createStageChannel(
       .then(() => auth(sessionId, url.searchParams.get("token") ?? ""))
       .then((ok) => (ok ? upgrade(req, socket, head, sessionId) : reject(socket)))
       .catch((err) => {
-        log("channel.auth_failed", { session_id: sessionId, error: err instanceof Error ? err.name : "unknown" });
+        log("channel.auth_failed", { session_id: sessionId, error: errorCode(err) });
         reject(socket);
       });
   });
