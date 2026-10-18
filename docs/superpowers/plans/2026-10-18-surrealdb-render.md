@@ -25,7 +25,7 @@ must not change.
 - Never log transcript text, prompts or model output, and never an error's message from the database (it can echo
   query values). Log ids, counts and error codes.
 - Never commit `.env` or a secret. Never run anything that costs money (probes, live replays, real bots).
-- Pin exact SDK versions whose embedded engine matches SurrealDB Cloud's server version (target v3.3.4) as closely
+- Pin exact SDK versions whose embedded engine matches SurrealDB Cloud's server version (target v3.3.2) as closely
   as published packages allow. Record what you chose and why.
 - Engine behavior, routes and the store's guarantees don't change.
 
@@ -86,7 +86,7 @@ value in the Blueprint).
    passwords taken from parameters (`$engine_pass`, `$api_pass`), never written in the file. Idempotent. The runbook
    uses it in Surrealist for Cloud, and compose uses it locally.
 3. **`docker-compose.yml`** at the root, for running the whole stack on a laptop:
-   - `surrealdb`: `surrealdb/surrealdb:v3.3.4`, `surrealkv` on a named volume, root user and password from compose
+   - `surrealdb`: `surrealdb/surrealdb:v3.3.2`, `surrealkv` on a named volume, root user and password from compose
      variables with obvious dev-only defaults, port 8000 on localhost only, a health check.
    - `surrealdb-setup`: one-shot, runs `setup.surql` against it with dev passwords, after it's healthy.
    - `engine`: the engine image, `SURREAL_URL=ws://surrealdb:8000`, `SURREAL_AUTH=database`, the engine user, runs
@@ -109,7 +109,7 @@ value in the Blueprint).
    - **CD:** `autoDeployTrigger: checksPass` on `main` for both, so Render deploys a commit only after CI passes on it.
      A failed health check keeps the old instance serving. Pre-deploy migrations run before the new instance starts.
 5. **CI additions** (`.github/workflows/ci.yml`): a job that builds both images, and a job that runs the engine's store
-   and concurrency tests and `npm run migrate -w @builder/engine` (twice) against a real `surrealdb/surrealdb:v3.3.4`
+   and concurrency tests and `npm run migrate -w @builder/engine` (twice) against a real `surrealdb/surrealdb:v3.3.2`
    service container, using the same setup script (ADR 0011: test against the real server).
 6. **Runbook** (`docs/runbooks/README.md`): create the SurrealDB Cloud instance (Start plan, free, AWS `us-east-1`); create the Recall workspace in `us-east-1`
    and its webhook endpoint pointing at the engine,
