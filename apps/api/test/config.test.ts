@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { ConfigError, loadConfig } from "../src/config.ts";
+import { ConfigError, loadConfig, surrealSettings } from "../src/config.ts";
 
 const pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey.export({ type: "spki", format: "pem" }).toString().trim();
 const token = "t".repeat(32);
@@ -17,7 +17,10 @@ function rejects(env: Record<string, string>, variable: RegExp) {
 }
 
 test("an empty environment gives defaults with every optional part off", () => {
-  assert.deepEqual(loadConfig({}), { port: 3001, clerk: null, engine: null, defaultLimits: null });
+  assert.deepEqual(loadConfig({}), {
+    port: 3001, clerk: null, engine: null, defaultLimits: null,
+    surreal: { url: null, user: null, pass: null, auth: "database", path: "data/surreal" },
+  });
 });
 
 test("blank values count as unset", () => {
@@ -61,4 +64,34 @@ test("default limits parse, must come together and be above 0", () => {
   rejects({ DEFAULT_MAX_USD: "5" }, /DEFAULT_MAX_MINUTES/);
   rejects({ DEFAULT_MAX_USD: "0", DEFAULT_MAX_MINUTES: "60" }, /DEFAULT_MAX_USD/);
   rejects({ DEFAULT_MAX_USD: "5", DEFAULT_MAX_MINUTES: "lots" }, /DEFAULT_MAX_MINUTES/);
+});
+
+test("without SURREAL_URL the api runs SurrealDB in its own process, in data/surreal", () => {
+  assert.deepEqual(surrealSettings({}), { url: null, user: null, pass: null, auth: "database", path: "data/surreal" });
+  assert.equal(surrealSettings({ SURREAL_PATH: " /tmp/x " }).path, "/tmp/x");
+});
+
+test("with SURREAL_URL it signs in as a database user unless SURREAL_AUTH says root", () => {
+  const cloud = { SURREAL_URL: "wss://abc123.aws-use1.surreal.cloud", SURREAL_USER: "api", SURREAL_PASS: "secret" };
+  assert.deepEqual(loadConfig(cloud).surreal, { url: cloud.SURREAL_URL, user: "api", pass: "secret", auth: "database", path: "data/surreal" });
+  assert.equal(surrealSettings({ ...cloud, SURREAL_URL: "ws://127.0.0.1:8000", SURREAL_AUTH: "root" }).auth, "root");
+  assert.throws(() => surrealSettings({ ...cloud, SURREAL_AUTH: "namespace" }), /SURREAL_AUTH must be database, root, or empty/);
+});
+
+test("a SurrealDB server needs a ws:// or wss:// URL and both credentials, and errors never quote them", () => {
+  for (const url of ["https://x.example.com", "not a url"]) {
+    assert.throws(() => surrealSettings({ SURREAL_URL: url, SURREAL_USER: "u", SURREAL_PASS: "p" }),
+      (err: Error) => err instanceof ConfigError && /ws:\/\/ or wss:\/\//.test(err.message) && !err.message.includes("example"));
+  }
+  for (const env of [{ SURREAL_USER: "u" }, { SURREAL_PASS: "hunter2" }, {}]) {
+    assert.throws(() => surrealSettings({ SURREAL_URL: "wss://x.example.com", ...env }), (err: Error) =>
+      /SURREAL_USER and SURREAL_PASS are required/.test(err.message) && !err.message.includes("hunter2"));
+  }
+});
+
+test("production refuses to run without a SurrealDB server", () => {
+  assert.throws(() => loadConfig({ NODE_ENV: "production" }), /SURREAL_URL is required when NODE_ENV=production/);
+  const cloud = { NODE_ENV: "production", SURREAL_URL: "wss://x.example.com", SURREAL_USER: "api", SURREAL_PASS: "p" };
+  assert.equal(loadConfig(cloud).surreal.url, cloud.SURREAL_URL);
+  assert.equal(loadConfig({ NODE_ENV: "development" }).surreal.url, null);
 });
