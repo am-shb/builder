@@ -6,12 +6,16 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.ts",
+    "migrate": "node src/db/migrate.ts",
     "typecheck": "tsc -p .",
     "test": "node --test \"test/**/*.test.ts\"",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@builder/contracts": "*",
-    "@clerk/backend": "^3.23.2"
+    "@clerk/backend": "^3.23.2",
+    "@surrealdb/node": "3.1.0",
+    "@surrealdb/node-native": "3.3.2",
+    "surrealdb": "2.1.1"
   }
 }

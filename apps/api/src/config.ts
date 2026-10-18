@@ -23,6 +23,17 @@ export type Config = {
   engine: EngineConfig | null;
   // Per-session limits until billing exists (decision D5 in docs/plans/api-first-slice.md).
   defaultLimits: SessionLimits | null;
+  // SurrealDB (docs/adr/0011-surrealdb.md): a server with its credentials, or SurrealDB in this process.
+  surreal: SurrealSettings;
+};
+
+export type SurrealSettings = {
+  // ws:// or wss:// (SurrealDB Cloud in production). null: SurrealDB in this process, in `path`.
+  url: string | null;
+  user: string | null;
+  pass: string | null;
+  auth: "database" | "root";
+  path: string;
 };
 
 type Env = Record<string, string | undefined>;
@@ -39,7 +50,33 @@ export function loadConfig(env: Env): Config {
     clerk: readClerk(env),
     engine: readEngine(env),
     defaultLimits: readLimits(env),
+    surreal: surrealSettings(env),
   };
+}
+
+/**
+ * The engine's SURREAL_* rules (apps/engine/src/config.ts), plus one: production needs a server.
+ * - SURREAL_URL set: that server, signed in as SURREAL_USER with SURREAL_PASS. SURREAL_AUTH says what kind of user:
+ *   `database` (the default) is a user defined on namespace builder, database api, as on SurrealDB Cloud; `root` is a
+ *   root user, as on a local `surreal start`.
+ * - Unset: SurrealDB in this process, in SURREAL_PATH (default data/surreal). Refused when NODE_ENV=production, where
+ *   that folder would vanish on the next deploy.
+ */
+export function surrealSettings(env: Env): SurrealSettings {
+  const url = value(env, "SURREAL_URL") ?? null;
+  const auth = value(env, "SURREAL_AUTH") ?? "database";
+  if (auth !== "database" && auth !== "root") throw new ConfigError("SURREAL_AUTH must be database, root, or empty");
+  const user = value(env, "SURREAL_USER") ?? null;
+  // Not trimmed: a password may have spaces.
+  const pass = env.SURREAL_PASS || null;
+  if (url) {
+    const protocol = URL.canParse(url) ? new URL(url).protocol : "";
+    if (protocol !== "ws:" && protocol !== "wss:") throw new ConfigError("SURREAL_URL must be a ws:// or wss:// URL");
+    if (!user || !pass) throw new ConfigError("SURREAL_USER and SURREAL_PASS are required with SURREAL_URL");
+  } else if (value(env, "NODE_ENV") === "production") {
+    throw new ConfigError("SURREAL_URL is required when NODE_ENV=production");
+  }
+  return { url, user, pass, auth, path: value(env, "SURREAL_PATH") ?? "data/surreal" };
 }
 
 const value = (env: Env, name: string) => env[name]?.trim() || undefined;

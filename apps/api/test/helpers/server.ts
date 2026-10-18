@@ -7,6 +7,7 @@ export const testConfig = (over: Partial<Config> = {}): Config => ({
   clerk: null,
   engine: null,
   defaultLimits: null,
+  surreal: { url: null, user: null, pass: null, auth: "database", path: "data/surreal" },
   ...over,
 });
 
