@@ -54,10 +54,11 @@ change the value in the service's Environment tab and save it with a deploy. Edi
   restart. The verifier accepts any matching `v1` signature in the header. A restart restores a live meeting's
   transcript window, open comparison and no-objection timer, but it drops hand-offs waiting for a run and cuts off a
   line Builder is speaking (known issue M2), so rotate between meetings.
-- **`SURREAL_PASS` (the `engine` or `api` database user):** make a new password with `openssl rand -hex 32` and run
-  `infra/surrealdb/setup.surql` again in Surrealist, with the new password for that user and the current one for the
-  other. Then set it on that service in Render right away, and deploy. From the moment the script runs until the
-  deploy, the service can't open a new connection.
+- **`SURREAL_PASS` (the `engine` or `api` database user):** run `node infra/surrealdb/make-user.ts <user>` for that
+  one user, in your own terminal (never through an AI agent or on a shared screen). Run the SurrealQL it prints in
+  Surrealist as root, then set the printed password as that service's `SURREAL_PASS` in Render right away, and deploy.
+  Clear your terminal. The other user is left alone. From the moment the SurrealQL runs until the deploy, the service
+  can't open a new connection.
 - **`ENGINE_INTERNAL_TOKEN`:** change it in the `builder-internal` environment group (Render dashboard, Environment
   Groups). Both services redeploy with it. A start request sent between the two deploys can get 401.
 - **Stage or handoff tokens:** they can't be revoked yet (see [../security/](../security/)). To cut off a leaked
@@ -73,7 +74,7 @@ Everything runs in US East:
 | `builder-engine` | Render web service, Docker, `starter`, region `virginia`, one instance | `render.yaml`, `apps/engine/Dockerfile` |
 | `builder-api` | Render web service, Docker, `starter`, region `virginia` | `render.yaml`, `apps/api/Dockerfile` |
 | `builder-internal` | Render environment group with the generated `ENGINE_INTERNAL_TOKEN`, linked to both services | `render.yaml` |
-| SurrealDB | SurrealDB Cloud, Start plan (free), AWS `us-east-1`, SurrealDB 3.3.2. Namespace `builder`, databases `engine` and `api` | `infra/surrealdb/setup.surql`, each app's `db/` |
+| SurrealDB | SurrealDB Cloud, Start plan (free), AWS `us-east-1`, SurrealDB 3.3.2. Namespace `builder`, databases `engine` and `api` | `infra/surrealdb/make-user.ts` (users), each app's `db/` (schema) |
 | Recall | A workspace in `us-east-1` | Recall dashboard |
 
 **Cost:** the Render Pro workspace ($25 a month) and two `starter` services ($7 each), about $39 a month plus
@@ -84,14 +85,17 @@ bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) 
 1. The instance: Start plan (free), AWS `us-east-1`, SurrealDB 3.3.2. Production's instance exists. Its host is
    `builder-06gktu2jmdup37o5s378tqqjq4.aws-use1.surreal.cloud`, so `SURREAL_URL` is
    `wss://builder-06gktu2jmdup37o5s378tqqjq4.aws-use1.surreal.cloud`. A new one is created from the Cloud dashboard.
-2. Make two passwords on your own machine, one per app user: `openssl rand -hex 32`, twice. Keep them in the password
-   manager until you paste them into Render (step 3).
-3. Open the instance in Surrealist and connect as its root user. Open a new query, paste
-   `infra/surrealdb/setup.surql`, and replace `{{engine_pass}}` and `{{api_pass}}` with the two passwords. Run it. Every
-   statement should say OK. If one fails, nothing was changed: the script runs as one transaction, and it refuses to
-   run with a placeholder left or a password that is too short. Close the query without saving it.
-4. The script defines namespace `builder`, databases `engine` and `api`, and the users `engine` and `api`, each with
-   the OWNER role on its own database only. It never touches data. Run it again to rotate a password.
+2. Make the app users on your own machine, from the repo root after `npm ci` (Node 24):
+   `node infra/surrealdb/make-user.ts engine api`. Run it in your own terminal, never through an AI agent or on a shared screen, because its output contains the
+   passwords. It makes a random password per user, hashes it with SurrealDB's own argon2 function in the process,
+   and prints two things: the SurrealQL to run, which holds only the hashes, and the passwords, once. It writes no
+   file.
+3. Open the instance in Surrealist and connect as its root user. Paste the SurrealQL it printed into a new query and
+   run it. Every statement should say OK. It runs as one transaction, so if one fails nothing was changed. It defines
+   namespace `builder`, databases `engine` and `api`, and the users `engine` and `api`, each with the OWNER role on
+   its own database only (`PASSHASH`, so no password reaches Surrealist). It never touches data.
+4. Paste each password into Render as that service's `SURREAL_PASS` when you create the Blueprint (section 3
+   below), then clear your terminal, scrollback too. The passwords aren't kept anywhere else.
 5. Backups: in the Cloud dashboard, check that the instance's daily backups are on. The free instance keeps one day.
    Raise it to seven, the plan's limit, and try a restore into a new instance before the first customer (ADR 0011).
 6. The free instance pauses itself after seven days without use. While it's paused, deploys fail at the pre-deploy
@@ -120,9 +124,9 @@ bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) 
    |---|---|---|
    | `SURREAL_URL` | both | `wss://builder-06gktu2jmdup37o5s378tqqjq4.aws-use1.surreal.cloud` |
    | `SURREAL_USER` | engine | `engine` |
-   | `SURREAL_PASS` | engine | the engine password from step 1 |
+   | `SURREAL_PASS` | engine | the `engine` password that `make-user.ts` printed |
    | `SURREAL_USER` | api | `api` |
-   | `SURREAL_PASS` | api | the api password from step 1 |
+   | `SURREAL_PASS` | api | the `api` password that `make-user.ts` printed |
    | `RECALL_API_KEY`, `RECALL_WEBHOOK_VERIFICATION_SECRET` | engine | from step 2 |
    | `OPENROUTER_API_KEY` | engine | the OpenRouter key. Empty means listen-only |
    | `TTS_VOICE`, `BOT_VARIANT` | engine | optional, can stay empty (`apps/engine/.env.example`) |

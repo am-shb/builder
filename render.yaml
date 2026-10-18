@@ -42,6 +42,12 @@ services:
         - package-lock.json
         - .nvmrc
         - .dockerignore
+      # Tests, scripts and docs aren't in the image, so a change to them alone doesn't deploy (an engine deploy ends
+      # live meetings).
+      ignoredPaths:
+        - apps/engine/test/**
+        - apps/engine/scripts/**
+        - "**/*.md"
     envVars:
       - key: NODE_ENV
         value: production
@@ -92,6 +98,12 @@ services:
         - package-lock.json
         - .nvmrc
         - .dockerignore
+      # Tests, scripts and docs aren't in the image, so a change to them alone doesn't deploy (an engine deploy ends
+      # live meetings).
+      ignoredPaths:
+        - apps/api/test/**
+        - apps/api/scripts/**
+        - "**/*.md"
     envVars:
       # Makes SURREAL_URL required, so the api never falls back to a database in its own process.
       - key: NODE_ENV

@@ -90,15 +90,15 @@ jobs:
           timeout 60 sh -c "until curl -fsS $SURREAL_HTTP/health; do sleep 1; done"
       # The same setup as docker-compose.yml: namespace builder, databases engine and api, a user for each.
       - run: sh infra/surrealdb/setup.sh
-      # Each app's migrations as its own database user, as Render's pre-deploy command runs them. The second run
-      # must apply nothing.
+      # Each app's migrations as its own database user, as Render's pre-deploy command runs them. The first run must
+      # apply at least one file, the second none.
       - name: Engine migrations, twice
         env:
           SURREAL_URL: ws://127.0.0.1:8000
           SURREAL_USER: engine
           SURREAL_PASS: ${{ env.ENGINE_DB_PASS }}
         run: |
-          npm run -s migrate -w @builder/engine
+          npm run -s migrate -w @builder/engine | tee /dev/stderr | grep -q '"applied":[1-9]'
           npm run -s migrate -w @builder/engine | tee /dev/stderr | grep -q '"applied":0'
       - name: Api migrations, twice
         env:
@@ -106,7 +106,7 @@ jobs:
           SURREAL_USER: api
           SURREAL_PASS: ${{ env.API_DB_PASS }}
         run: |
-          npm run -s migrate -w @builder/api
+          npm run -s migrate -w @builder/api | tee /dev/stderr | grep -q '"applied":[1-9]'
           npm run -s migrate -w @builder/api | tee /dev/stderr | grep -q '"applied":0'
       # The store and db tests, each test on a new database of its own on the server (test/helpers).
       - name: Engine store and concurrency tests
