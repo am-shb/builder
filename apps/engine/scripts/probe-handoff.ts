@@ -173,9 +173,9 @@ const scenarios: Scenario[] = [
 
 for (const sc of scenarios) {
   console.log(`\n== ${sc.name}`);
-  const store = openStore(":memory:");
+  const store = await openStore();
   const sessionId = randomUUID();
-  store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
+  await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
   const runtime = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
   if (sc.doc) runtime(sessionId).setDoc(sc.doc);
   const speech: Speech = { say: async () => randomUUID(), stop() {}, speaking: () => false };
@@ -187,7 +187,7 @@ for (const sc of scenarios) {
   });
   for (const round of sc.rounds) {
     for (const [i, [speaker, text]] of round.entries()) {
-      const e = store.addEvent({ sessionId, recallMsgId: null, kind: "utterance", speaker, text })!;
+      const e = (await store.addEvent({ sessionId, recallMsgId: null, kind: "utterance", speaker, text }))!;
       if (i === round.length - 1) live = true;
       const before = calls;
       loop.onUtterance(sessionId, { id: e.id, speaker, text });
@@ -197,7 +197,7 @@ for (const sc of scenarios) {
     }
   }
   console.log(`  handoffs forwarded: ${handoffs}`);
-  store.close();
+  await store.close();
 }
 
 console.log(`\ncalls=${calls} openrouter_usd=${totalUsd.toFixed(5)} computed_usd=${computedUsd.toFixed(5)}`);

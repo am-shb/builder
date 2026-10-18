@@ -20,6 +20,7 @@ import { buildComparisonView } from "../session/runtime.ts";
 import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
+import { errorCode } from "../error-code.ts";
 
 export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
@@ -89,9 +90,14 @@ type SessionState = {
   lastRunAt: number | null;
   timer: unknown;
   tick: unknown;
-  // Hand-offs accepted so far, and how many of them a finished run has covered.
+  // Hand-offs accepted so far, how many of them are merged into `pending` (they merge in the order they
+  // arrived), and how many a finished run has covered.
   received: number;
+  merged: number;
   settled: number;
+  // A hand-off with a pick reads its grounding lines from the database first. Hand-offs after it wait
+  // here, so they still merge in the order they arrived.
+  intake: Promise<void> | null;
   // Per pending decision ("<id>@<pendingSince>") whose 30 s are up: `received` at that moment.
   due: Map<string, number>;
 };
@@ -139,7 +145,6 @@ const batchLabel = (prefix: "Agreed" | "Reopened", text: string) => {
   return full.length <= LABEL_MAX ? full : `${full.slice(0, LABEL_MAX - 1)}…`;
 };
 
-const errorName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
 
 export function createBuildLoop(deps: {
   port: ModelPort;
@@ -159,9 +164,10 @@ export function createBuildLoop(deps: {
   const ended = new Set<string>();
 
   // The session's own utterances among the given ids, and the people (not Builder) who spoke them.
-  function groundingFor(sessionId: string, groundingIds: number[]) {
+  // `stored` is the session's events from the store.
+  function groundingFor(stored: StoredEvent[], groundingIds: number[]) {
     const ids = new Set(groundingIds);
-    const lines = store.listEvents(sessionId).filter((e) => e.kind === "utterance" && ids.has(e.id));
+    const lines = stored.filter((e) => e.kind === "utterance" && ids.has(e.id));
     const speakers = new Set(lines.map((e) => e.speaker).filter((s): s is string => !!s && s !== botName));
     return { lines, speakers };
   }
@@ -170,9 +176,9 @@ export function createBuildLoop(deps: {
     let st = sessions.get(sessionId);
     if (!st) {
       st = {
-        port: withCostRecording(deps.port, { store, sessionId }),
+        port: withCostRecording(deps.port, { store, sessionId, log }),
         inFlight: false, pending: null, pendingTaskIds: [], tasks: [], taskSeq: 0, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
-        received: 0, settled: 0, due: new Map(),
+        received: 0, merged: 0, settled: 0, intake: null, due: new Map(),
       };
       sessions.set(sessionId, st);
     }
@@ -228,7 +234,7 @@ export function createBuildLoop(deps: {
     try {
       anyPending = view(runtime(sessionId)).doc.decisions.some((d) => d.status === "pending");
     } catch (err) {
-      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tick_failed", { session_id: sessionId, error: errorCode(err) });
       return;
     }
     if (anyPending && st.tick === null) {
@@ -261,16 +267,16 @@ export function createBuildLoop(deps: {
         promote(sessionId, rt, promoted, "timeout");
       }
     } catch (err) {
-      log("build.tick_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tick_failed", { session_id: sessionId, error: errorCode(err) });
     }
     ensureTick(sessionId, st);
   }
 
   // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
   // when a person (not Builder) in this session's grounding lines is behind the hand-off.
-  function resolveChoice(sessionId: string, groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
+  function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
     try {
-      const { speakers } = groundingFor(sessionId, groundingIds);
+      const { speakers } = groundingFor(stored, groundingIds);
       if (speakers.size === 0) {
         log("build.resolve_ungrounded", { session_id: sessionId, conflict_id: choice.conflictId, grounding: groundingIds.length });
         return { kind: "ignored" };
@@ -308,7 +314,7 @@ export function createBuildLoop(deps: {
         },
       };
     } catch (err) {
-      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorName(err) });
+      log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorCode(err) });
       return { kind: "ignored" };
     }
   }
@@ -321,7 +327,7 @@ export function createBuildLoop(deps: {
         timers.clearTimeout(st.timer);
         st.timer = null;
       }
-      run(sessionId, st).catch((err) => log("build.run_failed", { session_id: sessionId, error: errorName(err) }));
+      run(sessionId, st).catch((err) => log("build.run_failed", { session_id: sessionId, error: errorCode(err) }));
     } else if (st.timer === null) {
       st.timer = timers.setTimeout(() => {
         st.timer = null;
@@ -342,7 +348,7 @@ export function createBuildLoop(deps: {
         queued: list.filter((t) => t.state === "queued").length, done: list.filter((t) => t.state === "done").length,
       });
     } catch (err) {
-      log("build.tasks_failed", { session_id: sessionId, error: errorName(err) });
+      log("build.tasks_failed", { session_id: sessionId, error: errorCode(err) });
     }
   }
 
@@ -456,7 +462,7 @@ export function createBuildLoop(deps: {
 
   async function run(sessionId: string, st: SessionState) {
     const h = st.pending!;
-    const through = st.received; // every hand-off received so far is in this run or an earlier one
+    const through = st.merged; // every hand-off merged so far is in this run or an earlier one
     const taskIds = st.pendingTaskIds;
     st.pendingTaskIds = [];
     const startedAt = clock();
@@ -479,7 +485,7 @@ export function createBuildLoop(deps: {
       const live = runtime(sessionId);
       rt = live;
       live.updateMoodInputs({ buildInFlight: true, buildStreaming: false });
-      const { lines: grounding, speakers } = groundingFor(sessionId, h.groundingIds);
+      const { lines: grounding, speakers } = groundingFor(await store.listEvents(sessionId), h.groundingIds);
       const { doc, proto } = view(live);
 
       // Streaming: "building" from the first input delta, and a placeholder where the
@@ -537,7 +543,7 @@ export function createBuildLoop(deps: {
             parentRe.lastIndex = 0;
           }
         } catch (err) {
-          log("build.stream_apply_failed", { session_id: sessionId, error: errorName(err) });
+          log("build.stream_apply_failed", { session_id: sessionId, error: errorCode(err) });
         }
       };
 
@@ -564,7 +570,7 @@ export function createBuildLoop(deps: {
       }
     } catch (err) {
       log("build.run_failed", {
-        session_id: sessionId, stage, error: errorName(err),
+        session_id: sessionId, stage, error: errorCode(err),
         status: (err as { status?: unknown } | null)?.status ?? null,
       });
     } finally {
@@ -574,12 +580,51 @@ export function createBuildLoop(deps: {
         if (rt && region) rt.pendingRegion(null);
         rt?.updateMoodInputs({ buildInFlight: false, buildStreaming: false });
       } catch (err) {
-        log("build.cleanup_failed", { session_id: sessionId, error: errorName(err) });
+        log("build.cleanup_failed", { session_id: sessionId, error: errorCode(err) });
       }
       finishTasks(sessionId, st, taskIds, patchCounts.applied > 0 || opsApplied > 0);
       ensureTick(sessionId, st);
       schedule(sessionId, st);
     }
+  }
+
+  // Merges an accepted hand-off into the pending one and schedules a run. `stored` is the session's events,
+  // read only when the hand-off carries a pick.
+  function take(sessionId: string, st: SessionState, input: Handoff, stored: StoredEvent[]): void {
+    // Counted first, so a hand-off lost to an error here can't hold a promotion back for good.
+    st.merged++;
+    // The model sees resolvedChoice only for a pick merged just now, so "already merged" is true
+    // (known issue I3). A pick not acted on, or for a conflict resolved before, is removed; a new
+    // pick whose winner no longer applies becomes a proposal to draw it again.
+    let resolved = false;
+    const topics = input.topics.map((t) => {
+      if (!t.resolvedChoice) return t;
+      const pick = resolveChoice(sessionId, stored, input.groundingIds, t.resolvedChoice);
+      if (pick.kind === "merged") {
+        resolved = true;
+        return t;
+      }
+      const { resolvedChoice: _dropped, ...rest } = t;
+      if (pick.kind !== "unmerged") return rest;
+      resolved = true;
+      return { ...rest, proposals: [...rest.proposals, pick.redraw] };
+    });
+    const h: Handoff = { ...input, topics };
+    if (!st.pending) st.pendingSince = clock();
+    st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
+    const ids: string[] = [];
+    for (const t of topics) {
+      const text = taskText(t);
+      if (!text) continue;
+      const id = `t${++st.taskSeq}`;
+      st.tasks.push({ id, text, state: "queued" });
+      ids.push(id);
+    }
+    st.pendingTaskIds.push(...ids);
+    pushTasks(sessionId, st);
+    if (resolved) st.bypassFloor = true;
+    schedule(sessionId, st);
+    ensureTick(sessionId, st);
   }
 
   return {
@@ -596,38 +641,22 @@ export function createBuildLoop(deps: {
       const st = state(sessionId);
       st.received++;
       log("build.handoff", { session_id: sessionId, topics: parsed.data.topics.length, grounding: parsed.data.groundingIds.length });
-      // The model sees resolvedChoice only for a pick merged just now, so "already merged" is true
-      // (known issue I3). A pick not acted on, or for a conflict resolved before, is removed; a new
-      // pick whose winner no longer applies becomes a proposal to draw it again.
-      let resolved = false;
-      const topics = parsed.data.topics.map((t) => {
-        if (!t.resolvedChoice) return t;
-        const pick = resolveChoice(sessionId, parsed.data.groundingIds, t.resolvedChoice);
-        if (pick.kind === "merged") {
-          resolved = true;
-          return t;
-        }
-        const { resolvedChoice: _dropped, ...rest } = t;
-        if (pick.kind !== "unmerged") return rest;
-        resolved = true;
-        return { ...rest, proposals: [...rest.proposals, pick.redraw] };
-      });
-      const h: Handoff = { ...parsed.data, topics };
-      if (!st.pending) st.pendingSince = clock();
-      st.pending = st.pending ? mergeHandoffs(st.pending, h) : h;
-      const ids: string[] = [];
-      for (const t of topics) {
-        const text = taskText(t);
-        if (!text) continue;
-        const id = `t${++st.taskSeq}`;
-        st.tasks.push({ id, text, state: "queued" });
-        ids.push(id);
-      }
-      st.pendingTaskIds.push(...ids);
-      pushTasks(sessionId, st);
-      if (resolved) st.bypassFloor = true;
-      schedule(sessionId, st);
-      ensureTick(sessionId, st);
+      const picks = parsed.data.topics.some((t) => t.resolvedChoice);
+      // Without a pick, and nothing ahead of it, a hand-off is taken at once, as before.
+      if (!picks && !st.intake) return take(sessionId, st, parsed.data, []);
+      const intake: Promise<void> = (st.intake ?? Promise.resolve())
+        .then(async () => {
+          let stored: StoredEvent[] = [];
+          // Unread grounding grounds nobody, so a pick is not acted on: agreement needs real lines (spec §4).
+          if (picks) stored = await store.listEvents(sessionId).catch((err) => {
+            log("build.grounding_failed", { session_id: sessionId, error: errorCode(err) });
+            return [];
+          });
+          if (!ended.has(sessionId)) take(sessionId, st, parsed.data, stored);
+        })
+        .catch((err) => log("build.handoff_failed", { session_id: sessionId, error: errorCode(err) }))
+        .finally(() => { if (st.intake === intake) st.intake = null; });
+      st.intake = intake;
     },
 
     // After a restart (known issue M2): the no-objection timer runs again for decisions still pending.
@@ -649,9 +678,16 @@ export function createBuildLoop(deps: {
       log("build.ended", { session_id: sessionId, in_flight: st?.inFlight ?? false });
     },
 
+    // While a hand-off is still being taken, a promise that settles once the ones received so far are; null when
+    // nothing is pending. A pick reads its grounding lines from the store first, so the conflict it settles is
+    // resolved (and the winner merged) only then. Commands and speech in the same turn wait for this.
+    taken(sessionId: string): Promise<void> | null {
+      return sessions.get(sessionId)?.intake ?? null;
+    },
+
     idle(sessionId: string): boolean {
       const st = sessions.get(sessionId);
-      return !st || (!st.inFlight && st.pending === null && st.timer === null);
+      return !st || (!st.inFlight && st.pending === null && st.timer === null && st.intake === null);
     },
   };
 }

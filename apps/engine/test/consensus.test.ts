@@ -11,7 +11,7 @@ import {
 } from "../src/consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../src/consensus/doc.ts";
 import { emptyPrototype } from "../src/ui/tree.ts";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 
 function decision(over: Partial<Decision> = {}): Decision {
   return { id: "d1", text: "Use a sidebar", status: "draft", proposedBy: "Ann", agreedBy: [], affects: [], rejectedOptions: [], ...over };
@@ -130,14 +130,14 @@ test("resolveConflict twice does not duplicate the decision", () => {
   assert.throws(() => resolveConflict(doc, "nope", "A", 0));
 });
 
-test("store round-trips consensus doc and prototype", () => {
-  const store = openStore(":memory:");
-  assert.equal(store.getConsensus("s1"), undefined);
+test("store round-trips consensus doc and prototype", async () => {
+  const store = await testStore();
+  assert.equal(await store.getConsensus("s1"), undefined);
   const doc = markPending(docWith(decision()), "d1", 123);
   const proto = emptyPrototype("Demo");
-  store.saveConsensus("s1", doc, proto);
-  assert.deepEqual(store.getConsensus("s1"), { doc, proto });
-  store.saveConsensus("s1", emptyDoc(), proto);
-  assert.equal(store.getConsensus("s1")!.doc.phase, "opening");
-  store.close();
+  await store.saveConsensus("s1", doc, proto);
+  assert.deepEqual(await store.getConsensus("s1"), { doc, proto });
+  await store.saveConsensus("s1", emptyDoc(), proto);
+  assert.equal((await store.getConsensus("s1"))!.doc.phase, "opening");
+  await store.close();
 });

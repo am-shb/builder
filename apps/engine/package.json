@@ -12,6 +12,7 @@
     "local": "node src/server.ts --local",
     "smoke": "node src/server.ts --smoke",
     "replay": "node scripts/replay.ts",
+    "migrate": "node src/db/migrate.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test && npm run smoke",
@@ -19,10 +20,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+    "@surrealdb/node": "3.1.0",
+    "@surrealdb/node-native": "3.3.2",
+    "surrealdb": "2.1.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
   }
 }

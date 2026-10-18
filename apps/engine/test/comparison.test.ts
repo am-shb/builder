@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openStore } from "../src/store.ts";
+import { testStore } from "./helpers/store.ts";
 import { buildComparisonView, createRuntime, nextComparison } from "../src/session/runtime.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { applyBatch, emptyPrototype, findNode } from "../src/ui/tree.ts";
@@ -82,9 +82,9 @@ test("buildComparisonView drops invalid variants and requires ≥2", () => {
   ])), null);
 });
 
-test("resolveComparison applies winner batch to main proto and records decision", () => {
-  const store = openStore(":memory:");
-  const s = store.createIntent("66666666-6666-6666-6666-666666666666", "https://meet.google.com/x");
+test("resolveComparison applies winner batch to main proto and records decision", async () => {
+  const store = await testStore();
+  const s = await store.createIntent("66666666-6666-6666-6666-666666666666", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 }, clock: () => 5000 })(s.id);
   assert.equal(rt.applyBatch(BASE).ok, true);
@@ -99,7 +99,8 @@ test("resolveComparison applies winner batch to main proto and records decision"
   assert.deepEqual(sent.map((e) => e.type), ["resolve", "patch", "doc"]);
   assert.deepEqual(sent[0], { type: "resolve", conflictId: "c1", winner: "B" });
 
-  const saved = store.getConsensus(s.id)!;
+  await rt.saved();
+  const saved = (await store.getConsensus(s.id))!;
   assert.ok(findNode(saved.proto, "home.done"), "the winner's batch is in the main prototype");
   assert.equal(findNode(saved.proto, "home.show-done"), undefined, "losers are not applied");
   assert.equal(findNode(saved.proto, "home.tabs"), undefined);
@@ -114,9 +115,9 @@ test("resolveComparison applies winner batch to main proto and records decision"
   assert.ok(findNode(snap.proto, "home.done"));
 });
 
-test("resolveComparison with an unknown conflict returns ok:false and sends nothing", () => {
-  const store = openStore(":memory:");
-  const s = store.createIntent("77777777-7777-7777-7777-777777777777", "https://meet.google.com/x");
+test("resolveComparison with an unknown conflict returns ok:false and sends nothing", async () => {
+  const store = await testStore();
+  const s = await store.createIntent("77777777-7777-7777-7777-777777777777", "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const rt = createRuntime({
@@ -127,7 +128,8 @@ test("resolveComparison with an unknown conflict returns ok:false and sends noth
   const two = conflict(THREE.variants.slice(0, 2));
   rt.setDoc(docWith(two));
   rt.showComparison(buildComparisonView(baseProto(), two));
-  const before = JSON.stringify(store.getConsensus(s.id));
+  await rt.saved();
+  const before = JSON.stringify(await store.getConsensus(s.id));
   const snapBefore = JSON.stringify(rt.snapshot());
   sent.length = 0;
 
@@ -137,7 +139,8 @@ test("resolveComparison with an unknown conflict returns ok:false and sends noth
     assert.equal(typeof r.error, "string");
   }
   assert.deepEqual(sent, [], "no events");
-  assert.equal(JSON.stringify(store.getConsensus(s.id)), before, "nothing persisted");
+  await rt.saved();
+  assert.equal(JSON.stringify(await store.getConsensus(s.id)), before, "nothing persisted");
   assert.equal(JSON.stringify(rt.snapshot()), snapBefore, "the comparison stays open, the doc unchanged");
   assert.deepEqual(logs, [
     { msg: "runtime.resolve_unknown", fields: { session_id: s.id, conflict_id: "nope", winner: "A" } },
@@ -154,9 +157,9 @@ const SECOND: Conflict = {
   ],
 };
 
-function twoConflicts(id: string) {
-  const store = openStore(":memory:");
-  const s = store.createIntent(id, "https://meet.google.com/x");
+async function twoConflicts(id: string) {
+  const store = await testStore();
+  const s = await store.createIntent(id, "https://meet.google.com/x");
   const sent: StageEvent[] = [];
   const rt = createRuntime({ store, channel: { send: (_i, ev) => sent.push(ev), sendAudio() {}, clients: () => 0 } })(s.id);
   assert.equal(rt.applyBatch(BASE).ok, true);
@@ -165,8 +168,8 @@ function twoConflicts(id: string) {
   return { store, id: s.id, sent, rt, snap };
 }
 
-test("resolving a conflict that is not on screen leaves the comparison that is (known issue M1)", () => {
-  const { sent, rt, snap } = twoConflicts("abababab-abab-abab-abab-abababababab");
+test("resolving a conflict that is not on screen leaves the comparison that is (known issue M1)", async () => {
+  const { sent, rt, snap } = await twoConflicts("abababab-abab-abab-abab-abababababab");
   assert.equal(nextComparison(baseProto(), snap().doc)?.conflictId, "c1", "the first conflict raised goes first");
   rt.showComparison(buildComparisonView(baseProto(), SECOND));
   sent.length = 0;
@@ -180,8 +183,8 @@ test("resolving a conflict that is not on screen leaves the comparison that is (
   assert.equal(snap().comparison, null);
 });
 
-test("resolving the comparison on screen brings up the next open conflict, built on the merged prototype (known issue M1)", () => {
-  const { sent, rt, snap } = twoConflicts("bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc");
+test("resolving the comparison on screen brings up the next open conflict, built on the merged prototype (known issue M1)", async () => {
+  const { sent, rt, snap } = await twoConflicts("bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc");
   rt.showComparison(buildComparisonView(baseProto(), THREE));
   sent.length = 0;
   rt.resolveComparison("c1", "B");
@@ -192,22 +195,22 @@ test("resolving the comparison on screen brings up the next open conflict, built
   assert.equal(snap().comparison?.conflictId, "c2");
 });
 
-test("a runtime made from a saved doc shows the open comparison again (known issue M2)", () => {
-  const store = openStore(":memory:");
-  const s = store.createIntent("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", "https://meet.google.com/x");
-  store.saveConsensus(s.id, docWith(THREE), baseProto());
-  const rt = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(s.id);
+test("a runtime made from a saved doc shows the open comparison again (known issue M2)", async () => {
+  const store = await testStore();
+  const s = await store.createIntent("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", "https://meet.google.com/x");
+  await store.saveConsensus(s.id, docWith(THREE), baseProto());
+  const rt = await createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } }).load(s.id);
   const view = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison;
   assert.equal(view?.conflictId, "c1");
   assert.deepEqual(view?.variants.map((v) => v.label), ["A", "B", "C"]);
 
   // An open conflict whose options no longer apply has nothing to show.
-  const t = store.createIntent("dededede-dede-dede-dede-dededededede", "https://meet.google.com/y");
-  store.saveConsensus(t.id, docWith(conflict([
+  const t = await store.createIntent("dededede-dede-dede-dede-dededededede", "https://meet.google.com/y");
+  await store.saveConsensus(t.id, docWith(conflict([
     { label: "A", summary: "x", backers: [], batch: broken },
     { label: "B", summary: "y", backers: [], batch: broken },
   ])), baseProto());
-  assert.equal((createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } })(t.id).snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison, null);
+  assert.equal(((await createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 } }).load(t.id)).snapshot() as Extract<StageEvent, { type: "snapshot" }>).comparison, null);
 });
 
 // Geometry and content of the comparison view as the stage shows it.

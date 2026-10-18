@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Prototype, Change, Interaction } from "../ui/schema.ts";
 import type { ConsensusDoc } from "../consensus/doc.ts";
 import type { Mood } from "../session/mood.ts";
+import { errorCode } from "../error-code.ts";
 
 // Someone is talking: all the stage needs to animate the character. It carries no speaker or text,
 // because the stage token is handed to the bot and the stage shows no transcript (spec §10a).
@@ -48,7 +49,8 @@ const MAX_CLIENT_MESSAGE = 64 * 1024;
 
 export function createStageChannel(
   server: http.Server,
-  auth: (sessionId: string, token: string) => boolean,
+  // May be async: it reads the session's token from the database, and can load the session before the snapshot.
+  auth: (sessionId: string, token: string) => boolean | Promise<boolean>,
   onClientMessage: (sessionId: string, msg: unknown) => void,
   snapshotFor: (sessionId: string) => StageEvent,
   log: (msg: string, fields?: Record<string, unknown>) => void = () => {},
@@ -57,6 +59,7 @@ export function createStageChannel(
   const bySession = new Map<string, Set<WebSocket>>();
 
   function reject(socket: Duplex) {
+    if (socket.destroyed) return;
     socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     socket.destroy();
   }
@@ -66,7 +69,19 @@ export function createStageChannel(
     const m = url.pathname.match(WS_PATH);
     if (!m) return void socket.destroy();
     const sessionId = m[1];
-    if (!auth(sessionId, url.searchParams.get("token") ?? "")) return reject(socket);
+    // The client can drop the connection while auth is pending; without a listener that error would throw.
+    socket.on("error", () => socket.destroy());
+    Promise.resolve()
+      .then(() => auth(sessionId, url.searchParams.get("token") ?? ""))
+      .then((ok) => (ok ? upgrade(req, socket, head, sessionId) : reject(socket)))
+      .catch((err) => {
+        log("channel.auth_failed", { session_id: sessionId, error: errorCode(err) });
+        reject(socket);
+      });
+  });
+
+  function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, sessionId: string) {
+    if (socket.destroyed) return;
     wss.handleUpgrade(req, socket, head, (ws) => {
       const set = bySession.get(sessionId) ?? new Set();
       set.add(ws);
@@ -91,7 +106,7 @@ export function createStageChannel(
         ws.terminate();
       }
     });
-  });
+  }
 
   const pinger = setInterval(() => {
     for (const set of bySession.values()) for (const ws of set) if (ws.readyState === WebSocket.OPEN) ws.ping();

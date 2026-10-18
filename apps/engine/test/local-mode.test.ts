@@ -4,7 +4,7 @@ import http from "node:http";
 import { loadConfig, loadLocalConfig } from "../src/config.ts";
 import { createLocalRecall } from "../src/local-recall.ts";
 import { createRecallClient } from "../src/recall-client.ts";
-import { openStore } from "../src/store.ts";
+import { settle, testStore } from "./helpers/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { createFakePort } from "../src/agent/llm.ts";
 import { signForTest } from "../src/verify.ts";
@@ -14,14 +14,14 @@ after(() => { for (const s of openServers) { s.closeAllConnections(); s.close();
 
 async function startLocal(opts: { speaking?: boolean } = {}) {
   const config = loadLocalConfig({});
-  const store = openStore(":memory:");
+  const store = await testStore();
   const stops: string[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const agent = opts.speaking === undefined ? undefined : {
     port: createFakePort([]),
     speech: { say: async () => "u", stop: (id: string) => void stops.push(id), speaking: () => opts.speaking! },
   };
-  const app = createApp({
+  const app = await createApp({
     config, store, recall: createLocalRecall(), log: (msg, fields) => logs.push({ msg, fields }),
     indexHtml: "<html></html>", stageHtml: "<html>stage</html>", localHtml: "<html>local</html>", ...(agent ? { agent } : {}),
   });
@@ -45,7 +45,10 @@ test("local config needs no Recall settings and serves the stage from localhost"
   const c = loadLocalConfig({ PORT: "4100", OPENROUTER_API_KEY: "k", TTS_VOICE: "george" });
   assert.equal(c.local, true);
   assert.equal(c.publicBaseUrl, "http://localhost:4100");
-  assert.equal(c.dbPath, "data/local.db");
+  assert.equal(c.surreal.url, null);
+  assert.equal(c.surreal.path, "data/local-surreal");
+  assert.equal(loadLocalConfig({ SURREAL_URL: "wss://real.example.com", SURREAL_USER: "u", SURREAL_PASS: "p" }).surreal.url, null,
+    "local sessions never go to the real database");
   assert.ok(c.verificationSecret.startsWith("whsec_"));
   assert.notEqual(c.verificationSecret, loadLocalConfig({}).verificationSecret, "webhook secret is random per run");
   assert.equal(c.agentEnabled, true);
@@ -73,9 +76,9 @@ test("local session starts recording at once; mic speech is stored like a Recall
   assert.equal((await post(`${base}/api/sessions/${session.id}/speech`, { kind: "join", speaker: "Amir" })).status, 200);
   assert.equal((await post(`${base}/api/sessions/${session.id}/speech`, { kind: "partial", speaker: "Amir", text: "a to do" })).status, 200);
   assert.equal((await post(`${base}/api/sessions/${session.id}/speech`, { kind: "utterance", speaker: "Amir", text: "a to do app please" })).status, 200);
-  await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 20)); await settle();
 
-  const kinds = store.listEvents(session.id).map((e) => [e.kind, e.speaker, e.text]);
+  const kinds = (await store.listEvents(session.id)).map((e) => [e.kind, e.speaker, e.text]);
   assert.deepEqual(kinds, [["join", "Amir", null], ["utterance", "Amir", "a to do app please"]]);
   assert.ok(!JSON.stringify(logs).includes("to do"), "no transcript text in logs");
 });
@@ -109,7 +112,7 @@ test("a mic partial while Builder is talking stops Builder (barge-in)", async ()
   const { base, stops } = await startLocal({ speaking: true });
   const session = await newLocalSession(base);
   await post(`${base}/api/sessions/${session.id}/speech`, { kind: "partial", speaker: "Amir", text: "wait" });
-  await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 20)); await settle();
   assert.deepEqual(stops, [session.id]);
 });
 
@@ -118,9 +121,9 @@ test("outside local mode the local routes do not exist", async () => {
     RECALL_REGION: "us-west-2", RECALL_API_KEY: "k", RECALL_WEBHOOK_VERIFICATION_SECRET: "whsec_" + Buffer.from("s").toString("base64"),
     PUBLIC_API_BASE_URL: "https://a.example.com",
   });
-  const store = openStore(":memory:");
+  const store = await testStore();
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: async () => Response.json({ id: "b1" }, { status: 201 }) });
-  const app = createApp({ config, store, recall, log: () => {}, indexHtml: "", stageHtml: "", localHtml: "" });
+  const app = await createApp({ config, store, recall, log: () => {}, indexHtml: "", stageHtml: "", localHtml: "" });
   const server = http.createServer(app.handler);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   openServers.add(server);
