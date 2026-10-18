@@ -1,16 +1,18 @@
 // Build loop: turns conversation hand-offs into consensus-document updates and
 // prototype patches with Opus. One run in flight per session; hand-offs that arrive
 // meanwhile merge into the next run, at most one run per 3 s unless a conflict was
-// just resolved. Each patch batch is applied as soon as the model finishes writing it. Also promotes pending decisions after 30 s without objection.
+// just resolved. Each patch batch is applied as soon as the model finishes writing it.
+// Also promotes pending decisions after 30 s without objection. When the call ends,
+// end() stops all of it, so the consensus and the handoff are final (spec §14).
 // Logs ids, counts and durations only: never transcript text, prompts or model output.
 import { readFileSync } from "node:fs";
 import { withCostRecording } from "./cost.ts";
 import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
-import { applyConsensusOps, enforceGrounding, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
-import type { ConsensusUpdate, Handoff, Topic } from "./handoff.ts";
+import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
+import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
-import type { PatchBatch, Prototype } from "../ui/schema.ts";
+import type { PatchBatch, Prototype, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch } from "../ui/tree.ts";
 import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
@@ -67,7 +69,7 @@ const TOOLS: PortTool[] = [
 ];
 
 // What a topic shows in the to-do list: its own short task line, else its title.
-export function taskText(t: Topic): string {
+export function taskText(t: Handoff["topics"][number]): string {
   const text = (t.task?.trim() || t.title.trim());
   return text.length <= TASK_MAX ? text : `${text.slice(0, TASK_MAX - 1).trimEnd()}…`;
 }
@@ -87,7 +89,18 @@ type SessionState = {
   lastRunAt: number | null;
   timer: unknown;
   tick: unknown;
+  // Hand-offs accepted so far, and how many of them a finished run has covered.
+  received: number;
+  settled: number;
+  // Per pending decision ("<id>@<pendingSince>") whose 30 s are up: `received` at that moment.
+  due: Map<string, number>;
 };
+
+// What the room's pick did. "ignored": not acted on (ungrounded, an unknown conflict or label, or
+// an error). "settled": the conflict was already resolved, so nothing is new. "merged": resolved
+// now, with the winner on the prototype. "unmerged": resolved now, but the winner's batch no longer
+// applies, so `redraw` asks the model to draw it again (known issue I3).
+type Pick = { kind: "ignored" } | { kind: "settled" } | { kind: "merged" } | { kind: "unmerged"; redraw: Proposal };
 
 function mergeHandoffs(a: Handoff, b: Handoff): Handoff {
   const merged: Handoff = {
@@ -142,6 +155,8 @@ export function createBuildLoop(deps: {
   const timers = deps.timers ?? realTimers;
   const botName = deps.botName ?? "Builder";
   const sessions = new Map<string, SessionState>();
+  // Sessions whose call is over: no runs, no promotions, no hand-offs (known issue I5).
+  const ended = new Set<string>();
 
   // The session's own utterances among the given ids, and the people (not Builder) who spoke them.
   function groundingFor(sessionId: string, groundingIds: number[]) {
@@ -157,17 +172,29 @@ export function createBuildLoop(deps: {
       st = {
         port: withCostRecording(deps.port, { store, sessionId }),
         inFlight: false, pending: null, pendingTaskIds: [], tasks: [], taskSeq: 0, pendingSince: null, bypassFloor: false, lastRunAt: null, timer: null, tick: null,
+        received: 0, settled: 0, due: new Map(),
       };
       sessions.set(sessionId, st);
     }
     return st;
   };
 
-  // Sets a decision's existing nodes to one status in one batch, skipping ids that no longer
-  // exist. The only code path that marks nodes agreed: model batches are sanitised to draft.
+  // Sets a decision's nodes (those it affects, then those drawn with its id) to one status in one
+  // batch, skipping ids that no longer exist and nodes already in that state. Reopening leaves a
+  // node that another decision has agreed since. The only code path that marks nodes agreed:
+  // model batches are sanitised to draft.
   function flipNodes(sessionId: string, rt: SessionRuntime, d: Decision, status: "agreed" | "draft") {
     const proto = view(rt).proto;
-    const ids = [...new Set(d.affects)].filter((id) => findNode(proto, id));
+    const drawn: string[] = [];
+    const walk = (n: UiNode) => {
+      if (n.decisionId === d.id) drawn.push(n.id);
+      n.children.forEach(walk);
+    };
+    walk(proto.root);
+    const flips = (n: UiNode | undefined) => !!n && (status === "agreed"
+      ? n.status !== "agreed" || n.decisionId !== d.id
+      : n.status === "agreed" && (n.decisionId === undefined || n.decisionId === d.id));
+    const ids = [...new Set([...d.affects, ...drawn])].filter((id) => flips(findNode(proto, id)));
     if (!ids.length) return;
     const r = rt.applyBatch({
       label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text),
@@ -188,7 +215,15 @@ export function createBuildLoop(deps: {
     rt.updateMoodInputs({ pleasedUntil: clock() + PLEASED_MS });
   }
 
+  function stopTimers(st: SessionState) {
+    if (st.timer !== null) timers.clearTimeout(st.timer);
+    if (st.tick !== null) timers.clearInterval(st.tick);
+    st.timer = null;
+    st.tick = null;
+  }
+
   function ensureTick(sessionId: string, st: SessionState) {
+    if (ended.has(sessionId)) return stopTimers(st);
     let anyPending: boolean;
     try {
       anyPending = view(runtime(sessionId)).doc.decisions.some((d) => d.status === "pending");
@@ -204,10 +239,23 @@ export function createBuildLoop(deps: {
     }
   }
 
+  // A hand-off received before a pending decision's 30 s ran out can carry an objection to it, so
+  // the promotion waits until every such hand-off has been applied (known issue M10). Hand-offs
+  // received later don't hold it up, so the wait is at most the run in flight plus the next one.
+  function objectionsApplied(st: SessionState, d: Decision): boolean {
+    const key = `${d.id}@${d.pendingSince}`;
+    let through = st.due.get(key);
+    if (through === undefined) st.due.set(key, (through = st.received));
+    return st.settled >= through;
+  }
+
   function tick(sessionId: string, st: SessionState) {
+    if (ended.has(sessionId)) return stopTimers(st);
     try {
       const rt = runtime(sessionId);
-      const { doc, promoted } = tickAgreement(view(rt).doc, clock());
+      const { doc, promoted } = tickAgreement(view(rt).doc, clock(), (d) => objectionsApplied(st, d));
+      const waiting = new Set(doc.decisions.filter((d) => d.status === "pending").map((d) => `${d.id}@${d.pendingSince}`));
+      for (const key of st.due.keys()) if (!waiting.has(key)) st.due.delete(key);
       if (promoted.length) {
         rt.setDoc(doc);
         promote(sessionId, rt, promoted, "timeout");
@@ -220,12 +268,12 @@ export function createBuildLoop(deps: {
 
   // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
   // when a person (not Builder) in this session's grounding lines is behind the hand-off.
-  // Returns whether the pick was acted on.
-  function resolveChoice(sessionId: string, groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): boolean {
+  function resolveChoice(sessionId: string, groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
     try {
-      if (groundingFor(sessionId, groundingIds).speakers.size === 0) {
+      const { speakers } = groundingFor(sessionId, groundingIds);
+      if (speakers.size === 0) {
         log("build.resolve_ungrounded", { session_id: sessionId, conflict_id: choice.conflictId, grounding: groundingIds.length });
-        return false;
+        return { kind: "ignored" };
       }
       const rt = runtime(sessionId);
       const before = view(rt).doc;
@@ -233,28 +281,40 @@ export function createBuildLoop(deps: {
       const r = rt.resolveComparison(choice.conflictId, choice.winner);
       if (!r.ok) {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
-        return false;
+        return { kind: "ignored" };
       }
-      if (conflict?.status !== "open") return true;
+      if (conflict?.status !== "open") return { kind: "settled" };
       const variant = conflict.variants.find((v) => v.label === choice.winner);
       const after = view(rt).doc;
       const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
-      if (!variant || !decision) return true;
-      // A winner batch that did not apply changed nothing, so it marks nothing agreed.
-      const proto = view(rt).proto;
-      const touched = r.applied ? touchedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
-      const affects = [...new Set([...decision.affects, ...touched])];
-      rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
-      promote(sessionId, rt, [decision.id], "conflict");
-      return true;
+      if (variant && decision) {
+        // A winner batch that did not apply changed nothing, so it marks nothing agreed.
+        const proto = view(rt).proto;
+        const touched = r.applied ? touchedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
+        const affects = [...new Set([...decision.affects, ...touched])];
+        rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
+        promote(sessionId, rt, [decision.id], "conflict");
+      }
+      if (r.applied) return { kind: "merged" };
+      // Recorded, but the prototype doesn't show the winner: the model draws it again, credited to
+      // someone heard in this hand-off (one of the winner's backers when one of them spoke).
+      log("build.resolve_unmerged", { session_id: sessionId, conflict_id: choice.conflictId });
+      const proposedBy = variant?.backers.find((b) => speakers.has(b)) ?? [...speakers][0];
+      return {
+        kind: "unmerged",
+        redraw: {
+          text: `Redraw option ${choice.winner} of conflict ${choice.conflictId}, which the room picked (decision d-${choice.conflictId}): ${variant?.summary ?? ""}`,
+          proposedBy, supporters: [], objectors: [],
+        },
+      };
     } catch (err) {
       log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId, error: errorName(err) });
-      return false;
+      return { kind: "ignored" };
     }
   }
 
   function schedule(sessionId: string, st: SessionState) {
-    if (st.inFlight || !st.pending) return;
+    if (st.inFlight || !st.pending || ended.has(sessionId)) return;
     const wait = st.bypassFloor || st.lastRunAt === null ? 0 : Math.max(0, st.lastRunAt + RUN_FLOOR_MS - clock());
     if (wait === 0) {
       if (st.timer !== null) {
@@ -301,23 +361,66 @@ export function createBuildLoop(deps: {
     pushTasks(sessionId, st);
   }
 
-  // apply_patches calls were applied while streaming; their counts arrive in `streamed`.
+  // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
+  // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
+  function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
+    const credit = groundCredit(input, speakers);
+    const snap = view(rt);
+    return { batch: sanitizeModelBatch(fromToolBatch(credit.batch), snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped };
+  }
+
+  type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number };
+
+  // Applies one prepared batch and counts what happened. True when it changed the screen.
+  function applyPrepared(sessionId: string, rt: SessionRuntime, batch: PatchBatch, opsGiven: number, counts: PatchCounts): boolean {
+    // Every op changed nothing or would have changed what was agreed: nothing to draw.
+    if (!batch.ops.length) {
+      counts.empty++;
+      return false;
+    }
+    const r = rt.applyBatch(batch);
+    if (r.ok) counts.applied++;
+    else {
+      counts.rejected++;
+      log("build.batch_rejected", { session_id: sessionId, reason: "does_not_apply", ops: opsGiven });
+    }
+    return r.ok;
+  }
+
+  // apply_patches calls were applied while streaming, except `deferred` ones: batches removing an
+  // agreed node, which wait for this run's consensus ops to say whether its decision reopens.
   function applyResult(
     sessionId: string, rt: SessionRuntime, result: RunToolsResult, speakers: Set<string>,
-    streamed: { applied: number; rejected: number },
+    patchCounts: PatchCounts, deferred: ToolPatchBatch[],
   ) {
-    const counts = { patches_applied: streamed.applied, patches_rejected: streamed.rejected, consensus_invalid: 0, ops: 0, grounding_dropped: 0, promoted: 0, reopened: 0, conflicts: 0 };
     const ops: ConsensusUpdate[] = [];
+    let consensusInvalid = 0;
     for (const call of result.toolCalls) {
       if (call.name !== "update_consensus") continue;
       const parsed = UpdateConsensusInput.safeParse(call.input);
       if (parsed.success) ops.push(...parsed.data.ops);
-      else counts.consensus_invalid++;
+      else consensusInvalid++;
     }
-
     const grounded = enforceGrounding(ops, speakers);
-    counts.ops = grounded.ops.length;
-    counts.grounding_dropped = grounded.dropped;
+    // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
+    const current = view(rt).doc;
+    const planned = applyConsensusOps(current, grounded.ops, clock()).doc;
+    const reopening = new Set(current.decisions
+      .filter((d) => d.status === "agreed" && planned.decisions.find((p) => p.id === d.id)?.status !== "agreed")
+      .map((d) => d.id));
+
+    // Deferred patches before the ops, so decisions and conflicts can reference the nodes they add.
+    for (const input of deferred) {
+      const { batch, creditDropped } = prepareBatch(input, rt, speakers, reopening);
+      patchCounts.creditDropped += creditDropped;
+      applyPrepared(sessionId, rt, batch, input.ops.length, patchCounts);
+    }
+    const counts = {
+      patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty,
+      consensus_invalid: consensusInvalid, ops: grounded.ops.length, grounding_dropped: grounded.dropped + patchCounts.creditDropped,
+      promoted: 0, reopened: 0, conflicts: 0,
+    };
+
     if (grounded.ops.length) {
       // Applied to the doc as it is now, so a promotion made during the run is kept.
       const before = view(rt).doc;
@@ -334,15 +437,18 @@ export function createBuildLoop(deps: {
         flipNodes(sessionId, rt, d, "draft");
         log("build.reopened", { session_id: sessionId, decision_id: d.id });
       }
+      // One comparison on screen at a time (known issue M1): a new conflict shows only when none is
+      // shown. The others wait in the doc, and the runtime shows the next when the one shown resolves.
       for (const id of addedConflicts) {
         const conflict = doc.conflicts.find((c) => c.id === id)!;
         const comparison = buildComparisonView(view(rt).proto, conflict);
-        if (comparison) {
-          rt.showComparison(comparison);
-          counts.conflicts++;
-        } else {
+        if (!comparison) {
           log("build.comparison_skipped", { session_id: sessionId, conflict_id: id });
+          continue;
         }
+        counts.conflicts++;
+        if (view(rt).comparison === null) rt.showComparison(comparison);
+        else log("build.comparison_queued", { session_id: sessionId, conflict_id: id });
       }
     }
     return counts;
@@ -350,6 +456,7 @@ export function createBuildLoop(deps: {
 
   async function run(sessionId: string, st: SessionState) {
     const h = st.pending!;
+    const through = st.received; // every hand-off received so far is in this run or an earlier one
     const taskIds = st.pendingTaskIds;
     st.pendingTaskIds = [];
     const startedAt = clock();
@@ -362,7 +469,8 @@ export function createBuildLoop(deps: {
     const running = new Set(taskIds);
     st.tasks = st.tasks.map((t) => (running.has(t.id) ? { ...t, state: "now" } : t));
     pushTasks(sessionId, st);
-    const streamed = { applied: 0, rejected: 0 };
+    const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0 };
+    const deferred: ToolPatchBatch[] = [];
     let opsApplied = 0;
     let rt: SessionRuntime | null = null;
     let region = false;
@@ -402,21 +510,23 @@ export function createBuildLoop(deps: {
       let firstPatchMs: number | null = null;
       let lastPatchMs: number | null = null;
       const onToolCall = (call: ToolCall) => {
-        if (call.name !== "apply_patches") return;
+        if (call.name !== "apply_patches" || ended.has(sessionId)) return;
         try {
           const parsed = ToolPatchBatch.safeParse(call.input);
           if (!parsed.success) {
-            streamed.rejected++;
+            patchCounts.rejected++;
             log("build.batch_rejected", { session_id: sessionId, reason: "invalid_input" });
             return;
           }
-          const r = live.applyBatch(sanitizeModelBatch(fromToolBatch(parsed.data), view(live).doc));
-          if (!r.ok) {
-            streamed.rejected++;
-            log("build.batch_rejected", { session_id: sessionId, reason: "does_not_apply", ops: parsed.data.ops.length });
+          // A batch this run's reopenings could change (it removes an agreed node) waits for them.
+          const agreedIds = new Set(view(live).doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
+          const { batch, creditDropped } = prepareBatch(parsed.data, live, speakers, new Set());
+          if (batch.ops.length !== prepareBatch(parsed.data, live, speakers, agreedIds).batch.ops.length) {
+            deferred.push(parsed.data);
             return;
           }
-          streamed.applied++;
+          patchCounts.creditDropped += creditDropped;
+          if (!applyPrepared(sessionId, live, batch, parsed.data.ops.length, patchCounts)) return;
           lastPatchMs = clock() - startedAt;
           firstPatchMs ??= lastPatchMs;
           // The placeholder has been filled; a later add may show a new one.
@@ -442,12 +552,13 @@ export function createBuildLoop(deps: {
         dropped: result.dropped, ms: Math.round(result.ms), topics: h.topics.length, grounding: grounding.length,
         wait_ms: waitMs, first_patch_ms: firstPatchMs, last_patch_ms: lastPatchMs,
       };
-      // A refusal or no usable call leaves the doc as it is; batches already streamed stay on screen.
-      if (result.stopReason === "refusal" || result.toolCalls.length === 0) {
-        log("build.run", { ...base, patches_applied: streamed.applied, patches_rejected: streamed.rejected });
-      }
+      // A refusal or no usable call leaves the doc as it is (batches already streamed stay on screen),
+      // and so does a call that ended while the model was working: the handoff is already final.
+      const streamedCounts = { patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty };
+      if (ended.has(sessionId)) log("build.run", { ...base, ...streamedCounts, discarded: "ended" });
+      else if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", { ...base, ...streamedCounts });
       else {
-        const counts = applyResult(sessionId, live, result, speakers, streamed);
+        const counts = applyResult(sessionId, live, result, speakers, patchCounts, deferred);
         opsApplied = counts.ops;
         log("build.run", { ...base, ...counts });
       }
@@ -458,13 +569,14 @@ export function createBuildLoop(deps: {
       });
     } finally {
       st.inFlight = false;
+      st.settled = Math.max(st.settled, through);
       try {
         if (rt && region) rt.pendingRegion(null);
         rt?.updateMoodInputs({ buildInFlight: false, buildStreaming: false });
       } catch (err) {
         log("build.cleanup_failed", { session_id: sessionId, error: errorName(err) });
       }
-      finishTasks(sessionId, st, taskIds, streamed.applied > 0 || opsApplied > 0);
+      finishTasks(sessionId, st, taskIds, patchCounts.applied > 0 || opsApplied > 0);
       ensureTick(sessionId, st);
       schedule(sessionId, st);
     }
@@ -472,23 +584,33 @@ export function createBuildLoop(deps: {
 
   return {
     handoff(sessionId: string, input: Handoff): void {
+      if (ended.has(sessionId)) {
+        log("build.handoff_ignored", { session_id: sessionId, reason: "ended" });
+        return;
+      }
       const parsed = HandoffSchema.safeParse(input);
       if (!parsed.success) {
         log("build.handoff_invalid", { session_id: sessionId, issues: parsed.error.issues.length });
         return;
       }
       const st = state(sessionId);
+      st.received++;
       log("build.handoff", { session_id: sessionId, topics: parsed.data.topics.length, grounding: parsed.data.groundingIds.length });
-      // A pick that was not acted on is removed, so the model never sees it as done.
+      // The model sees resolvedChoice only for a pick merged just now, so "already merged" is true
+      // (known issue I3). A pick not acted on, or for a conflict resolved before, is removed; a new
+      // pick whose winner no longer applies becomes a proposal to draw it again.
       let resolved = false;
       const topics = parsed.data.topics.map((t) => {
         if (!t.resolvedChoice) return t;
-        if (resolveChoice(sessionId, parsed.data.groundingIds, t.resolvedChoice)) {
+        const pick = resolveChoice(sessionId, parsed.data.groundingIds, t.resolvedChoice);
+        if (pick.kind === "merged") {
           resolved = true;
           return t;
         }
         const { resolvedChoice: _dropped, ...rest } = t;
-        return rest;
+        if (pick.kind !== "unmerged") return rest;
+        resolved = true;
+        return { ...rest, proposals: [...rest.proposals, pick.redraw] };
       });
       const h: Handoff = { ...parsed.data, topics };
       if (!st.pending) st.pendingSince = clock();
@@ -506,6 +628,25 @@ export function createBuildLoop(deps: {
       if (resolved) st.bypassFloor = true;
       schedule(sessionId, st);
       ensureTick(sessionId, st);
+    },
+
+    // After a restart (known issue M2): the no-objection timer runs again for decisions still pending.
+    resume(sessionId: string): void {
+      if (!ended.has(sessionId)) ensureTick(sessionId, state(sessionId));
+    },
+
+    // The call is over: clear the timers, drop pending work and ignore later hand-offs. Pending
+    // decisions stay pending; the handoff flags them as not agreed.
+    end(sessionId: string): void {
+      ended.add(sessionId);
+      const st = sessions.get(sessionId);
+      if (st) {
+        stopTimers(st);
+        st.pending = null;
+        st.bypassFloor = false;
+        sessions.delete(sessionId); // a run still in flight keeps its own reference
+      }
+      log("build.ended", { session_id: sessionId, in_flight: st?.inFlight ?? false });
     },
 
     idle(sessionId: string): boolean {

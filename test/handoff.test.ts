@@ -11,6 +11,7 @@ import { createRecallClient } from "../src/recall-client.ts";
 import { openStore } from "../src/store.ts";
 import { createApp } from "../src/app.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
+import { emptyPrototype } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
 import { buildExportHtml } from "../src/handoff/export.ts";
@@ -45,9 +46,10 @@ async function start() {
   const id = randomUUID();
   store.createIntent(id, "https://meet.google.com/abc-defg-hij");
   store.saveConsensus(id, doc, proto);
-  const token = store.ensureStageToken(id);
+  const token = store.ensureHandoffToken(id);
+  const stageToken = store.ensureStageToken(id);
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
-  return { base, id, token, store, close: () => { openServers.delete(server); server.closeAllConnections(); server.close(); } };
+  return { base, id, token, stageToken, store, close: () => { openServers.delete(server); server.closeAllConnections(); server.close(); } };
 }
 
 const tunnel = { "x-forwarded-for": "1.2.3.4" };
@@ -64,14 +66,57 @@ test("handoff requires token and is reachable through the tunnel", async () => {
     }
     const unknown = await fetch(`${h.base}/handoff/${randomUUID()}?token=${h.token}`, { headers: tunnel });
     assert.equal(unknown.status, 404);
+    // The handoff token is read-only and separate from the stage token (known issue I7).
+    assert.notEqual(h.token, h.stageToken);
+    assert.equal((await fetch(`${h.base}/handoff/${h.id}?token=${h.stageToken}`, { headers: tunnel })).status, 404, "the stage token does not open the handoff");
+    assert.equal((await fetch(`${h.base}/stage/${h.id}/state?token=${h.token}`, { headers: tunnel })).status, 404, "the handoff token does not open the stage");
     const page = await (await fetch(`${h.base}/handoff/${h.id}?token=${h.token}`, { headers: tunnel })).text();
     assert.match(page, /Tasks live on one list/);
     assert.match(page, /Do tasks have due dates\?/);
     assert.match(page, /Kanban board/);
     // The operator session view links to the handoff.
     const view = (await (await fetch(`${h.base}/api/sessions/${h.id}`)).json()) as any;
-    assert.match(view.session.handoff_url, new RegExp(`^https://agent.example.com/handoff/${h.id}\\?token=`));
+    assert.equal(view.session.handoff_url, `https://agent.example.com/handoff/${h.id}?token=${h.token}`);
   } finally { h.close(); }
+});
+
+test("before anything is saved the handoff is empty, not missing (known issue M8)", async () => {
+  const h = await start();
+  try {
+    const id = randomUUID();
+    h.store.createIntent(id, "https://meet.google.com/new-sess-ion");
+    const token = h.store.ensureHandoffToken(id);
+    for (const path of [`/handoff/${id}`, `/handoff/${id}/export`]) {
+      const res = await fetch(`${h.base}${path}?token=${token}`, { headers: tunnel });
+      assert.equal(res.status, 200, path);
+      const page = await res.text();
+      assert.match(page, /No decisions agreed yet/);
+      assert.match(page, /Untitled app/);
+    }
+    assert.equal((await fetch(`${h.base}/handoff/${id}?token=wrong`, { headers: tunnel })).status, 404, "still token-gated");
+  } finally { h.close(); }
+});
+
+test("an agreed decision with nobody named says how it was agreed (known issue M3)", () => {
+  const timed = { id: "d2", text: "Due dates on every task", status: "agreed" as const, proposedBy: "Bo", agreedBy: [], decidedAt: 1_700_000_000_000, affects: [], rejectedOptions: [] };
+  const picked = { ...timed, id: "d-c1", text: "Done tasks get their own tab" };
+  const pending = { ...timed, id: "d3", text: "Colour-coded labels", status: "pending" as const, decidedAt: undefined };
+  const html = buildExportHtml({
+    ...emptyDoc(),
+    decisions: [timed, picked, pending],
+    conflicts: [{ id: "c1", topic: "Done tasks", status: "resolved", openedAt: 1, winner: "B", variants: [
+      { label: "A", summary: "Toggle", backers: [], batch: { label: "A", ops: [] } },
+      { label: "B", summary: "Tab", backers: [], batch: { label: "B", ops: [] } },
+    ] }],
+  }, emptyPrototype("Team To-Do"));
+  const meta = (text: string) => {
+    const at = html.indexOf(`<p class="decision-text">${text}`);
+    assert.ok(at > 0, text);
+    return html.slice(at, html.indexOf("</li>", at));
+  };
+  assert.match(meta("Due dates on every task"), /<dt>Agreed by<\/dt><dd>no objection within 30 s<\/dd>/);
+  assert.match(meta("Done tasks get their own tab"), /<dt>Agreed by<\/dt><dd>the room, picking between side-by-side options<\/dd>/);
+  assert.match(meta("Colour-coded labels"), /<dt>Agreed by<\/dt><dd>nobody yet<\/dd>/);
 });
 
 test("drafts are flagged as not agreed", () => {

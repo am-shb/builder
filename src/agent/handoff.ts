@@ -3,8 +3,8 @@
 // unsupported attributions out, and the pure application of those ops to the doc.
 import { z } from "zod";
 import { ToolPatchBatch } from "../ui/schema.ts";
-import type { PatchBatch, PatchOp, UiNode } from "../ui/schema.ts";
-import { fromToolBatch } from "../ui/tree.ts";
+import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
+import { findNode, fromToolBatch } from "../ui/tree.ts";
 import { markPending, Phase, recordObjection, recordSupport } from "../consensus/doc.ts";
 import type { ConsensusDoc, Conflict } from "../consensus/doc.ts";
 
@@ -16,6 +16,7 @@ export const Proposal = z.strictObject({
   supporters: z.array(z.string()),
   objectors: z.array(z.string()),
 });
+export type Proposal = z.infer<typeof Proposal>;
 
 export const Topic = z.strictObject({
   title: z.string(),
@@ -36,20 +37,24 @@ export const HandoffSchema = z.strictObject({
 export type Handoff = z.infer<typeof HandoffSchema>;
 
 // The update_build tool's local validator. A live probe (scripts/probe-handoff.ts) saw Haiku put
-// requestedView on a topic when the room asked to see a screen. It belongs to the hand-off: the
-// first topic's copy moves up unless the hand-off has its own, and the topics lose theirs.
-// The wire schema stays HandoffSchema.
+// requestedView on a topic when the room asked to see a screen. It belongs to the hand-off: unless
+// the hand-off has its own, the last topic's copy moves up (the latest request wins, as when
+// hand-offs merge). The topics lose theirs, and a topic whose view was not kept gets it as its
+// screenHint when it has none, so no request is silently lost. The wire schema stays HandoffSchema.
 export const HandoffToolInput = z.preprocess(hoistRequestedView, HandoffSchema);
 
 function hoistRequestedView(v: unknown): unknown {
   const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
   if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && "requestedView" in t)) return v;
   let view = v.requestedView;
+  if (view === undefined) {
+    for (const t of v.topics) if (isRecord(t) && typeof t.requestedView === "string") view = t.requestedView;
+  }
   const topics = v.topics.map((t) => {
     if (!isRecord(t) || !("requestedView" in t)) return t;
     const { requestedView, ...rest } = t;
-    if (view === undefined && typeof requestedView === "string") view = requestedView;
-    return rest;
+    if (typeof requestedView !== "string" || requestedView === view || rest.screenHint !== undefined) return rest;
+    return { ...rest, screenHint: requestedView };
   });
   return { ...v, topics, ...(view === undefined ? {} : { requestedView: view }) };
 }
@@ -82,9 +87,20 @@ export type ConsensusUpdate = z.infer<typeof ConsensusUpdate>;
 export const UpdateConsensusInput = z.strictObject({ ops: z.array(ConsensusUpdate) });
 
 /**
+ * A batch's `by` is the on-screen credit ("Added: due date · Amir"), so like a proposer it must be
+ * someone heard in the grounding lines; otherwise it is removed. `dropped` is 1 when it was.
+ */
+export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<string>): { batch: ToolPatchBatch; dropped: number } {
+  if (batch.by === undefined || groundingSpeakers.has(batch.by)) return { batch, dropped: 0 };
+  const { by: _by, ...rest } = batch;
+  return { batch: rest, dropped: 1 };
+}
+
+/**
  * Only people heard in the grounding lines can propose, back or object. Drops support/object ops
  * and add_decision ops whose speaker is not among them, and strips ungrounded conflict backers
- * (backers become agreed_by when a conflict resolves). `dropped` counts ops and backers removed.
+ * (backers become agreed_by when a conflict resolves) and variant credits. `dropped` counts ops,
+ * backers and credits removed.
  */
 export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
@@ -98,8 +114,9 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
         const backers = v.backers.filter((b) => groundingSpeakers.has(b));
-        dropped += v.backers.length - backers.length;
-        return { ...v, backers };
+        const credit = groundCredit(v.batch, groundingSpeakers);
+        dropped += v.backers.length - backers.length + credit.dropped;
+        return { ...v, backers, batch: credit.batch };
       });
       kept.push({ ...op, variants });
       continue;
@@ -111,21 +128,54 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
 
 const asDraft = (n: UiNode): UiNode => ({ ...n, status: "draft", children: n.children.map(asDraft) });
 
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// Whether removing `node` would take an agreed node off the prototype whose decision is not being reopened.
+const holdsAgreed = (node: UiNode, reopened: Set<string>): boolean =>
+  (node.status === "agreed" && !(node.decisionId !== undefined && reopened.has(node.decisionId))) ||
+  node.children.some((c) => holdsAgreed(c, reopened));
+
 /**
  * Only the build loop's promotion flip may mark nodes agreed. In a model-made batch, added nodes
  * are forced to draft, and an update to "agreed" loses that status (and its decisionId, unless the
  * decision really is agreed). An update left with nothing to change is dropped.
+ *
+ * With `current` (the model's own apply_patches batches, not conflict variants: the room's pick is
+ * the decision for those), only a decision changes what was agreed (known issue I2). An update
+ * never sets a status itself; one that changes an agreed node's props or decisionId sends that
+ * node back to draft, and flipNodes makes it agreed again when a decision covering it is agreed.
+ * An update that changes nothing is dropped. A remove that would take an agreed node off the
+ * prototype is dropped, unless that node's decision is in `current.reopened` (reopened by this
+ * run's consensus ops). Ops on nodes that don't exist are kept, so the batch still fails validation.
  */
-export function sanitizeModelBatch(batch: PatchBatch, doc: ConsensusDoc): PatchBatch {
+export function sanitizeModelBatch(
+  batch: PatchBatch, doc: ConsensusDoc, current?: { proto: Prototype; reopened: Set<string> },
+): PatchBatch {
   const agreed = new Set(doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
   const ops: PatchOp[] = [];
   for (const op of batch.ops) {
     if (op.op === "add") {
       ops.push({ ...op, node: asDraft(op.node) });
+    } else if (op.op === "update" && current) {
+      const { status, decisionId, ...rest } = op;
+      const next: Extract<PatchOp, { op: "update" }> =
+        decisionId !== undefined && (status !== "agreed" || agreed.has(decisionId)) ? { ...rest, decisionId } : rest;
+      const node = findNode(current.proto, op.id);
+      if (!node) {
+        ops.push(next);
+        continue;
+      }
+      const changed = (next.decisionId !== undefined && next.decisionId !== node.decisionId) ||
+        Object.entries(next.props ?? {}).some(([k, v]) => !sameValue(node.props[k], v));
+      if (!changed) continue;
+      ops.push(node.status === "agreed" ? { ...next, status: "draft" } : next);
     } else if (op.op === "update" && op.status === "agreed") {
       const { status: _status, decisionId, ...rest } = op;
       const next = decisionId !== undefined && agreed.has(decisionId) ? { ...rest, decisionId } : rest;
       if (next.props !== undefined || "decisionId" in next) ops.push(next);
+    } else if (op.op === "remove" && current) {
+      const node = findNode(current.proto, op.id);
+      if (!node || !holdsAgreed(node, current.reopened)) ops.push(op);
     } else {
       ops.push(op);
     }

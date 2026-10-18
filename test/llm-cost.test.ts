@@ -7,7 +7,7 @@ import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
 import { openStore } from "../src/store.ts";
 import { createApp } from "../src/app.ts";
-import { MODELS, BUILD_FALLBACKS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
+import { MODELS, BUILD_FALLBACKS, DEADLINE_MS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
 import { PRICES, costOf, withCostRecording } from "../src/agent/cost.ts";
 import { patchBatchJsonSchema } from "../src/ui/schema.ts";
 
@@ -290,6 +290,36 @@ test("truncated tool stream still records the usage seen and drops the partial c
   await withCostRecording(port, { store, sessionId: "t" }).runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
   assert.ok(store.sessionCost("t") > 0);
   store.close();
+});
+
+// ---- deadlines (known issue I1) ----
+
+test("a stream that stalls past its deadline returns the completed calls, keeps the usage seen and logs llm_timeout", async () => {
+  // The first events arrive, then nothing more, and the body ignores the abort signal.
+  const head = toolUseStream({ name: "emit", json: ['{"n":1}'] }).slice(0, 4);
+  const text = head.map((e) => `event: ${(e as any).type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  const stalled = (async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(text)); } }),
+    { status: 200, headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: stalled, log: (msg, fields) => logs.push({ msg, fields }), deadlineMs: { build: 100 } });
+  const t0 = Date.now();
+  const r = await port.runTools({ loop: "build", ...REQ, tools: [emitTool], effort: "medium" });
+  assert.ok(Date.now() - t0 < 2_000, "ends at the deadline, not when the stream does");
+  assert.deepEqual(r.toolCalls, [{ name: "emit", input: { n: 1 } }]);
+  assert.equal(r.stopReason, null);
+  assert.equal(r.usage.inputTokens, 10, "the billed usage is kept");
+  assert.ok(logs.some((l) => l.msg === "llm_timeout" && l.fields?.loop === "build" && l.fields?.started === true));
+});
+
+test("a call with no response by its deadline fails with LlmTimeoutError", async () => {
+  // Like real fetch, this one only ends when its signal aborts.
+  const hang = ((_url: unknown, init: RequestInit) => new Promise<Response>((_, reject) =>
+    init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))) as typeof fetch;
+  const logs: string[] = [];
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: hang, log: (m) => logs.push(m), deadlineMs: { conversation: 50 } });
+  await assert.rejects(port.runTools({ loop: "conversation", ...REQ, tools: [emitTool], effort: "low" }), (e: Error) => e.name === "LlmTimeoutError");
+  assert.ok(logs.includes("llm_timeout"));
+  assert.deepEqual(DEADLINE_MS, { conversation: 8_000, build: 90_000 });
 });
 
 test("non-stream errors still propagate", async () => {

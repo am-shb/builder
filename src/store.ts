@@ -18,6 +18,8 @@ export type Session = {
   bot_sub_code: string | null;
   error: string | null;
   stage_token: string | null;
+  // Read-only capability for the handoff page; never the stage token, which also opens the stage socket.
+  handoff_token: string | null;
   stage_html: string | null;
   created_at: string;
   updated_at: string;
@@ -49,7 +51,10 @@ export type ModelCall = {
 const TERMINAL = new Set(["done", "fatal", "call_ended"]);
 export const isTerminal = (status: string | null) => !!status && TERMINAL.has(status);
 
-export function openStore(path: string) {
+type Log = (msg: string, fields?: Record<string, unknown>) => void;
+
+export function openStore(path: string, opts: { log?: Log } = {}) {
+  const log: Log = opts.log ?? (() => {});
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec(`
@@ -63,6 +68,7 @@ export function openStore(path: string) {
       bot_sub_code TEXT,
       error TEXT,
       stage_token TEXT,
+      handoff_token TEXT,
       stage_html TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -97,9 +103,9 @@ export function openStore(path: string) {
     );
     CREATE INDEX IF NOT EXISTS model_calls_session ON model_calls(session_id);
   `);
-  // Additive migration for databases created before the stage columns existed.
+  // Additive migration for databases created before the stage and handoff columns existed.
   const cols = new Set((db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name));
-  for (const col of ["stage_token", "stage_html"]) {
+  for (const col of ["stage_token", "stage_html", "handoff_token"]) {
     if (!cols.has(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
   }
   const now = () => new Date().toISOString();
@@ -108,8 +114,8 @@ export function openStore(path: string) {
   return {
     createIntent(id: string, meetingUrl: string): Session {
       const t = now();
-      db.prepare(`INSERT INTO sessions (id, meeting_url, state, stage_token, created_at, updated_at) VALUES (?, ?, 'intent', ?, ?, ?)`)
-        .run(id, meetingUrl, newToken(), t, t);
+      db.prepare(`INSERT INTO sessions (id, meeting_url, state, stage_token, handoff_token, created_at, updated_at) VALUES (?, ?, 'intent', ?, ?, ?, ?)`)
+        .run(id, meetingUrl, newToken(), newToken(), t, t);
       return this.getSession(id)!;
     },
     // An unfinished session for the same meeting means a bot is (or may be) already there.
@@ -136,6 +142,14 @@ export function openStore(path: string) {
       if (s.stage_token) return s.stage_token;
       const token = newToken();
       db.prepare(`UPDATE sessions SET stage_token = ?, updated_at = ? WHERE id = ?`).run(token, now(), id);
+      return token;
+    },
+    // Sessions created before handoff tokens existed get one on first use.
+    ensureHandoffToken(id: string): string {
+      const s = this.getSession(id)!;
+      if (s.handoff_token) return s.handoff_token;
+      const token = newToken();
+      db.prepare(`UPDATE sessions SET handoff_token = ?, updated_at = ? WHERE id = ?`).run(token, now(), id);
       return token;
     },
     setStageHtml(id: string, html: string) {
@@ -171,14 +185,20 @@ export function openStore(path: string) {
       return db.prepare(`SELECT id, session_id, kind, speaker, text, created_at FROM events WHERE session_id = ? ORDER BY id`)
         .all(sessionId) as StoredEvent[];
     },
+    // A row that no longer parses (written by older code, say) reads as absent, so the session starts
+    // from a fresh doc instead of throwing on every later event.
     getConsensus(sessionId: string): { doc: ConsensusDoc; proto: Prototype } | undefined {
       const row = db.prepare(`SELECT doc_json, proto_json FROM consensus WHERE session_id = ?`)
         .get(sessionId) as { doc_json: string; proto_json: string } | undefined;
       if (!row) return undefined;
-      return {
-        doc: ConsensusDocSchema.parse(JSON.parse(row.doc_json)),
-        proto: PrototypeSchema.parse(JSON.parse(row.proto_json)),
-      };
+      const json = (text: string): unknown => { try { return JSON.parse(text); } catch { return undefined; } };
+      const doc = ConsensusDocSchema.safeParse(json(row.doc_json));
+      const proto = PrototypeSchema.safeParse(json(row.proto_json));
+      if (!doc.success || !proto.success) {
+        log("store.consensus_invalid", { session_id: sessionId, doc_ok: doc.success, proto_ok: proto.success });
+        return undefined;
+      }
+      return { doc: doc.data, proto: proto.data };
     },
     saveConsensus(sessionId: string, doc: ConsensusDoc, proto: Prototype): void {
       db.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, ?)

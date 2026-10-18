@@ -22,7 +22,9 @@ The v0 engine hasn't moved here yet. It lives at the repo root:
 The authority on how it behaves is `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`.
 
 ## Known issues
-See [docs/known-issues.md](../../docs/known-issues.md). Fix I1, I5, I6 and I7 before any shared deployment.
+See [docs/known-issues.md](../../docs/known-issues.md). The deployment blockers I1, I5, I6 and I7, the
+agreement-correctness items I2 and I3, and the minor and visual items were fixed on 2026-10-17. Still open: the I4
+ruling, a move of an agreed node, and the live checks.
 
 ## Open decisions
 - When and how to move `src/` and `public/` here. Do it in one PR that only moves files and fixes imports.
@@ -31,5 +33,6 @@ See [docs/known-issues.md](../../docs/known-issues.md). Fix I1, I5, I6 and I7 be
 - Whether usage events reach billing directly or through the worker
 
 ## First tasks
-- [ ] Fix known issues I1, I5, I6 and I7
+- [x] Fix known issues I1, I5, I6 and I7
+- [x] Fix I2 and I3 together (agreement correctness)
 - [ ] An ADR on scaling and state

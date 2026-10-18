@@ -119,8 +119,8 @@ function showCost(usd) { $("cost").textContent = "$" + Number(usd || 0).toFixed(
 async function refreshCost() {
   if (!current) return;
   try {
-    const res = await fetch(`/api/sessions/${current.id}`);
-    if (res.ok) showCost((await res.json()).session.cost_usd);
+    const res = await fetch(`/api/sessions/${current.id}/cost`);
+    if (res.ok) showCost((await res.json()).cost_usd);
   } catch {}
 }
 setInterval(refreshCost, 5000);

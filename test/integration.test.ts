@@ -276,30 +276,85 @@ test("databases created before the stage columns are migrated and old sessions g
   store.close();
 });
 
-test("stage state carries rolling captions and the in-progress partial (stage polls; proxies buffer SSE)", async () => {
+test("stage routes never serve transcript text: /state has no captions and there is no public stream (known issue I7)", async () => {
   const ctx = await startApp((async () => Response.json({ id: "bot-6" }, { status: 201 })) as any);
   const { session } = (await (await post(`${ctx.base}/api/sessions`, { meeting_url: "https://meet.google.com/cap-tion-sss" })).json()) as any;
   const token = new URL(((await (await fetch(`${ctx.base}/api/sessions/${session.id}`)).json()) as any).session.stage_url).searchParams.get("token");
-  for (let i = 0; i < 12; i++) {
-    const p = transcriptPayload(session.id, "bot-6", [`line${i}`]);
-    await post(`${ctx.base}${REALTIME_PATH}`, p, signForTest(SECRET, p, `u${i}`));
-  }
+  const final = transcriptPayload(session.id, "bot-6", ["secret", "roadmap"]);
+  await post(`${ctx.base}${REALTIME_PATH}`, final, signForTest(SECRET, final, "u-1"));
   const partial = transcriptPayload(session.id, "bot-6", ["typing", "now"], "transcript.partial_data");
-  await post(`${ctx.base}${REALTIME_PATH}`, partial, signForTest(SECRET, partial, "p-last"));
+  await post(`${ctx.base}${REALTIME_PATH}`, partial, signForTest(SECRET, partial, "p-1"));
   await new Promise((r) => setTimeout(r, 30));
 
-  const state = (await (await fetch(`${ctx.base}/stage/${session.id}/state?token=${token}`)).json()) as any;
-  assert.deepEqual(state.captions.filter((c: any) => !c.partial).map((c: any) => c.text), ["line9", "line10", "line11"], "latest finalized utterances");
-  assert.deepEqual(state.captions.filter((c: any) => c.partial).map((c: any) => [c.speaker, c.text]), [["Ada", "typing now"]]);
-
-  // A finalized utterance clears the stale partial.
-  const fin = transcriptPayload(session.id, "bot-6", ["typing", "now", "done"]);
-  await post(`${ctx.base}${REALTIME_PATH}`, fin, signForTest(SECRET, fin, "u-fin"));
-  await new Promise((r) => setTimeout(r, 30));
-  const after = (await (await fetch(`${ctx.base}/stage/${session.id}/state?token=${token}`)).json()) as any;
-  assert.equal(after.captions.some((c: any) => c.partial), false);
-  assert.equal(after.captions.at(-1).text, "typing now done");
+  const tunnel = { "x-forwarded-for": "1.2.3.4" };
+  const res = await fetch(`${ctx.base}/stage/${session.id}/state?token=${token}`, { headers: tunnel });
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.equal(JSON.parse(body).type, "snapshot");
+  assert.equal("captions" in JSON.parse(body), false);
+  assert.doesNotMatch(body, /secret|roadmap|typing|Ada/, "no transcript text or speaker names");
+  assert.equal((await fetch(`${ctx.base}/stage/${session.id}/stream?token=${token}`, { headers: tunnel })).status, 404, "no public transcript stream");
+  // The operator's own stream (local only) still works.
+  assert.equal((await fetch(`${ctx.base}/api/sessions/${session.id}/stream`, { headers: tunnel })).status, 404, "not through the tunnel");
   await ctx.close();
+});
+
+// ---------- crash safety (known issue I6) ----------
+test("an error while processing a realtime event is logged by name and the server keeps running", async () => {
+  const config = loadConfig(ENV);
+  const store = openStore(":memory:");
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const recall = createRecallClient({ region: config.region, apiKey: config.apiKey, fetch: (async () => Response.json({ id: "bot-7" }, { status: 201 })) as any, sleep: async () => {} });
+  const app = createApp({
+    config, recall, store, log: (msg, fields) => logs.push({ msg, fields }), indexHtml: "", stageHtml: "",
+    runtime: () => { throw new SyntaxError("Unexpected token in secret roadmap"); },
+  });
+  const server = http.createServer(app.handler);
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  openServers.add(server);
+  const base = `http://127.0.0.1:${(server.address() as any).port}`;
+  const { session } = (await (await post(`${base}/api/sessions`, { meeting_url: "https://meet.google.com/cra-shes-not" })).json()) as any;
+  for (const [i, event] of ["transcript.partial_data", "transcript.data"].entries()) {
+    const p = transcriptPayload(session.id, "bot-7", ["hello"], event);
+    assert.equal((await post(`${base}${REALTIME_PATH}`, p, signForTest(SECRET, p, `crash-${i}`))).status, 200);
+  }
+  await new Promise((r) => setTimeout(r, 30));
+  const failed = logs.filter((l) => l.msg === "realtime.process_failed");
+  assert.equal(failed.length, 2);
+  assert.deepEqual(failed[0].fields, { error: "SyntaxError" }, "the name only, never the message");
+  assert.equal((await fetch(`${base}/healthz`)).status, 200, "still serving");
+  openServers.delete(server);
+  server.closeAllConnections();
+  server.close();
+});
+
+test("a stored consensus row that no longer parses reads as absent instead of throwing", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "m2b-")), "bad.db");
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const store = openStore(path, { log: (msg, fields) => logs.push({ msg, fields }) });
+  const id = "33333333-3333-3333-3333-333333333333";
+  store.createIntent(id, "https://meet.google.com/x");
+  const raw = new DatabaseSync(path);
+  raw.prepare(`INSERT INTO consensus (session_id, doc_json, proto_json, updated_at) VALUES (?, ?, ?, 't')`).run(id, '{"old":"shape"}', "not json");
+  raw.close();
+  assert.equal(store.getConsensus(id), undefined);
+  assert.deepEqual(logs, [{ msg: "store.consensus_invalid", fields: { session_id: id, doc_ok: false, proto_ok: false } }]);
+  store.close();
+});
+
+test("databases created before handoff tokens get one on first use, distinct from the stage token", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "m2b-")), "old2.db");
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, meeting_url TEXT NOT NULL, state TEXT NOT NULL, bot_id TEXT UNIQUE,
+    bot_status TEXT, bot_sub_code TEXT, error TEXT, stage_token TEXT, stage_html TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    INSERT INTO sessions VALUES ('44444444-4444-4444-4444-444444444444','https://meet.google.com/x','created','b','done',NULL,NULL,'stage-tok',NULL,'t','t');`);
+  old.close();
+  const store = openStore(path);
+  const token = store.ensureHandoffToken("44444444-4444-4444-4444-444444444444");
+  assert.ok(token.length >= 32);
+  assert.notEqual(token, "stage-tok");
+  assert.equal(store.ensureHandoffToken("44444444-4444-4444-4444-444444444444"), token, "stable once issued");
+  store.close();
 });
 
 test("stage page hides the placeholder for real and does not depend on SSE", () => {

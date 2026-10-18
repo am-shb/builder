@@ -58,15 +58,28 @@ type Log = (msg: string, fields?: Record<string, unknown>) => void;
 const MAX_TOKENS: Record<Loop, number> = { conversation: 2048, build: 32000 };
 const EPHEMERAL = { type: "ephemeral" } as const;
 
+// A deadline for the whole call, stream included. The SDK's own timeout stops counting once
+// response headers arrive, and each loop runs one call at a time per session, so a stalled
+// stream would otherwise leave Builder silent (conversation) or the prototype frozen (build).
+export const DEADLINE_MS: Record<Loop, number> = { conversation: 8_000, build: 90_000 };
+
+/** Thrown when a call hits its deadline before any stream event arrived (so nothing was billed). */
+export class LlmTimeoutError extends Error {
+  name = "LlmTimeoutError";
+}
+
 export function createOpenRouterPort(
   config: { openrouterApiKey: string | null },
-  opts: { fetch?: typeof fetch; log?: Log } = {},
+  opts: { fetch?: typeof fetch; log?: Log; deadlineMs?: Partial<Record<Loop, number>> } = {},
 ): ModelPort {
   if (!config.openrouterApiKey) throw new Error("OPENROUTER_API_KEY is required for the model port");
   const log = opts.log ?? (() => {});
+  const deadlines = { ...DEADLINE_MS, ...opts.deadlineMs };
   const client = new Anthropic({
     baseURL: "https://openrouter.ai/api",
     authToken: config.openrouterApiKey,
+    // Retries share the call's deadline; more than one would rarely fit inside it.
+    maxRetries: 1,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 
@@ -132,8 +145,18 @@ export function createOpenRouterPort(
         return (block.outcome = { ok: true, call: { name: block.name, input } });
       };
       const take = (n: unknown, into: (v: number) => void) => { if (typeof n === "number") into(n); };
+      const controller = new AbortController();
+      let timedOut = false;
+      const deadline = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, deadlines[req.loop]);
+      // Raced against the stream, so the deadline holds even when a body ignores the abort signal.
+      const expired = new Promise<never>((_, reject) =>
+        controller.signal.addEventListener("abort", () => reject(new LlmTimeoutError("model call exceeded its deadline")), { once: true }));
+      expired.catch(() => {});
       try {
-        const stream = client.messages.stream(body as unknown as Anthropic.MessageStreamParams);
+        const stream = client.messages.stream(body as unknown as Anthropic.MessageStreamParams, { signal: controller.signal });
         stream.on("streamEvent", (event) => {
           started = true;
           if (event.type === "message_start") messageId = event.message.id;
@@ -166,13 +189,22 @@ export function createOpenRouterPort(
             }
           }
         });
-        await stream.done();
+        await Promise.race([stream.done(), expired]);
       } catch (err) {
-        // Typed API/connection errors, and anything before the response began, propagate.
-        // A non-API SDK error after events started means the stream ended or broke
-        // mid-way: keep the usage seen (the call was billed) and the completed tool calls.
-        if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
-        log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
+        if (timedOut) {
+          // Past the deadline. Once events have started the call was billed: keep the usage seen
+          // and the completed tool calls, as for a truncated stream. Before that, report a failure.
+          log("llm_timeout", { loop: req.loop, model, id: messageId, started, deadline_ms: deadlines[req.loop] });
+          if (!started) throw err instanceof LlmTimeoutError ? err : new LlmTimeoutError("model call exceeded its deadline");
+        } else {
+          // Typed API/connection errors, and anything before the response began, propagate.
+          // A non-API SDK error after events started means the stream ended or broke
+          // mid-way: keep the usage seen (the call was billed) and the completed tool calls.
+          if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
+          log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
+        }
+      } finally {
+        clearTimeout(deadline);
       }
 
       if (callbackError) throw (callbackError as { err: unknown }).err;
@@ -181,7 +213,7 @@ export function createOpenRouterPort(
       let dropped = 0;
       if (stopReason === "refusal" || stopReason === "max_tokens") {
         // A refusal or truncation can cut a tool input short: never use this turn's tools.
-        // Calls already sent through onToolCall have taken effect (ADR 0001); only the result is empty.
+        // Calls already sent through onToolCall have taken effect (ADR 0002); only the result is empty.
         log("llm_tools_discarded", { loop: req.loop, model, stop_reason: stopReason });
       } else {
         for (const block of [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b)) {

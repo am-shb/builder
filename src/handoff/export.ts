@@ -65,10 +65,19 @@ function flatten(n: UiNode): UiNode[] {
 const when = (ms?: number) => (ms ? new Date(ms).toISOString().slice(0, 10) : "");
 const list = (items: string[]) => items.map((x) => `<li>${esc(x)}</li>`).join("");
 
-function decisionHtml(d: ConsensusDoc["decisions"][number]): string {
+// Who agreed. An agreed decision with nobody named was either a side-by-side pick whose backers were
+// not heard in the grounding lines, or a pending one nobody objected to for 30 s (known issue M3).
+function agreedBy(d: ConsensusDoc["decisions"][number], doc: ConsensusDoc): string {
+  if (d.agreedBy.length) return esc(d.agreedBy.join(", "));
+  if (d.status !== "agreed") return "nobody yet";
+  const picked = doc.conflicts.some((c) => c.status === "resolved" && `d-${c.id}` === d.id);
+  return picked ? "the room, picking between side-by-side options" : "no objection within 30 s";
+}
+
+function decisionHtml(d: ConsensusDoc["decisions"][number], doc: ConsensusDoc): string {
   const meta = [
     `<dt>Proposed by</dt><dd>${esc(d.proposedBy)}</dd>`,
-    `<dt>Agreed by</dt><dd>${d.agreedBy.length ? esc(d.agreedBy.join(", ")) : "nobody yet"}</dd>`,
+    `<dt>Agreed by</dt><dd>${agreedBy(d, doc)}</dd>`,
     d.decidedAt ? `<dt>Decided</dt><dd>${esc(when(d.decidedAt))}</dd>` : "",
     d.affects.length ? `<dt>Affects</dt><dd>${esc(d.affects.join(", "))}</dd>` : "",
     d.rejectedOptions.length ? `<dt>Rejected options</dt><dd><ul>${list(d.rejectedOptions)}</ul></dd>` : "",
@@ -89,7 +98,7 @@ function render(doc: ConsensusDoc, proto: Prototype, mode: { inline: true } | { 
 
   const notAgreed = draftNodes.length || draftDecisions.length
     ? `${draftNodes.length ? `<h3>Components</h3><ul class="plain">${draftNodes.map((n) => `<li><span class="type">${esc(n.type)}</span> <code>${esc(n.id)}</code> ${FLAG}</li>`).join("")}</ul>` : ""}
-${draftDecisions.length ? `<h3>Decisions</h3><ul class="decisions">${draftDecisions.map(decisionHtml).join("")}</ul>` : ""}`
+${draftDecisions.length ? `<h3>Decisions</h3><ul class="decisions">${draftDecisions.map((d) => decisionHtml(d, doc)).join("")}</ul>` : ""}`
     : `<p class="none">Everything shown here was agreed.</p>`;
 
   const replacements: Record<string, string> = {
@@ -100,7 +109,7 @@ ${draftDecisions.length ? `<h3>Decisions</h3><ul class="decisions">${draftDecisi
     "<!--THEME-->": theme,
     "<!--EXPORT-->": !mode.inline && mode.exportHref ? `<a class="btn" href="${esc(mode.exportHref)}" download>Download self-contained HTML</a>` : "",
     "<!--SPEC-->": `<ul class="tree root">${nodeHtml(proto.root)}</ul>`,
-    "<!--DECISIONS-->": agreedDecisions.length ? `<ul class="decisions">${agreedDecisions.map(decisionHtml).join("")}</ul>` : `<p class="none">No decisions agreed yet.</p>`,
+    "<!--DECISIONS-->": agreedDecisions.length ? `<ul class="decisions">${agreedDecisions.map((d) => decisionHtml(d, doc)).join("")}</ul>` : `<p class="none">No decisions agreed yet.</p>`,
     "<!--NOTAGREED-->": notAgreed,
     "<!--QUESTIONS-->": doc.openQuestions.length
       ? `<ul class="plain">${doc.openQuestions.map((q) => `<li>${esc(q.text)}${q.raisedBy ? ` <span class="by">raised by ${esc(q.raisedBy)}</span>` : ""}</li>`).join("")}</ul>`

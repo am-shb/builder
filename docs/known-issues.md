@@ -1,118 +1,137 @@
 # Builder v0: known issues and remaining fixes
 
 From the final whole-branch review on 2026-10-17 (range `fafebe0..5b76f58`). The review found no Critical issues, 7
-Important and 10 Minor. None of these were fixed before v0 was frozen. File references are at commit `5b76f58`.
+Important and 10 Minor. To claim an open item, put your name next to it.
 
-## Fix before the next live session
+## Fixed on 2026-10-17 (branch `infra/production-readiness`)
 
-**I1. Model calls have no deadline.**
-`src/agent/llm.ts:62-66, 103-130`. The SDK timeout stops counting once response headers arrive, so a stalled stream
-can hang for minutes. Both loops run one call at a time per session. A hung Haiku call leaves Builder silent and ignoring
-voice commands; a hung Opus call freezes the prototype.
-- *Fix:*
-  - Give each loop's call a deadline through an `AbortController` passed as `signal`: about 8 s for conversation and
-    60–90 s for build.
-  - Set `maxRetries` to 0 or 1.
-  - On abort, keep the usage already seen and log `llm_timeout`.
-  - Test with a fake body that never ends: the loop recovers, and the next utterance runs a turn.
+These were the blockers for any shared deployment. Each fix has tests.
 
-**I6. A throw while processing a realtime webhook crashes the server.**
-`src/app.ts:138-173`, which runs from `setImmediate` at `:275`. It also reaches `runtime.ts:76` and `store.ts:174-181`.
-Nothing catches a strict-schema parse failure on the stored consensus row (likely after a restart onto changed code) or
-a SQLite error. The process dies, and it dies again on every later utterance.
-- *Fix:*
-  - Wrap `processRealtime` in try/catch and log the error name only.
-  - Make `getConsensus` use `safeParse` and fall back to a fresh doc.
+- **I1. Model calls had no deadline.** Each call now has a deadline that covers the whole stream:
+  `DEADLINE_MS` is 8 s for conversation and 90 s for build (`src/agent/llm.ts`). The deadline is raced against the
+  stream, so it holds even when a body ignores the abort signal. Once events have started, the billed usage and the
+  completed tool calls are kept. A call that times out before any event fails with `LlmTimeoutError`. Every timeout
+  logs `llm_timeout`. `maxRetries` is 1.
+- **I5. Nothing handled the end of the call.** When `pollOnce` sees a terminal status (`done`, `call_ended` or
+  `fatal`), it calls:
+  - `conversation.onBotEnded`, which stops speech, drops the session's state and discards a turn still in flight;
+  - `buildLoop.end`, which clears timers, drops pending work, discards a run still in flight and ignores later
+    hand-offs.
 
-**I5. Nothing handles the end of the call.**
-`src/app.ts:120-135` forwards only `in_call_recording`. Also `conversation-loop.ts:468-482`, `stuck.ts:32-51` and
-`build-loop.ts:179-207`.
-- *Effects:*
-  - After the bot leaves, a Builder question followed by silence re-fires the stuck turn every 120 s, costing one Haiku
-    call plus one TTS call each time, indefinitely.
-  - Pending decisions keep auto-agreeing 30 s after the meeting, so the handoff is never final (spec §14).
-- *Fix:*
-  - When `pollOnce` sees a terminal status (`done`, `call_ended` or `fatal`), call `conversation.onBotEnded(id)`: stop
-    speech and drop the session's state.
-  - Call `buildLoop.end(id)`: clear timers, drop pending work and ignore later hand-offs.
-  - Freeze consensus.
-  - Test that after a terminal status there are no model calls and no promotions.
+  Late realtime events for a terminal session are stored, but the agent doesn't act on them, and that holds after a
+  restart too. Pending decisions stay pending, so the handoff is final.
+- **I6. A throw while processing a realtime webhook crashed the server.** `processRealtime` is now wrapped and logs
+  `realtime.process_failed` with the error name only. `getConsensus` uses `safeParse` and logs
+  `store.consensus_invalid`, and the session starts from a fresh doc. `server.ts` adds a last-resort
+  `uncaughtException` handler that logs the error name and stack frames, never the message.
+- **I7. The handoff link exposed the live transcript.**
+  - Captions reach the stage as `{partial, isAgent}` only. The snapshot and `/state` no longer carry captions.
+  - `speech_start` no longer carries Builder's line.
+  - The public `/stage/<id>/stream` SSE route, which the stage didn't use but which streamed every utterance to
+    anyone holding the stage token, is gone. The operator's own stream stays at `/api/sessions/<id>/stream`, which
+    is local only.
+  - The handoff has its own read-only `handoff_token`, so a shared handoff link can no longer open the stage socket
+    or send `barge_in`. **Handoff links issued before this change stop working.** Copy the new one from the
+    operator page.
+- **M6.** `.env.example` now says an empty `BOT_VARIANT` means `web_4_core`.
+- **Also found:**
+  - `npm test` (`node --test test/`) didn't run on Node 24. It now uses the glob `test/**/*.test.ts`.
+  - The `http.error` log printed error messages, and V8's `JSON.parse` messages quote the request body. It now logs
+    the error name only.
 
-**I7. The handoff link exposes the live transcript.**
-`src/app.ts:155, 168, 224-235`; `runtime.ts:110-116, 142-149`. The handoff reuses the stage token. The runtime still
-pushes full caption text to the stage WebSocket, the snapshot and `/state`, though the stage no longer shows captions.
-The same token can also stop Builder's voice through `barge_in`.
-- *Fix:*
-  - Send captions with no text: `{partial, isAgent}` is all `character.hear()` needs.
-  - Drop captions from the snapshot and `/state`.
-  - Preferably, also give the handoff its own read-only token.
+## Also fixed on 2026-10-17 (branch `infra/production-readiness`)
 
-## Agreement correctness (fix together)
+Everything below has tests, and `npm run check` passes. The visual items were checked in headless Chrome at
+1280×720, not yet in a live Meet (see Manual checks).
 
-**I2. Agreed nodes can change without a decision.**
-`src/agent/handoff.ts:118-133`, `src/ui/tree.ts:89-97`.
-- *What happens:*
-  - A model `update` to an agreed node's props keeps it solid "agreed", both on screen and in the handoff.
-  - A `remove` leaves its decision agreed while the node is gone.
-- *Fix:*
-  - Pass the current proto into `sanitizeModelBatch`. A props or `decisionId` update on an agreed node sets it back to
-    `draft`, and `flipNodes` restores it if the room agrees again.
-  - Drop a `remove` of an agreed node unless its decision is reopened in the same run.
+### Agreement correctness
 
-**I3. A resolved choice can claim a merge that never happened.**
-`src/agent/build-loop.ts:226-237, 400-409`; `runtime.ts:186-200`; `prompts/build.md:65`.
-- *What happens:*
-  - `resolvedChoice` stays in the hand-off when the winning batch was rejected, or when the conflict was already
-    resolved.
-  - The build prompt then tells Opus the winner "has already merged". The decision log says agreed, but the prototype
-    never shows the winner.
-- *Fix:*
-  - `resolveChoice` returns `{ acted, applied }`.
-  - When the batch didn't apply, rewrite the topic as a proposal to redraw the variant.
-  - When the conflict was already resolved, drop the choice.
-  - Update the prompt line to match.
+- **I2. Agreed nodes changed without a decision.** `sanitizeModelBatch` (`src/agent/handoff.ts`) now gets the current
+  prototype and the decisions this run reopens:
+  - A model `update` never sets a status. One that changes an agreed node's props or `decisionId` sends the node
+    back to draft. An update that changes nothing is dropped.
+  - A `remove` of an agreed node, or of anything holding one, is dropped unless the same run objects to that node's
+    decision. A batch left empty is skipped and counted as `patches_empty` in `build.run`.
+  - `flipNodes` also flips the nodes drawn with the decision's id, and skips nodes already in the target state.
+    Reopening a decision leaves a node that another decision has agreed since. So a changed node turns solid again
+    when a decision covering it is agreed.
+  - Conflict variants are exempt: the room's pick is itself the decision `d-<conflictId>`.
+- **I3. A resolved choice could claim a merge that never happened.** `resolveChoice` (`src/agent/build-loop.ts`)
+  now returns `ignored`, `settled`, `merged` or `unmerged`.
+  - The model sees `resolvedChoice` only for a pick merged just now, so the prompt's "already merged" is true.
+  - A pick for a conflict resolved earlier is removed and no longer skips the 10 s floor.
+  - When the winner's batch no longer applies, the topic gets a proposal that starts "Redraw option B of conflict
+    …", credited to a backer heard picking it, or else to someone in the grounding lines. `prompts/build.md` tells
+    the model to draw it again as drafts with the decision's id. Those nodes stay draft until a decision covering
+    them is agreed.
+  - A repeated `resolveComparison` for a resolved conflict now changes and sends nothing.
 
-**I4. Plan versus spec §9: the conflict merges before the room confirms.** *Ruling for v0: keep the current behavior*,
-because the live test matched expectations. The merge happens when Haiku reports a pick, and "So: B. Everyone OK?"
-comes afterwards. An objection then only demotes nodes to draft; the comparison can't come back.
-- *Smallest fix:* an `object` on `d-<conflictId>` within a few seconds of `decidedAt` reopens the conflict and re-shows
-  the comparison.
-- *Fix that follows the spec:* keep the comparison up with the winner highlighted, and merge after a few seconds with no
-  objection.
-- Choose one of these before changing it.
+### Minor
 
-## Minor
+- **M1.** One comparison is on screen at a time. A conflict raised while another is shown waits in the doc
+  (`build.comparison_queued`). Resolving the conflict on screen shows the next open one (`nextComparison` in
+  `src/session/runtime.ts`), and resolving any other conflict leaves the shown comparison alone. The stage opens the
+  next comparison only after the winner's expansion has played out.
+- **M2.** A restart now restores:
+  - the open comparison, rebuilt from the saved doc when the runtime is created;
+  - Haiku's 40-line window, plus who joined and who spoke. `createApp` calls `conversation.resume` for every call
+    still recording. The reloaded lines count as handed off, so their support can't be replayed into a decision
+    that was reopened since.
+  - the no-objection timer, through `buildLoop.resume` for every active session.
 
-- **M1.** `runtime.resolveComparison` clears the visible comparison even when it resolves a different conflict
-  (`runtime.ts:195`). Two `add_conflict` ops in one run show only the last one (`build-loop.ts:306-315`).
-- **M2.** A restart loses some state:
-  - the open comparison;
-  - Haiku's 40-line window (it is not reloaded from `store.recentUtterances`);
-  - the build tick, which doesn't run until the next hand-off.
-- **M3.** The handoff says "Agreed by: nobody yet" for decisions promoted by the 30 s timer and for conflicts whose
-  backers were stripped (`export.ts:71`). Label these "no objection within 30 s".
-- **M4.** `ADDRESS_RE` matches "form builder" and "page builder" (`stuck.ts:13`). Direct follow-ups without the name,
-  such as "why?", aren't answered.
-- **M5.** `TTS_TIMEOUT_MS = 4000` to the first chunk (`speech.ts:15`), but provider audio isn't streamed progressively.
-  Long lines can fall back to chat. Scale the timeout with text length, or raise it to 6–8 s.
-- **M6.** `.env.example:10` says an empty `BOT_VARIANT` means `web`; the code defaults to `web_4_core`.
-- **M7.** The operator UI's cost refresh refetches every stored event every 5 s (`public/index.html:119-126`). Add a
-  small cost endpoint instead.
-- **M8.** `/handoff/<id>` returns 404 until the first patch or doc is saved. Render an empty handoff instead.
-- **M9.** A patch's `by` (the on-screen credit) isn't checked against the grounding speakers (`build-loop.ts:273`).
-- **M10.** Results that went stale during a run are checked only by validation, which can cause brief
-  agreed-then-reopened flips (`build-loop.ts:290-305`).
-- The hand-off repair keeps the first topic's `requestedView` and silently drops differing ones (`handoff.ts:49`). The
-  conversation prompt doesn't say `requestedView` belongs at the hand-off level (`prompts/conversation.md:47`).
-- A misspelled optional key on a patch op is stripped, so that op does nothing (`llm.ts:378`). This was accepted as the
-  cost of tolerating OpenRouter's non-strict tool inputs.
+  Still lost on restart: hand-offs waiting for a run, a run in flight, a line Builder is speaking, and the
+  addressed, stuck and voice-command timers.
+- **M3.** An agreed decision with nobody named shows "Agreed by: no objection within 30 s". For a side-by-side pick
+  whose backers were all stripped, it shows "the room, picking between side-by-side options", because a 30 s label
+  would be wrong there.
+- **M4.**
+  - `ADDRESS_RE` (`src/agent/stuck.ts`) ignores "builder" right after an article or a common compound word, such as
+    "form builder", "page builder" or "drag-and-drop builder". The list is a heuristic; add words as they come up.
+  - The first thing someone says within 15 s of Builder's line, if it's a question, opens `answer` like the name
+    does (`FOLLOW_UP_MS`). It also doesn't start the room-silence timer. The prompt tells Haiku to answer only if
+    the question is meant for Builder.
+- **M5.** The wait for a line's first audio is 4 s plus 15 ms a character, at most 8 s (`firstChunkTimeout` in
+  `src/voice/speech.ts`). The gap allowed between chunks stays 4 s.
+- **M7.** `GET /api/sessions/<id>/cost` returns `{ cost_usd }`. It's local only, like the rest of `/api`. The
+  operator page polls it instead of the whole session.
+- **M8.** `/handoff/<id>` (and its export) shows an empty prototype and doc until the first patch or doc is saved.
+  It's still token-gated.
+- **M9.** A batch's `by` is removed unless that person is in the grounding lines. That covers the model's own
+  batches and conflict variants, and it counts toward `grounding_dropped`.
+- **M10.** A pending decision whose 30 s run out waits to be promoted until every hand-off received before then has
+  been applied, so an objection already on its way lands first. Hand-offs received later don't hold it, so the wait
+  is at most the run in flight plus the next one.
+- **Hand-off repair.** When a topic carries `requestedView`, the hand-off's own value wins. Otherwise the last
+  topic's value is used, the same rule as merging hand-offs. A topic whose view isn't kept gets it as its
+  `screenHint` when it has none. `prompts/conversation.md` now says `requestedView` belongs on the hand-off.
 
-## Visual polish (from the live test)
+### Visual polish
 
-- The spotlight label overlaps the content above its target.
-- The DRAFT tags are visually busy, and their 15 px font is under the 20 px stage minimum.
-- The opening line runs about 10 s; shorten it.
-- `focus_option` ("show option B") has no visual effect.
+- **Spotlight label.** It goes above the change on the left, above on the right, below, or beside it, whichever
+  covers the least of the other text on the canvas (`placeLabel` in `public/renderer/focus.js`).
+- **DRAFT tags.** There's one tag per draft region, at 20 px. A draft inside another draft shows no tag or outline
+  of its own. The spotlight and comparison rings read the tag's offset from the CSS.
+- **Opening line.** The prompt asks for at most 100 characters, about five seconds out loud. A longer opening is
+  blocked (`too_long`) and the fixed line is said instead: "Hi, I'm Builder. I'll listen and sketch; say my name if
+  you need me."
+- **`focus_option`.** "Show option B" sends a `focus_option` stage event. The pointer moves to option B, the other
+  options dim and B is ringed for 3 s. Nothing is picked, and the command counts as visible, so Builder says nothing.
+
+## Still open
+
+- **I4. Plan versus spec §9: the conflict merges before the room confirms.** *Ruling for v0: keep the current
+  behavior*, because the live test matched expectations. The merge happens when Haiku reports a pick, and "So: B.
+  Everyone OK?" comes afterwards. An objection then only demotes nodes to draft; the comparison can't come back.
+  - *Smallest fix:* an `object` on `d-<conflictId>` within a few seconds of `decidedAt` reopens the conflict and
+    re-shows the comparison.
+  - *Fix that follows the spec:* keep the comparison up with the winner highlighted, and merge after a few seconds
+    with no objection.
+  - Choose one of these before changing it.
+- A model `move` of an agreed node keeps it agreed. I2 covered props, `decisionId` and removals, which was the
+  fix the review asked for. Decide whether a move should also send the node back to draft.
+- *Accepted:* a misspelled optional key on a patch op is stripped (`validateToolInput` in `src/agent/llm.ts`), the
+  cost of tolerating OpenRouter's non-strict tool inputs. An update left with nothing to change is now dropped
+  instead of spotlighting a node that didn't change.
 
 ## Manual checks still pending
 
@@ -123,7 +142,9 @@ comes afterwards. An objection then only demotes nodes to draft; the comparison 
   - This costs money.
 - **Full live Meet checklist with 2+ people** (see the README):
   - silence while people talk;
-  - A/B options resolved by voice;
+  - A/B options resolved by voice, including two conflicts raised together and "show option B";
   - "click Add";
   - barge-in;
+  - a follow-up question to Builder without its name ("why?");
+  - the length of the opening line, the spotlight labels and the DRAFT tags as Meet shows them;
   - the handoff link after the call.

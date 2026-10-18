@@ -199,3 +199,51 @@ test("frame budget: a burst of 10 focus moments (capped queue) holds the 15fps c
     assert.deepEqual(r.played.slice(1), ["item-7", "item-8", "item-9"]);
   });
 });
+
+const RECTS = (sel: Record<string, string>) => `(() => {
+  const box = (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+  return Object.fromEntries(Object.entries(${JSON.stringify(sel)}).map(([k, s]) => [k, box(document.querySelector(s))]));
+})()`;
+type Box = { x: number; y: number; w: number; h: number };
+const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+test("the spotlight label sits where it covers no other text instead of on the content above", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", { id: "home.add", type: "Button", props: { label: "Add" }, status: "agreed", children: [] })] } }]);
+    await sleep(1700);
+    await script([{ batch: { label: "Added: due date", by: "Amir", ops: [add("home", { id: "home.due", type: "Input", props: { label: "Due", placeholder: "Fri" }, status: "draft", children: [] })] } }]);
+    await page.waitFor(`!!document.querySelector(".m-focus .m-label")`, 3000);
+    await sleep(450); // the label's own 350 ms entrance has played
+    const r = await page.eval<Record<string, Box>>(RECTS({ label: ".m-focus .m-label", ring: ".m-focus .m-ring", button: '[data-node-id="home.add"]', canvas: "#proto" }));
+    assert.ok(!overlaps(r.label, r.button), `the label leaves the Add button visible: ${JSON.stringify(r)}`);
+    assert.ok(!overlaps(r.label, r.ring), "and the change itself");
+    assert.ok(r.label.y + r.label.h <= r.ring.y, "still right above the change");
+    assert.ok(r.label.x >= r.canvas.x && r.label.x + r.label.w <= r.canvas.x + r.canvas.w, "on the canvas");
+  });
+});
+
+test("one 20 px draft tag per draft region: a draft inside a draft shows neither tag nor outline", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [
+      add("home", { id: "home.card", type: "Card", props: { title: "Quick add" }, status: "draft", children: [
+        { id: "home.card.input", type: "Input", props: { placeholder: "Add a task" }, status: "draft", children: [] },
+      ] }),
+      add("home", { id: "home.list", type: "List", props: {}, status: "agreed", children: [
+        { id: "home.t1", type: "ListItem", props: { text: "Send invites" }, status: "draft", children: [] },
+      ] }),
+    ] } }]);
+    await page.waitFor(`!!document.querySelector('[data-node-id="home.t1"]')`);
+    const read = await page.eval<Record<string, { outline: string; tag: string; px: number }>>(`Object.fromEntries(["home.card", "home.card.input", "home.list", "home.t1"].map((id) => {
+      const el = document.querySelector('[data-node-id="' + id + '"]');
+      const tag = getComputedStyle(el, "::after");
+      return [id, { outline: getComputedStyle(el).outlineStyle, tag: tag.content, px: parseFloat(tag.fontSize) }];
+    }))`);
+    assert.equal(read["home.card"].outline, "dashed");
+    assert.match(read["home.card"].tag, /draft/);
+    assert.ok(read["home.card"].px >= 20, `tag ${read["home.card"].px}px`);
+    assert.deepEqual([read["home.card.input"].outline, read["home.card.input"].tag], ["none", "none"], "inside a draft: no tag, no outline of its own");
+    assert.equal(read["home.list"].outline, "none", "agreed");
+    assert.equal(read["home.t1"].outline, "dashed", "a draft inside an agreed node keeps both");
+    assert.match(read["home.t1"].tag, /draft/);
+  });
+});

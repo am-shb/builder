@@ -4,8 +4,7 @@
 <!-- One area from docs/workstreams.md. If this touches another area or a shared shape, link the ADR or tag its owner. -->
 
 ## How it was tested
-- [ ] `npm test` passes
-- [ ] `npm run smoke` passes
+- [ ] `npm run check` passes (typecheck, tests, smoke; CI runs the same)
 - [ ] Live check (only if needed, and only with approval, because it costs money):
 
 ## Checklist

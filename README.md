@@ -1,5 +1,7 @@
 # Builder
 
+[![CI](https://github.com/am-shb/builder/actions/workflows/ci.yml/badge.svg)](https://github.com/am-shb/builder/actions/workflows/ci.yml)
+
 Builder is a Recall.ai meeting bot that joins a Google Meet, listens to everyone, steers the group
 like a facilitator, and live-builds a clickable prototype of the app they are discussing on a
 screenshared stage. When the call ends, engineers get a handoff page with the clickable prototype,
@@ -50,7 +52,8 @@ New contributors should read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUT
 8. **Stuck.** 20 s of silence after a question to the room, a conflict open 180 s, or an open question
    nobody engaged with for 180 s makes Builder speak once.
 9. **Handoff.** `/handoff/<session>?token=...` lists the decisions, open questions, the component spec
-   and a clickable prototype, with a self-contained HTML export.
+   and a clickable prototype, with a self-contained HTML export. It has its own read-only token, separate from
+   the stage token. When the bot leaves the call, the agent stops for that session and the handoff is final.
 
 Voice is `elevenlabs/eleven-v4-turbo` through OpenRouter's speech endpoint (PCM, streamed to the stage,
 which plays it into the call). If TTS fails or no voice is set, the line goes to meeting chat instead.
@@ -64,8 +67,13 @@ Browser --POST /api/sessions--> backend --Create Bot--> Recall (us-west-2) --> G
                        OpenRouter (conversation model, build model, TTS)
 ```
 
-Through the public tunnel only these respond: `/recall/realtime/` (signed), `/stage/*` and `/handoff/*`
-(token-gated), and `/renderer/*` (static). Everything else answers localhost only.
+Through the public tunnel only these respond:
+- `/recall/realtime/`, which is signed;
+- `/stage/*`, gated by the stage token, which only the bot holds; it never carries transcript text;
+- `/handoff/*`, gated by the read-only handoff token;
+- `/renderer/*` (static files) and `/healthz`.
+
+Everything else answers localhost only.
 
 ## Environment variables
 
@@ -85,7 +93,8 @@ Copy `.env.example` to `.env` and fill it in. Never commit `.env`. Names only he
 
 ## Running
 
-Node 24 or newer (TypeScript runs natively, no build step).
+Node 24 or newer (TypeScript runs natively, no build step). `.nvmrc` pins it, so run `nvm use` (or the fnm/volta
+equivalent) first.
 
 ```
 npm install
@@ -93,10 +102,15 @@ npm run tunnel          # cloudflared quick tunnel to port 3000; put the printed
 npm start               # http://localhost:3000, paste a Meet link and click Send bot
 npm test                # unit, HTTP-boundary and end-to-end replay tests (no network, no ports but ephemeral ones)
 npm run smoke           # boots the real app on a loopback socket with a fake Recall API; prints SMOKE OK
+npm run typecheck       # tsc --noEmit over src, scripts and test
+npm run check           # typecheck + test + smoke: what CI runs, and what must pass before a PR
 ```
 
 Quick-tunnel URLs change on every restart. Use a reserved ngrok domain or a named Cloudflare tunnel for
 anything longer-lived. Admit "Builder" in the call when it asks to join.
+
+Browser tests (`test/*browser*.test.ts`, and parts of `test/handoff.test.ts`) need Chrome. They find it at the
+macOS default path or at `CHROME_PATH`, and skip otherwise.
 
 ### Replay
 
@@ -151,4 +165,6 @@ Run in a real Google Meet with 2 or more people. Not yet done.
 
 ## Known issues
 
-Remaining fixes from the final review are listed in [docs/known-issues.md](docs/known-issues.md).
+The deployment blockers from the final review (I1, I5, I6, I7) are fixed, and so are agreement correctness (I2, I3)
+and the minor and visual items. What's still open (the I4 ruling, a move of an agreed node, and the live checks) is
+listed in [docs/known-issues.md](docs/known-issues.md). Operations: [docs/runbooks/](docs/runbooks/).

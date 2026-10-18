@@ -1,4 +1,4 @@
-# 0001: Builder's to-do list, streamed tool calls, and a faster build loop
+# 0002: Builder's to-do list, streamed tool calls, and a faster build loop
 
 - **Status:** accepted
 - **Date:** 2026-10-17

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 24 with native TypeScript (type stripping, no build), `node:test`, zod v4, `@anthropic-ai/sdk` via OpenRouter, plain ES modules on the stage, headless Chrome browser tests (`test/helpers/stage.ts`).
 
-**Spec:** `docs/adr/0001-build-todo-and-streamed-tool-calls.md` (the decisions), with engine behaviour from `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`.
+**Spec:** `docs/adr/0002-build-todo-and-streamed-tool-calls.md` (the decisions), with engine behaviour from `docs/superpowers/specs/2026-10-16-meeting-prototype-agent-design.md`.
 
 ## Global Constraints
 
@@ -35,7 +35,7 @@
 **Files:**
 - Modify: `src/agent/llm.ts` (`RunToolsRequest`, `createOpenRouterPort`, `createFakePort`)
 - Test: `test/llm-cost.test.ts`
-- Also commit: `docs/adr/0001-build-todo-and-streamed-tool-calls.md`, this plan
+- Also commit: `docs/adr/0002-build-todo-and-streamed-tool-calls.md`, this plan
 
 **Interfaces:**
 - Produces: `RunToolsRequest.onToolCall?: (call: ToolCall) => void`. It is called once per valid tool call, in stream order, as soon as the block closes. Unknown, incomplete, unparseable or invalid blocks are never passed to it. `createFakePort` calls `req.onToolCall?.(call)` for each scripted call, in order, before it resolves.

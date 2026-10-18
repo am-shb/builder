@@ -99,10 +99,14 @@ export function recordObjection(doc: ConsensusDoc, id: string, _speaker: string 
   });
 }
 
-export function tickAgreement(doc: ConsensusDoc, now: number): { doc: ConsensusDoc; promoted: string[] } {
+// Promotes pending decisions nobody objected to within NO_OBJECTION_MS. `ready` can hold back a due
+// decision while an objection to it may still be on its way (the build loop's hand-offs in flight).
+export function tickAgreement(
+  doc: ConsensusDoc, now: number, ready: (d: Decision) => boolean = () => true,
+): { doc: ConsensusDoc; promoted: string[] } {
   const promoted: string[] = [];
   const decisions = doc.decisions.map((d) => {
-    if (d.status === "pending" && d.pendingSince !== undefined && now - d.pendingSince >= NO_OBJECTION_MS) {
+    if (d.status === "pending" && d.pendingSince !== undefined && now - d.pendingSince >= NO_OBJECTION_MS && ready(d)) {
       promoted.push(d.id);
       return agree(d, now);
     }

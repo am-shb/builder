@@ -20,10 +20,18 @@ async function main() {
   if (existsSync(".env")) process.loadEnvFile(".env");
   const config = loadConfig(process.env);
   if (!config.agentEnabled) console.warn("OPENROUTER_API_KEY is not set: running listen-only (no agent replies or prototype building).");
-  const store = openStore(config.dbPath);
+  const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
+  // Last resort. Logs the error's name and stack frames, never its message (which can quote meeting
+  // content), then exits so the process supervisor starts a clean process.
+  process.on("uncaughtException", (err) => {
+    const e = err instanceof Error ? err : null;
+    const frames = (e?.stack ?? "").split("\n").map((f) => f.trim()).filter((f) => f.startsWith("at ")).slice(0, 8);
+    log("process.uncaught", { error: e?.name ?? "unknown", frames });
+    process.exit(1);
+  });
+  const store = openStore(config.dbPath, { log });
   const recall = createRecallClient({ region: config.region, apiKey: config.apiKey });
   const server = http.createServer();
-  const log = (msg: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
   let runtime!: ReturnType<typeof createRuntime>;
   let voice: { stop(sessionId: string): void } | undefined; // Builder's voice, once configured
   const channel = createStageChannel(
