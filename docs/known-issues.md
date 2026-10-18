@@ -133,6 +133,56 @@ Everything below has tests, and `npm run check` passes. The visual items were ch
   cost of tolerating OpenRouter's non-strict tool inputs. An update left with nothing to change is now dropped
   instead of spotlighting a node that didn't change.
 
+## Open since the first production deploy (2026-10-18)
+
+From the reviews of the SurrealDB port and the Render setup (ADR 0011, ADR 0005). Production runs on Render with
+SurrealDB Cloud, and the first real meeting worked end to end. These are what's left. R1 to R4 come before anyone
+outside the team gets an api token, or before meetings run on Render often.
+
+### Before other people start sessions
+
+- **R1. Spend limits aren't enforced.** The api sends `limits: { maxUsd, maxMinutes }` and the engine stores them
+  with the session (`createIntent` in `apps/engine/src/store.ts`), but nothing ends a session when it reaches either
+  one. A bot runs, and costs Recall and model money, until the call ends or someone removes it. ADR 0008 says the
+  engine enforces them and ends the session with a clear message.
+- **R2. A deploy ends live meetings, and two engines can run the same meeting.** Session state lives in memory, so
+  the new instance doesn't know the old one's sessions. During Render's overlap, both instances also resume active
+  sessions from the database, with no fence to stop the old one. Until this is fixed, merge engine changes outside
+  meetings, or pause auto-deploy on `builder-engine` first (runbook).
+- **R3. Shutdown doesn't wait for pending writes.** On SIGTERM, every deploy, the store closes without waiting
+  for in-flight Recall events and consensus writes, so the last few can be lost.
+- **R4. Store queries have no timeout.** A hung connection to SurrealDB Cloud stalls that session's write queue.
+  Reconnects over the internet haven't been tested under load.
+
+### Security
+
+- **R5. Stage and hand-off links are the only access check.** Anyone holding a stage or hand-off link can open it.
+  ADR 0008 leaves the rule open: signed, expiring links, or an org check through the api.
+- **R6. The engine's operator routes can be reached from inside the Render workspace.** `/` and `/api/*` refuse
+  requests that carry proxy headers, so the public internet can't reach them. Requests over the private network
+  carry none, so any service in the workspace could send a bot. Only `builder-engine` and `builder-api` are there
+  today. The fix is to turn the operator routes off when `RENDER` is set, or to require a token.
+
+### Operations
+
+- **R7. The database is on SurrealDB Cloud's free tier.** It holds at most 1 GB, keeps one day of backups by
+  default, and pauses itself after seven days without use, after which nothing can reach it until it's resumed.
+  Before customers: move to a paid instance, set backups to 7 days, and try restoring a backup into a new instance
+  (ADR 0011).
+
+### Minor
+
+- **R8.** If the store read in `conversation.resume` fails after a restart, Builder says its opening line again in
+  the middle of the call.
+- **R9.** The engine's `/api/sessions/<id>/chat`, `/leave` and `/screenshare` routes return the error's message in
+  their 502 reply (`apps/engine/src/app.ts`). These routes are local only and the message isn't logged, but a
+  database error message can quote values. Return the error code instead.
+- **R10.** A bad setting stops the api with a raw stack trace (`loadConfig` in `apps/api/src/server.ts` runs outside
+  any `catch`). It names the variable, never its value, but should be one `config.invalid` log line and exit 1, the
+  way the engine does it.
+- **R11.** Builder's own chat lines are stored outside the per-session queue, so their order against other events
+  can be off by milliseconds.
+
 ## Manual checks still pending
 
 - **Live replay eval:**
