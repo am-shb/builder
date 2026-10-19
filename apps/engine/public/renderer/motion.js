@@ -181,7 +181,11 @@ export function snapshotCanvas(container) {
 /** Lays the old canvas (from snapshotCanvas) over the re-themed one and fades it out. */
 export function playThemeFade(container, snapshot) {
   const root = canvasRoot(container);
-  Object.assign(snapshot.style, { left: "0px", top: "0px", width: `${root.clientWidth}px` });
+  // A set height, so the copied App's min-height: 100% fills the canvas as the live one does: on a short
+  // screen the area below the content must fade too, not switch to the new background at once.
+  Object.assign(snapshot.style, {
+    left: "0px", top: "0px", width: `${root.clientWidth}px`, height: `${Math.max(root.scrollHeight, root.clientHeight)}px`,
+  });
   root.append(snapshot);
   whenDone(animate(snapshot, [{ opacity: 1 }, { opacity: 0 }], { duration: THEME_FADE_MS, easing: EASE }), () => snapshot.remove());
   logMotion({ fn: "playThemeFade" });

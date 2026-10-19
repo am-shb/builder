@@ -249,25 +249,32 @@ test("one 20 px draft tag per draft region: a draft inside a draft shows neither
 });
 
 // A theme patch as the stage receives it: the current prototype with the given accent slot, and its change.
-const themePatch = (slot: { value: string; status: string; decisionId?: string; previous: string }, label: string) => `(() => {
+type Slot = { value: string; status: string; decisionId?: string; previous: string };
+const themePatch = (slot: Slot, label: string, warmth?: Slot) => `(() => {
   const p = JSON.parse(JSON.stringify(window.stageProto()));
   const s = (v) => ({ value: v, status: "agreed", previous: v });
-  p.theme = { accent: ${JSON.stringify(slot)}, warmth: s("neutral"), radius: s("soft"), density: s("regular") };
+  p.theme = { accent: ${JSON.stringify(slot)}, warmth: ${warmth ? JSON.stringify(warmth) : `s("neutral")`}, radius: s("soft"), density: s("regular") };
   window.stageEvent({ type: "patch", proto: p, changes: [{ kind: "theme", id: "app", label: ${JSON.stringify(label)}, by: "Sara" }] });
 })()`;
 const GOLD_DRAFT = { value: "gold", status: "draft", decisionId: "d1", previous: "slate" };
 
 test("a theme value change fades the old canvas out", async (t) => {
   await withStage(t, async ({ page, script }) => {
+    // A short screen and a background (warmth) change: the copy must cover the whole canvas, not just the content.
     await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
     await sleep(1700); // let the first spotlight finish
     await page.eval(`window.__motionLog = []`);
-    const right = await page.eval<{ fades: number; ids: number; accent: string; snapAccent: string; aligned: boolean }>(`(() => {
-      ${themePatch(GOLD_DRAFT, "Proposed: gold accent")};
+    const right = await page.eval<{ fades: number; ids: number; accent: string; snapAccent: string; aligned: string[]; covers: string[]; short: boolean }>(`(() => {
+      const canvas = document.getElementById("proto");
+      const content = document.querySelector('[data-node-id="a"]').getBoundingClientRect();
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent", { value: "warm", status: "draft", decisionId: "d1", previous: "neutral" })};
       const fade = document.querySelector(".m-theme-fade");
-      const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width].map(Math.round).join(); };
+      const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); };
+      const c = canvas.getBoundingClientRect();
       return {
-        aligned: !!fade && box(fade.firstElementChild) === box(document.querySelector('[data-node-id="app"]')),
+        short: content.bottom < c.bottom - 200,
+        aligned: fade ? [box(fade.firstElementChild), box(document.querySelector('[data-node-id="app"]'))] : [],
+        covers: fade ? [box(fade), [c.left, c.top, c.width, c.height].map(Math.round).join()] : [],
         fades: document.querySelectorAll(".m-theme-fade").length,
         ids: fade ? fade.querySelectorAll("[data-node-id]").length + (fade.hasAttribute("data-node-id") ? 1 : 0) : -1,
         accent: document.querySelector('[data-node-id="app"]').style.getPropertyValue("--b-accent"),
@@ -276,7 +283,9 @@ test("a theme value change fades the old canvas out", async (t) => {
     })()`);
     assert.equal(right.fades, 1);
     assert.equal(right.ids, 0, "the snapshot carries no node ids");
-    assert.ok(right.aligned, "the snapshot sits exactly over the canvas it copies");
+    assert.ok(right.short, "the content ends well above the canvas bottom");
+    assert.equal(right.aligned[0], right.aligned[1], "the copied App sits exactly over the live one, full height");
+    assert.equal(right.covers[0], right.covers[1], "the copy covers the whole canvas");
     assert.notEqual(right.snapAccent, right.accent, "the snapshot keeps the old theme over the new one");
     const anims = await page.eval<{ props: string[]; duration: number; easing: string }[]>(`document.getAnimations()
       .filter((a) => a.effect.target.classList.contains("m-theme-fade"))
