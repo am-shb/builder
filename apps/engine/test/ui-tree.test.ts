@@ -205,6 +205,26 @@ describe("trimmed tool format", () => {
     assert.equal(dropped, 1);
   });
 
+  test("an update whose props all drop is skipped unless it names its own decision", () => {
+    const { batch, dropped } = fromToolBatch({ label: "x", decisionId: "d9", ops: [
+      { op: "add", parentId: "home", node: { id: "b", type: "Button", props: [{ key: "label", value: "Go" }] } },
+      { op: "update", id: "b", props: [{ key: "color", value: "#f00" }, { key: "px", value: 4 }] },
+      { op: "update", id: "b", props: [{ key: "color", value: "#f00" }], decisionId: "d3" },
+    ] });
+    assert.deepEqual(batch.ops.slice(1), [{ op: "update", id: "b", props: {}, decisionId: "d3" }], "only the op with its own decisionId stays");
+    assert.equal(dropped, 3);
+  });
+
+  test("a set_theme with no slots is skipped and counted, not a batch rejection", () => {
+    const { batch, dropped } = fromToolBatch({ label: "x", ops: [
+      { op: "set_theme" },
+      { op: "add", parentId: "home", node: { id: "t", type: "Text", props: [{ key: "text", value: "hi" }] } },
+    ] });
+    assert.equal(dropped, 1);
+    assert.deepEqual(batch.ops.map((o) => o.op), ["add"]);
+    assert.ok(applyBatch(emptyPrototype("X"), batch).ok);
+  });
+
   test("drop_theme becomes a theme_status revert", () => {
     const { batch } = fromToolBatch({ label: "x", decisionId: "d2", ops: [{ op: "drop_theme", decisionId: "d1" }] });
     assert.deepEqual(batch.ops, [{ op: "theme_status", decisionId: "d1", to: "revert" }]);

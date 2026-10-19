@@ -214,7 +214,9 @@ function propsToRecord(props: ToolProp[]): Record<string, unknown> {
  * and counted in `dropped` (unsafe keys too). An update is checked against the type of the node it
  * names: added earlier in this batch, else in `proto`; a node of unknown type takes no props.
  * Added nodes are drafts. Adds, updates and set_theme take the op's or node's own decisionId, else
- * the batch's, else `defaults.decisionId`. drop_theme becomes a theme_status revert.
+ * the batch's, else `defaults.decisionId`. drop_theme becomes a theme_status revert. An update whose
+ * props were all dropped (on a known node, naming no decisionId of its own) is skipped, as is a set_theme
+ * that sets no slot (counted in `dropped`).
  */
 export function fromToolBatch(
   t: ToolPatchBatch, defaults: { decisionId?: string } = {}, proto?: Prototype,
@@ -233,28 +235,39 @@ export function fromToolBatch(
     dropped += out.dropped.length;
     return out.props;
   };
-  const ops = t.ops.map((op): PatchOp => {
+  const ops = t.ops.flatMap((op): PatchOp[] => {
     switch (op.op) {
       case "add": {
         const { props, decisionId, ...rest } = op.node;
         added.set(op.node.id, op.node.type);
         const node: UiNode = { ...rest, props: normalize(op.node.type, props), status: "draft", ...withDecision(decisionId), children: [] };
-        return { ...op, node };
+        return [{ ...op, node }];
       }
       case "update": {
         const { props, decisionId, ...rest } = op;
         const type = added.get(op.id) ?? (proto ? findNode(proto, op.id)?.type : undefined);
-        return { ...rest, ...(props ? { props: normalize(type, props) } : {}), ...withDecision(decisionId) };
+        const kept = props ? normalize(type, props) : undefined;
+        // Every prop it set was dropped: what is left would only retag the node with the batch's
+        // decision (sending an agreed node back to draft) for a change nobody can see. Its own
+        // decisionId is a deliberate retag, so that op stays, and so does an update to a node that
+        // does not exist (unknown type), so the batch still fails validation.
+        if (type !== undefined && props?.length && Object.keys(kept!).length === 0 && decisionId === undefined) return [];
+        return [{ ...rest, ...(kept ? { props: kept } : {}), ...withDecision(decisionId) }];
       }
       case "set_theme": {
         const values: Partial<Record<ThemeSlotName, string>> = {};
         for (const slot of THEME_SLOTS as ThemeSlotName[]) if (op[slot] !== undefined) values[slot] = op[slot];
-        return { op: "set_theme", values, ...withDecision(undefined) };
+        // No slot set: dropped, never a reason to reject the batch.
+        if (Object.keys(values).length === 0) {
+          dropped++;
+          return [];
+        }
+        return [{ op: "set_theme", values, ...withDecision(undefined) }];
       }
       case "drop_theme":
-        return { op: "theme_status", decisionId: op.decisionId, to: "revert" };
+        return [{ op: "theme_status", decisionId: op.decisionId, to: "revert" }];
       default:
-        return op;
+        return [op];
     }
   });
   const batch: PatchBatch = { ops, label: t.label };

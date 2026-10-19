@@ -9,7 +9,7 @@ import { createBuildLoop, taskText, TASK_DONE_MS } from "../src/agent/build-loop
 import { toolJsonSchema } from "../src/agent/tool-schema.ts";
 import { enforceGrounding, HandoffSchema, sanitizeModelBatch } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
-import { applyBatch, emptyPrototype, findNode } from "../src/ui/tree.ts";
+import { applyBatch, emptyPrototype, findNode, fromToolBatch } from "../src/ui/tree.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
@@ -540,6 +540,34 @@ test("a model batch cannot send theme_status agreed", () => {
   const batch = { label: "x", ops: [{ op: "theme_status" as const, decisionId: "d1", to: "agreed" as const }, setTheme] };
   assert.deepEqual(sanitizeModelBatch(batch, doc, { proto: draft.proto, reopened: new Set(["d1"]) }).ops, [setTheme]);
   assert.deepEqual(sanitizeModelBatch(batch, doc).ops, [setTheme]);
+});
+
+test("an update whose props all drop leaves an agreed node alone (known issue I2)", () => {
+  const added = applyBatch(emptyPrototype("X"), { label: "t", ops: [
+    { op: "add", parentId: "home", node: { id: "b", type: "Button", props: { label: "Go" }, status: "agreed", decisionId: "d1", children: [] } },
+  ] });
+  assert.ok(added.ok);
+  const { batch, dropped } = fromToolBatch({ label: "x", decisionId: "d9", ops: [
+    { op: "update", id: "b", props: [{ key: "color", value: "#f00" }] },
+  ] }, {}, added.proto);
+  assert.equal(dropped, 1);
+  const doc = { ...emptyDoc(), decisions: [{ id: "d1", text: "Go button", status: "agreed" as const, proposedBy: "Amir", agreedBy: ["Sara"], affects: ["b"], rejectedOptions: [] }] };
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto: added.proto, reopened: new Set() }).ops, []);
+});
+
+test("a variant update whose props all drop does not retag the node", async () => {
+  const s = await setup([[
+    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    consensus([{ op: "add_conflict", id: "c1", topic: "Heading", variants: [
+      conflictVariant("A", "Red", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "color", value: "red" }] }]),
+      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Toggle")]),
+    ] }]),
+  ]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "red"), await s.say("Sara", "toggle")]));
+  await flush();
+  const [a, b] = s.doc().conflicts[0].variants;
+  assert.deepEqual(a.batch.ops, [], "nothing left to do, so nothing to retag");
+  assert.equal(b.batch.ops.length, 1);
 });
 
 test("conflict variants default to d-<conflictId>", async () => {
