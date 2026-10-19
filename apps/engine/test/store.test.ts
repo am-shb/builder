@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecordId } from "surrealdb";
-import { connect } from "../src/db/connect.ts";
+import { connect, query } from "../src/db/connect.ts";
 import { testStore } from "./helpers/store.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype, UNTITLED_APP } from "../src/ui/tree.ts";
@@ -192,4 +192,17 @@ test("E3: findActiveForMeeting only finds the given org's sessions; no org finds
   const op = await store.createIntent("aaaaaaaa-0000-4000-8000-000000000002", url);
   assert.equal((await store.findActiveForMeeting(url))?.id, op.id);
   assert.equal((await store.findActiveForMeeting(url, "org_a"))?.id, a.id, "nor the operator's session for an org");
+});
+
+test("R4: a store query that takes longer than its deadline fails with STORE_TIMEOUT instead of waiting", async () => {
+  const db = await connect();
+  try {
+    const t0 = Date.now();
+    await assert.rejects(query(db, "SLEEP 2s", {}, 50), (err: Error & { code?: string }) => err.code === "STORE_TIMEOUT");
+    assert.ok(Date.now() - t0 < 1000, "gave up at the deadline, not when the statement ended");
+    const [n] = await query<[number]>(db, "RETURN 1 + 1", {}, 1000);
+    assert.equal(n, 2, "a query inside its deadline answers as usual");
+  } finally {
+    await db.close();
+  }
 });

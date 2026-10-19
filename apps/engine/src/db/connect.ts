@@ -38,7 +38,27 @@ const RETRY = { enabled: true, attempts: 10, retryDelay: 2, retryDelayMax: 100, 
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
+// How long one store query may take in all (known issue R4): waiting for a dropped connection to come back, the
+// retries on a conflict, and the answer. A hung connection then fails the query instead of stalling the session's
+// queue behind it. The store's queries are single rows or small sums, answered in well under a second.
+export const QUERY_TIMEOUT_MS = 5_000;
+
 const codeError = (code: string, message: string, cause?: unknown) => Object.assign(new Error(message, { cause }), { code });
+
+/**
+ * One statement, sent again when it hits a transaction conflict (RETRY), with a deadline over all of it. Fails
+ * with code STORE_TIMEOUT when the deadline passes. The SDK's `requestTimeout` isn't enough: it starts once the
+ * request is sent, so it doesn't cover the wait for a reconnect, and each retry gets it afresh. The server isn't
+ * told, so a write that timed out may still have been applied.
+ */
+export async function query<R extends unknown[]>(db: Surreal, sql: string, vars: Record<string, unknown> | undefined, timeoutMs: number) {
+  try {
+    return await db.query<R>(sql, vars).retry().signal(AbortSignal.timeout(timeoutMs)).collect();
+  } catch (err) {
+    if ((err as Error | null)?.name === "TimeoutError") throw codeError("STORE_TIMEOUT", "store query timed out", err);
+    throw err;
+  }
+}
 
 export async function connect(target: DbTarget = {}): Promise<Surreal> {
   const db = new Surreal({ engines: { ...createRemoteEngines(), ...createNodeEngines() } });

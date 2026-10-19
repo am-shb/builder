@@ -4,7 +4,8 @@
 // async. Guarantees that the old synchronous store got for free are kept by the database: a redelivered Recall
 // event is dropped by its unique index, and a missing token is issued with a conditional UPDATE,
 // never by reading and then writing. Two writes that collide fail with a transaction conflict, and every query
-// here is one statement sent again on a conflict (connect.ts), so the second one sees the first one's write.
+// here is one statement sent again on a conflict (connect.ts), so the second one sees the first one's write. Each
+// query has a deadline (QUERY_TIMEOUT_MS, known issue R4) and fails with STORE_TIMEOUT when it passes.
 import { randomBytes } from "node:crypto";
 import { RecordId } from "surrealdb";
 import type { DateTime, Surreal } from "surrealdb";
@@ -12,7 +13,7 @@ import { ConsensusDocSchema } from "./consensus/doc.ts";
 import type { ConsensusDoc } from "./consensus/doc.ts";
 import { Prototype as PrototypeSchema } from "./ui/schema.ts";
 import type { Prototype } from "./ui/schema.ts";
-import { connect } from "./db/connect.ts";
+import { connect, query, QUERY_TIMEOUT_MS } from "./db/connect.ts";
 import type { DbTarget } from "./db/connect.ts";
 import { migrate } from "./db/migrate.ts";
 
@@ -113,8 +114,9 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   const newToken = () => randomBytes(24).toString("base64url");
   let closing: Promise<void> | undefined;
 
-  // One statement, sent again when it hits a transaction conflict. Results are per statement.
-  const run = <R extends unknown[]>(sql: string, vars?: Record<string, unknown>) => db.query<R>(sql, vars).retry().collect();
+  // One statement, sent again when it hits a transaction conflict, within the query deadline. Results are per
+  // statement.
+  const run = <R extends unknown[]>(sql: string, vars?: Record<string, unknown>) => query<R>(db, sql, vars, QUERY_TIMEOUT_MS);
 
   async function getSession(id: string): Promise<Session | undefined> {
     const [[row]] = await run<[SessionRow[]]>("SELECT * FROM $id", { id: sessionRef(id) });
