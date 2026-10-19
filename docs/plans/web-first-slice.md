@@ -1,7 +1,8 @@
 # Plan: the web app's first slice (sign-in, orgs, sessions, start a session)
 
 - **Status:** proposed. No web code yet.
-- **Date:** 2026-10-18 (rewritten against `main` at `2c87931`)
+- **Date:** 2026-10-18 (rewritten against `main` at `2c87931`). Updated 2026-10-19 against `main` at `e9b01b5`,
+  after the Render Blueprint for the engine and the api landed: see [What changed on 2026-10-19](#what-changed-on-2026-10-19).
 - **Deadline:** hackathon submission due 2026-10-25, 11:59 PM ET. Where there's a choice, take the simplest option.
 - **Area:** `apps/web`. Work needed elsewhere is listed in [Changes outside apps/web](#changes-outside-appsweb) and
   needs that area's review first.
@@ -18,14 +19,71 @@ new one by pasting a meeting link, and opens a session to see its status and sta
 
 ```
 browser (Clerk, active org)
-  -> GET  {API}/v1/me
-  -> GET  {API}/v1/sessions
-  -> GET  {API}/v1/sessions/:id
-  -> POST {API}/v1/sessions { meetingUrl }        every call: Authorization: Bearer <Clerk session token>
+  -> GET  {API_ORIGIN}/v1/me
+  -> GET  {API_ORIGIN}/v1/sessions
+  -> GET  {API_ORIGIN}/v1/sessions/:id
+  -> POST {API_ORIGIN}/v1/sessions { meetingUrl }        every call: Authorization: Bearer <Clerk session token>
 ```
 
 **Not in this slice:** live updates (the api doesn't receive engine events yet), cost so far, hand-off links and
 library, billing, calendar, staff pages, invitations beyond what Clerk's components already offer, a design system.
+
+## What changed on 2026-10-19
+Read against `main` at `e9b01b5`. `apps/web`, `contracts/` and the api's routes are unchanged since this plan was
+written. What changed around them:
+- **Production runs on Render** (root `render.yaml`, [runbook](../runbooks/README.md#production-render-and-surrealdb-cloud)):
+  `builder-engine` and `builder-api`, both Docker web services in `virginia`, plus the environment group
+  `builder-internal` (the generated `ENGINE_INTERNAL_TOKEN`). **There is no web service yet.** The api reaches the
+  engine over Render's private network (`ENGINE_INTERNAL_URL` from `fromService ... hostport`, which the api now
+  accepts as a bare `host:port`).
+- **How deploys work:** a commit on `main` deploys a service only after every CI check on that commit passes
+  (`autoDeployTrigger: checksPass`), and only if a path in that service's `buildFilter` changed. Both services' filters
+  include `contracts/**`, the root `package.json`, `package-lock.json`, `.nvmrc` and `.dockerignore`. A pre-deploy
+  step runs migrations; the health check gates traffic. **An engine deploy ends live meetings** (known issue R2).
+- **Clerk on Render:** `CLERK_JWT_KEY` and `CLERK_AUTHORIZED_PARTIES` are `sync: false` on `builder-api`, set in the
+  dashboard, not in `render.yaml`. Editing `render.yaml` never changes them.
+- **Session limits:** `DEFAULT_MAX_USD` and `DEFAULT_MAX_MINUTES` are `sync: false` and still undecided (D5 in the api
+  plan). Without them, `POST /v1/sessions` on Render answers 503 `limits_unavailable`. The engine now enforces the
+  limits it's given (known issue R1), so a session ends on its own at `maxMinutes` or `maxUsd`, but the api isn't told why yet.
+- **Still true:** no CORS in the api (`OPTIONS` answers 405), no `POST /internal/engine-events`, so statuses don't
+  move, and the api-to-web shapes still live in `apps/api/src/routes/schemas.ts`.
+- **New locally:** `docker compose up --build` runs SurrealDB, the engine (local mode, no Recall) and the api from the
+  same images Render runs. CI also builds both images and tests against a real SurrealDB 3.3.2.
+
+What this changes in the plan:
+1. **I1 no longer waits on the Blueprint.** It adds a static site to the existing `render.yaml`, and it moves up to
+   right after W1, so the deployed origin exists early (for the api's `CLERK_AUTHORIZED_PARTIES` and CORS) and the
+   CSP is tested from the first screen, not the last. The deploy stops being the biggest risk.
+2. **Merging web work can redeploy the engine.** W1 and any PR that adds a dependency change `package-lock.json`, and
+   WC1 changes `contracts/**`. Both are in the engine's and the api's build filters, so merging them redeploys both,
+   which ends any live meeting. Merge those outside meetings, or pause the engine's auto-deploy first (runbook).
+   Changes only under `apps/web/` deploy only the web site.
+3. **A failing web check blocks every deploy.** Render waits for all checks on the commit, and CI runs every
+   workspace's `check`. A broken `vite build` on `main` stops engine and api deploys too, so `main` must stay green.
+4. **No URL is written into the repo** (product name and domain aren't decided). See [Names, URLs and
+   placeholders](#names-urls-and-placeholders). Because Render header values are literal text, the CSP origins move
+   out of `render.yaml` into the build (WD11).
+5. **The deployed start form needs D5.** Without the limits set on `builder-api`, a deployed start answers 503
+   `limits_unavailable`, which the error table already covers.
+
+## Names, URLs and placeholders
+The product name and the domain aren't decided. Until they are:
+- **UI text** uses two constants from `apps/web/src/brand.ts`: `PRODUCT_NAME` (header, page title, "Can't reach
+  {PRODUCT}") and `BOT_NAME` (the bot in the meeting, "{BOT} is joining"). Both hold the repo's working name for now.
+  `BOT_NAME` must match the name the engine gives the bot (`BOT_NAME` in `apps/engine/src/app.ts`), or people will look
+  for the wrong name in the meeting; renaming means changing both. In this plan, `{PRODUCT}` and `{BOT}` in quoted
+  text stand for these.
+- **Origins** are placeholders in this plan and come from configuration, never from code or `render.yaml`:
+
+  | Placeholder | What | Where it's set |
+  |---|---|---|
+  | `{WEB_ORIGIN}` | the web site's origin | Render shows it on the site's page (an `onrender.com` host until a domain exists) |
+  | `{API_ORIGIN}` | `builder-api`'s public origin | `VITE_API_URL` on the web site (build time) |
+  | `{FAPI}` | the Clerk instance's Frontend API host | derived at build time from `VITE_CLERK_PUBLISHABLE_KEY`, which encodes it |
+
+- **When a domain is chosen** (later, outside this slice): add it to the site in Render, add the new origin to the
+  api's `CLERK_AUTHORIZED_PARTIES`, set `VITE_API_URL` if the api moves too, rebuild the site, and only then consider a
+  Clerk production instance (it needs DNS records on that domain). No code changes.
 
 ## Where things stand (read on 2026-10-18)
 - **`apps/web`** is a placeholder: a README and a `package.json` whose `check` only prints a line.
@@ -63,10 +121,12 @@ library, billing, calendar, staff pages, invitations beyond what Clerk's compone
 - **The stage link** is `{engine}/stage/{sessionId}?token={stage_token}`. The stage token is the bot's capability:
   it opens the stage page, `/state` and the stage WebSocket. The stage page sends `ui_screen` and `barge_in` messages
   over that socket, so **a second browser that opens the stage link can change what the live stage reports, and its
-  `barge_in` stops Builder's voice in the live meeting**. It can also play Builder's voice locally. It is a control
+  `barge_in` stops the bot's voice in the live meeting**. It can also play the bot's voice locally. It is a control
   link, not a viewing link (see [Stage link](#stage-link)). `GET /v1/sessions` returns it for every row.
 - **The api has no CORS handling.** A browser on another origin can't read its replies, and `OPTIONS` answers 405.
-- **No `render.yaml` on `main` yet.** Ports: engine 3000, api 3001, Vite 5173.
+- ~~No `render.yaml` on `main` yet.~~ It exists now, with the engine and the api only (see
+  [What changed on 2026-10-19](#what-changed-on-2026-10-19)). Ports: engine 3000, api 3001, Vite 5173 locally; both
+  services use 10000 on Render.
 - **Shapes:** the api-to-web schemas are in `apps/api/src/routes/schemas.ts`. ADR 0010 says they move to `contracts/`
   once the web app imports them (WC1 below).
 
@@ -119,7 +179,7 @@ wired to React Router's `navigate`, so Clerk's own redirects stay inside the app
 pages or reloading the page. W0 also checks whether `@clerk/react-router` fits declarative mode better than
 `@clerk/react` with these props, and picks one.
 
-**Header** (on `/` and `/sessions/:id`): the app name, `<OrganizationSwitcher hidePersonal />`, the role from
+**Header** (on `/` and `/sessions/:id`): `PRODUCT_NAME` (see [Names](#names-urls-and-placeholders)), `<OrganizationSwitcher hidePersonal />`, the role from
 `GET /v1/me` (`org:admin` → "Admin", `org:member` → "Member", any other role shown as its key), and `<UserButton />`.
 
 **Organizations (each company is a tenant):**
@@ -163,7 +223,7 @@ list.** States: loading, empty (points at the form), error (by code, below). A R
 - The button is disabled while the request is in flight, so a double click sends one request.
 - **Guard after an unknown outcome (WD8):** if the list has a `start_unknown` session for the same normalized link
   from the last 30 minutes, Start shows a confirmation first: "An earlier start for this link didn't confirm.
-  Check the meeting for a Builder bot before starting another." with "Start anyway" and "Cancel".
+  Check the meeting for a {BOT} bot before starting another." with "Start anyway" and "Cancel".
 - Outcomes are in [Errors](#errors-every-api-code).
 
 **Session detail (`/sessions/:id`):** from `GET /v1/sessions/:id`. Shows the status label and a one-line
@@ -175,13 +235,13 @@ such session in this organization." with a link back.
 
 | Status | Label | Explanation on the detail page |
 |---|---|---|
-| `starting` | Starting | We're asking Builder to join. |
-| `joining` | Joining | Builder is joining the meeting. Admit it if the meeting asks. |
-| `in_meeting` | In the meeting | Builder is in the meeting. |
+| `starting` | Starting | We're asking {BOT} to join. |
+| `joining` | Joining | {BOT} is joining the meeting. Admit it if the meeting asks. |
+| `in_meeting` | In the meeting | {BOT} is in the meeting. |
 | `ended` | Ended | |
-| `failed` | Failed | Builder left the meeting because of an error. |
+| `failed` | Failed | {BOT} left the meeting because of an error. |
 | `start_failed` | Didn't start | The meeting service refused. Check the link and try again. |
-| `start_unknown` | Check the meeting | We couldn't confirm whether Builder joined. Check the meeting before starting again. |
+| `start_unknown` | Check the meeting | We couldn't confirm whether {BOT} joined. Check the meeting before starting again. |
 | anything else | Unknown | Shown without crashing, so a new status from the api doesn't break the page. |
 
 ### Stage link
@@ -189,7 +249,7 @@ The api returns `stageUrl` to members of the owning org (api plan D8). It holds 
 [Where things stand](#where-things-stand-read-on-2026-10-18)). **Decision WD5** for this slice:
 - Shown **only on the detail page**, behind a "Show stage link" button, never in the list or in any URL of the web app.
 - Next to it: "This link controls the stage shown in the meeting. Anyone with it can change what's on screen and
-  interrupt Builder's voice. Don't share it, and don't open it while the meeting is running unless you mean to."
+  interrupt {BOT}'s voice. Don't share it, and don't open it while the meeting is running unless you mean to."
 - Opening it puts the token in that browser's history; the warning says so. Hiding it in the list is about not
   showing it by accident: `GET /v1/sessions` still returns it for every row, so dropping it from the list response
   is an api change for later (A3).
@@ -231,8 +291,8 @@ The same mapping is used on every screen. "Network" codes are made by the web ap
 
 | HTTP | `code` | Where it can happen | Shown | Action offered |
 |---|---|---|---|---|
-| 201 | (none) | `POST` | "Builder is joining the meeting." Session goes to the top of the list | link to its detail |
-| 200 `reused: true` | (none) | `POST` | "This meeting already has a Builder session." with its status label (it may still be Starting) | link to that session |
+| 201 | (none) | `POST` | "{BOT} is joining the meeting." Session goes to the top of the list | link to its detail |
+| 200 `reused: true` | (none) | `POST` | "This meeting already has a {BOT} session." with its status label (it may still be Starting) | link to that session |
 | 400 | `invalid_request` | `POST` | "Use an https Google Meet, Zoom or Teams link." | fix the field |
 | 400 | `invalid_json` | `POST` | "Something went wrong (invalid_json)." It's a bug in our app | none |
 | 401 | `unauthenticated` | all | "Your sign-in has expired or isn't accepted here." | a "Sign in again" button (never automatic). If it keeps happening right after signing in, the api's `CLERK_AUTHORIZED_PARTIES` is missing this site's origin; the message says to contact support |
@@ -245,16 +305,16 @@ The same mapping is used on every screen. "Network" codes are made by the web ap
 | 415 | `unsupported_media_type` | none expected | generic, with the code | none |
 | 500 | `internal_error` | `GET` | "Something went wrong on our side. Try again in a moment." | Refresh |
 | 500 | `internal_error` | `POST` | **The 504 warning.** The api calls the engine before saving its answer, so a 500 can come after a bot was sent | list reloads; no retry button |
-| 502 | `engine_rejected`, `session.errorCode` = `recall_rejected` | `POST` | "Builder couldn't join this meeting. Check the link and that the meeting is open, then try again." | Start is allowed again |
-| 502 | `engine_rejected`, `session.errorCode` = `meeting_in_use` | `POST` | "Builder already has a session in this meeting. Check the meeting." | link to the list; no retry button |
+| 502 | `engine_rejected`, `session.errorCode` = `recall_rejected` | `POST` | "{BOT} couldn't join this meeting. Check the link and that the meeting is open, then try again." | Start is allowed again |
+| 502 | `engine_rejected`, `session.errorCode` = `meeting_in_use` | `POST` | "{BOT} already has a session in this meeting. Check the meeting." | link to the list; no retry button |
 | 502 | `engine_rejected`, any other `errorCode` | `POST` | "Starting meetings isn't working right now (`<errorCode>`)." A server setup problem | none |
 | 503 | `auth_unavailable` | all | "Sign-in isn't available right now." | Refresh |
 | 503 | `db_unavailable` | sessions routes | "Sessions aren't available right now." | Refresh |
 | 503 | `engine_unavailable` | `POST` | "Starting meetings isn't available right now." Nothing was started | none |
 | 503 | `limits_unavailable` | `POST` | "Starting meetings isn't set up on this server yet." Nothing was started | none |
-| 504 | `engine_outcome_unknown` | `POST` | **Warning:** "We couldn't confirm whether Builder joined. Check the meeting for a Builder bot before trying again." | link to the session; **no retry button**; list reloads; the WD8 guard applies |
+| 504 | `engine_outcome_unknown` | `POST` | **Warning:** "We couldn't confirm whether {BOT} joined. Check the meeting for a {BOT} bot before trying again." | link to the session; **no retry button**; list reloads; the WD8 guard applies |
 | (none) | `network_error` | `POST` | **The 504 warning:** "We lost the connection while starting. Check the session list and the meeting before trying again." | list reloads; no retry button |
-| (none) | `network_error` | `GET` | "Can't reach Builder. Check your connection." | Refresh |
+| (none) | `network_error` | `GET` | "Can't reach {PRODUCT}. Check your connection." | Refresh |
 | (none) | `bad_response` | `GET` | "Something went wrong (bad_response)." | Refresh |
 | (none) | `bad_response` | `POST` | **The 504 warning** | list reloads; no retry button |
 | any other | any other | `GET` | "Something went wrong (`<code>`)." | Refresh |
@@ -276,26 +336,41 @@ outcome (201 aside) shows the 504 warning**, because a bot may exist.
   Meeting links are shown as text, not links. The only `href` built from api data is the stage link, after the
   protocol check above. A test scans `src/` for `dangerouslySetInnerHTML`, `innerHTML`, `localStorage` and
   `console.`.
-- **Content Security Policy** (and other headers), sent by Render for the static site (I1). From Clerk's CSP guide,
-  with `{FAPI}` the Clerk instance's Frontend API host (for a dev instance, `*.clerk.accounts.dev`) and `{API}` the
-  api's origin:
+- **Content Security Policy (WD11).** From Clerk's CSP guide, with `{FAPI}` the Clerk instance's Frontend API host
+  (for a dev instance, under `clerk.accounts.dev`) and `{API_ORIGIN}` the api's origin. Render's `headers` values in
+  `render.yaml` are literal text, so a policy that names those origins can't live there without writing a URL into
+  the repo. It's split in two:
+  - **Built into `index.html`** as `<meta http-equiv="Content-Security-Policy">`, by a small Vite plugin
+    (`transformIndexHtml`) at build time. It takes `{API_ORIGIN}` from `VITE_API_URL` and `{FAPI}` from
+    `VITE_CLERK_PUBLISHABLE_KEY` (the part after `pk_test_` or `pk_live_` is the base64 of the host plus `$`). With
+    either variable missing or not parsing, the build still succeeds and writes the strict policy below without those
+    origins, so the page shows "not configured" instead of loading anything. A unit test covers the derivation. In
+    `vite dev` the plugin adds nothing (Vite's dev client needs `'unsafe-eval'` and websockets).
+  - **Sent as a header by Render** (`render.yaml`, no URLs): `Content-Security-Policy: frame-ancestors 'none';
+    object-src 'none'; base-uri 'self'`, because a `<meta>` policy ignores `frame-ancestors`. A browser enforces both
+    policies.
+
+  The `<meta>` policy:
 
   ```
   default-src 'self';
   script-src 'self' https://{FAPI} https://challenges.cloudflare.com https://*.protect.clerk.com;
-  connect-src 'self' {API} https://{FAPI} https://*.protect.clerk.com:*;
+  connect-src 'self' {API_ORIGIN} https://{FAPI} https://*.protect.clerk.com:*;
   img-src 'self' https://img.clerk.com;
   style-src 'self' 'unsafe-inline';
   worker-src 'self' blob:;
   frame-src https://challenges.cloudflare.com https://*.protect.clerk.com;
-  form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'
+  form-action 'self'; base-uri 'self'; object-src 'none'
   ```
 
   `style-src 'unsafe-inline'` is required by Clerk's runtime styles. No `'unsafe-eval'` in production. Clerk
-  telemetry is turned off (`telemetry={false}` on `ClerkProvider`), so its host isn't needed. Also:
-  `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`,
-  `Permissions-Policy: camera=(), microphone=(), geolocation=()`. The deploy (I1) loads the site with the CSP
-  and checks the browser console for CSP errors on every screen before it's merged.
+  telemetry is turned off (`telemetry={false}` on `ClerkProvider`), so its host isn't needed. The `<meta>` tag goes
+  first in `<head>`, before any script. Also as Render headers (no URLs): `Referrer-Policy: no-referrer`,
+  `X-Content-Type-Options: nosniff`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`. I1 checks the
+  deployed placeholder for CSP errors in the browser console, and every later step that adds a screen checks that
+  screen on the deployed site after it merges.
+- **No URLs in the code.** A test scans `src/`, `index.html` and `vite.config.ts` for `onrender.com` and any
+  `https://` origin other than the Clerk and Cloudflare hosts the CSP names. Origins come only from `VITE_*`.
 - **CORS** is on the api side (A1): exact allowed origins, no credentials.
 - **Never logged, anywhere:** session tokens, meeting links, stage links, request or response bodies, api error
   messages. The web app has no logger and no analytics or error-reporting script in this slice (WD9). If one is
@@ -325,6 +400,10 @@ mode, which uses a stand-in for Recall, and with no model key set.
 - **Never run the engine with `npm start` and a Recall key for web work.** That sends a real, paid bot. Ask first.
 - Step W1 adds `apps/web/.env.example` (names only) and `dist/` to `apps/web/.gitignore`.
 - A root `npm run dev` that starts all three is optional (R1).
+- **Or with Docker:** `docker compose up --build` runs SurrealDB, the engine in local mode and the api on the same
+  ports, from the images Render runs, then `npm run dev -w @builder/web` on the host. The api needs `CLERK_JWT_KEY`
+  and `CLERK_AUTHORIZED_PARTIES=http://localhost:5173` in `apps/api/.env`, and the session limits, as above. Compose
+  sets its own engine token and database. Compose has no web service, and this plan doesn't add one.
 
 ## Testing (no real Clerk, api, engine or paid service)
 - **Vitest + jsdom + Testing Library**, in `apps/web/test/`, run by `npm run check` and CI, offline.
@@ -364,45 +443,63 @@ mode, which uses a stand-in for Recall, and with no model key set.
 Against the Clerk dev instance and the three local apps above. The engine is in local mode, so no bot is sent:
 1. Sign up; the choose-organization step appears; create org A; the list is empty.
 2. Start a Meet link; it appears at the top as Joining; its detail page shows the stage link only after "Show".
-3. Start the same link again: "This meeting already has a Builder session."
+3. Start the same link again: "This meeting already has a {BOT} session."
 4. Stop the engine and start a different link: the 504 warning, no retry button, the session shows "Check the
    meeting". Start that link again: the guard asks first.
 5. Create org B, switch to it: empty list. Switch back: A's sessions.
 6. Sign out, sign back in: back on `/` in the last org.
 
-**On the deployed site** (after I1), first check without a bot: sign-in, org choice, the list, and no CSP errors in
-the browser console on every screen; no 401 loop (a 401 right after sign-in means the api's
+**On the deployed site** (from I1 on, each screen as its step merges), first check without a bot: sign-in, org
+choice, the list, and no CSP errors in the browser console on every screen; no 401 loop (a 401 right after sign-in means the api's
 `CLERK_AUTHORIZED_PARTIES` lacks the site's origin). With the deployed engine unreachable or not configured, the
-start form shows the 503 or 504 messages. **Starting a session on the deployed site sends a real, paid Recall bot:
+start form shows the 503 or 504 messages; with D5's limits unset, 503 `limits_unavailable`. **Starting a session on the deployed site sends a real, paid Recall bot:
 ask first** (AGENTS.md), use a meeting you control, and end the bot afterwards.
 
 ## Deployment on Render
-Per ADR 0005, in the root `render.yaml` Blueprint. This is I1, an infra-area change (see
-[Changes outside apps/web](#changes-outside-appsweb)). There's no `render.yaml` on `main` yet; I1 adds the web site
-to the Blueprint the api and engine services go in, so it comes after that Blueprint exists.
-- **Service:** `web`, `type: web`, `runtime: static`, $0, served from Render's CDN (static sites take no `region`).
+Per ADR 0005, in the root `render.yaml` Blueprint, next to `builder-engine` and `builder-api`. This is I1, an
+infra-area change (see [Changes outside apps/web](#changes-outside-appsweb)). The Blueprint exists, so I1 only adds a
+service, and it comes right after W1 (a placeholder page that calls nothing).
+- **Service:** `builder-web` (the same internal prefix as the other two; it isn't the product name and appears only
+  in Render and in the default `onrender.com` host), `type: web`, `runtime: static`, $0, served from Render's CDN.
+  Static sites take no `region`, `plan`, `numInstances`, `preDeployCommand` or health check.
 - **No Dockerfile (WD10).** ADR 0005 says each app has a Dockerfile; that fits services that run a process, and a
-  static site runs none. Recording this exception is D-INFRA below.
-- **Build from the repo root, no `rootDir`** (ADR 0005), so `contracts/` is there:
-  `npm ci --workspace @builder/web --include-workspace-root && npm run build -w @builder/web`.
-  `staticPublishPath: apps/web/dist`.
-- **`buildFilter.paths`:** `apps/web/**`, `contracts/**`, `package.json`, `package-lock.json`.
-- **`autoDeployTrigger: checksPass`**, as for the other services.
-- **Routes:** rewrite `/*` → `/index.html`.
-- **Headers:** for `/*`, the CSP and the other headers from [Security](#security). The CSP names the api's origin
-  and the Clerk Frontend API host, so it's written per environment.
-- **Env:** `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL`, `sync: false`. Render asks for `sync: false` values only
-  when the Blueprint is first created; later changes are made in the dashboard. They're read at build time, so
-  changing either needs a rebuild.
-- **The api's env** gets the site's URL (`https://<web>.onrender.com`) in `CLERK_AUTHORIZED_PARTIES`, which A1 also
-  uses for CORS. That's a change to the api service's settings, made with I1.
-- **Clerk for the demo (WD7):** the development instance. Clerk's production instances need a domain we own with DNS
-  records; a dev instance works on the Render URL, with a "development mode" badge and dev limits, which is fine for
-  the demo. A production instance and domain come later.
-- Check the exact `render.yaml` keys (`headers`, `routes`, `buildFilter`) against Render's Blueprint reference when
-  writing I1.
-- **Fallback if the deploy isn't ready by 2026-10-24:** demo from a laptop with the local setup (engine in local mode,
-  or a real engine only with approval), which needs none of I1.
+  static site runs none. Recording this exception is D-INFRA below. CI's image job is unchanged.
+- **Build from the repo root, no `rootDir`** (as for the other two, so `contracts/` is there):
+  `buildCommand: npm ci --workspace @builder/web --include-workspace-root && npm run build -w @builder/web`,
+  `staticPublishPath: ./apps/web/dist`. Render's docs list `NODE_VERSION`, `.node-version` and `engines`, not
+  `.nvmrc`, so the service sets `NODE_VERSION` to the same Node 24 minor as the Dockerfiles (`node:24.22`). Its
+  default is also a Node 24, but pinning keeps the site and the images in step.
+- **`buildFilter`,** matching the other services: `paths` `apps/web/**`, `contracts/**`, `package.json`,
+  `package-lock.json`, `.nvmrc`; `ignoredPaths` `apps/web/test/**`, `apps/web/README.md`, `contracts/README.md`.
+- **`autoDeployTrigger: checksPass`** and `branch: main`, as for the other services.
+- **Routes:** one `rewrite`, source `/*`, destination `/index.html`. Render doesn't apply a rewrite to a path where a
+  file exists, so `/assets/*` still load.
+- **Headers** for `/*`, all URL-free: the `frame-ancestors` CSP and the other headers from [Security](#security). The
+  origin-bearing CSP is in the built `index.html` (WD11). Render keeps header and route rules made in the dashboard
+  that aren't in the Blueprint, so set them only in `render.yaml`.
+- **Env:** `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL` (`{API_ORIGIN}`, from `builder-api`'s page), both
+  `sync: false`. Neither is secret, but `sync: false` keeps origins out of the repo. Render asks for them only when it
+  first sees the new service in the Blueprint; later changes are made in the dashboard. They're read at build time,
+  so changing either needs a new deploy of the site.
+- **Not from `fromService`:** Render's `fromService` gives a service's private `host`, `port` or `hostport`, not its
+  public URL, so it can't fill `VITE_API_URL`.
+- **The api's settings** (dashboard, on `builder-api`, since both are `sync: false`): add `{WEB_ORIGIN}` to
+  `CLERK_AUTHORIZED_PARTIES`, comma-separated next to `http://localhost:5173` if the dev instance is shared. A1 also
+  uses that list for CORS. Saving redeploys only the api, which doesn't end meetings.
+- **Same Clerk instance on both sides.** The publishable key on the site and `CLERK_JWT_KEY` on `builder-api` must be
+  from the same instance, or every call gets 401. If `builder-api` already has a key from another instance, I1 checks
+  which one before setting the site's key.
+- **Clerk for the demo (WD7):** the development instance, on the site's `onrender.com` origin. A production instance
+  needs a domain we own with DNS records, and the domain isn't chosen. A dev instance shows a "development mode"
+  badge and has dev limits, which is fine for the demo.
+- **The runbook** gets the site: a row in the production table, the two variables in the Blueprint step, the
+  `CLERK_AUTHORIZED_PARTIES` step, and the cost (unchanged, the site is free). Same PR as I1.
+- **Starting a session from the deployed site** needs D5's limits set on `builder-api` (otherwise 503
+  `limits_unavailable`), and it sends a real, paid Recall bot: ask first.
+- **Known issue R6 doesn't change:** a static site runs no process on the private network, so it can't reach the engine's
+  operator routes.
+- **Fallback if the deploy isn't working by 2026-10-24:** demo from a laptop with the local setup (engine in local
+  mode, or a real engine only with approval), which needs none of I1.
 
 ## Steps
 Each step is its own branch from fresh `main`, with tests, squash-merged, and leaves `main` working. Sizes: S = up
@@ -410,8 +507,9 @@ to 2 hours, M = about half a day, L = about a day.
 
 | # | Branch | What | Size | Safe alone because |
 |---|---|---|---|---|
-| W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with CSP. Settles WD1, WD2, WD5–WD10 for the web app | S | docs only |
-| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; network-blocking test setup; the source-scan guard tests; README update. Lockfile changes | M | renders a placeholder; calls nothing |
+| W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with the split CSP, names and origins from configuration. Settles WD1, WD2, WD5–WD11 for the web app | S | docs only |
+| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
+| I1 | `infra/render-web` | `builder-web` static site in `render.yaml`, the runbook's production section; then, in the dashboard, its two variables and `{WEB_ORIGIN}` in the api's `CLERK_AUTHORIZED_PARTIES`. Placeholder checked live: loads, routes rewrite, headers present, no CSP errors | S | the site calls nothing yet; the Blueprint change adds a service and touches no other |
 | W2 | `web/clerk-auth` | `ClerkProvider` with the wiring above, the routes and guard, sign-in/up, `/choose-organization` with its fallback, header with `<OrganizationSwitcher hidePersonal />` and `<UserButton />`, "not configured" screen, `test/helpers/clerk.tsx`. Org flow checked by hand on the dev instance | M–L | no api calls yet |
 | W3 | `web/api-client` | `src/api/client.ts`, `src/api/schemas.ts` (tolerant), `ApiError`, the error mapping, `test/helpers/fake-api.ts`; `GET /v1/me` shows the role in the header | M | `/v1/me` exists; reads only. Needs A1 to work in a real browser |
 | W4 | `web/sessions-list` | The list, labels, states, Refresh, reload on org change | M | reads only |
@@ -419,13 +517,17 @@ to 2 hours, M = about half a day, L = about a day.
 | W6 | `web/session-detail` | `/sessions/:id`, status explanation, limits, error code, the stage link behind "Show" | M | reads only |
 
 - **Order:** W0 and the outside items A1, WC1 and K1 first (they're small and others wait on them). W1–W3 can start
-  at once. W4–W6 need WC1 (or the temporary copy below). I1 after W5, once the Blueprint exists.
+  at once. I1 right after W1. W4–W6 need WC1 (or the temporary copy below). After each step from W2 on merges, its
+  screens are checked on the deployed site too.
+- **Merges that redeploy the engine** (and so end live meetings): W1 (lockfile) and WC1 (`contracts/`). Merge them
+  when no meeting is running, or pause the engine's auto-deploy first (runbook). The other web steps change only
+  `apps/web/` and deploy only the site.
 - **What to cut first if time runs short**, in this order:
   1. The WD8 guard's confirmation step (the 504 warning itself is never cut; the engine already refuses a second
      bot for the same org and meeting in nearly every case).
   2. The role in the header (`GET /v1/me`).
   3. The session detail page: show the status in the list and drop the stage link from the web app for the demo.
-  4. The deploy (I1): demo locally instead.
+  4. Checking every screen on the deployed site: if the deployed site misbehaves late, demo locally instead.
   5. Styling beyond Clerk's defaults and one CSS file.
 
   Never cut: sign-in, org choice and switching, the list, the start form, the `POST` warnings, and (when deployed)
@@ -449,6 +551,8 @@ Each needs review from that area. None of them changes how another area behaves 
   app adds polling on the detail page (WD6).
 - **A3 (later). Leave `stageUrl` out of `GET /v1/sessions`,** keeping it on `GET /v1/sessions/:id` and the `POST`
   reply, so the list never carries control tokens.
+- **D5 (the api plan's open decision).** `DEFAULT_MAX_USD` and `DEFAULT_MAX_MINUTES` on `builder-api`. Not needed
+  for the web app's code or the local demo, but a deployed start answers 503 `limits_unavailable` until they're set.
 
 **contracts (`contracts/`, additive, reviewed for both the engine and the api):**
 - **WC1. Move the api-to-web shapes** from `apps/api/src/routes/schemas.ts`: `ApiSessionStatus`, `SessionView`,
@@ -467,8 +571,9 @@ Each needs review from that area. None of them changes how another area behaves 
   `ui_screen` or `barge_in`. Until then, the stage link is handled as in [Stage link](#stage-link).
 
 **infra:**
-- **I1.** The `web` static site in `render.yaml` (see [Deployment](#deployment-on-render)), and the web URL in the
-  api service's `CLERK_AUTHORIZED_PARTIES`. Needs the Blueprint with the api and engine services first.
+- **I1.** The `builder-web` static site in the existing `render.yaml` (see [Deployment](#deployment-on-render)), the
+  runbook update, and, in the dashboard, `{WEB_ORIGIN}` in `builder-api`'s `CLERK_AUTHORIZED_PARTIES`. Right after
+  W1. The Blueprint with the engine and the api is on `main` already.
 - **D-INFRA.** Amend ADR 0005 for WD10: a static site has no Dockerfile.
 
 **Identity (Clerk dashboard and ADR 0006, shared with the api plan):**
@@ -494,8 +599,8 @@ Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID
   read-only link. Alternative: don't show it at all in the web app for now.
 - **WD6. Status updates.** *Recommended:* a Refresh button now; polling on the detail page after A2. Polling now
   would show nothing new.
-- **WD7. Clerk instance for the demo.** *Recommended:* the development instance on the Render URL. Alternative: buy
-  a domain and set up a production instance before 2026-10-25 (DNS can take up to 48 hours).
+- **WD7. Clerk instance for the demo.** *Recommended:* the development instance on the site's `onrender.com` origin.
+  The domain isn't chosen, so a production instance (which needs DNS on our own domain) waits for that decision.
 - **WD8. Starting again after an unknown outcome.** *Recommended:* the web app asks first (above), as a second line
   of defense behind the engine's per-org, per-meeting check. Alternative: the api also reuses `start_unknown`
   sessions, which also blocks starting again after a start that really failed; that's an api decision.
@@ -503,13 +608,19 @@ Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID
   bodies, after its own review.
 - **WD10. Dockerfile for the web app.** *Recommended:* none; it's a static site (D-INFRA). Alternative: an nginx image
   on a $7 web service.
+- **WD11. Where the CSP's origins come from.** *Recommended:* a `<meta>` policy built into `index.html` from the two
+  `VITE_*` variables, plus a URL-free header policy in `render.yaml` for `frame-ancestors`. Alternatives: the whole
+  policy as a `render.yaml` header (writes the api and Clerk origins into the repo, and needs editing when the domain
+  changes), or a looser `connect-src https:` (allows any host).
 - **Styling.** One plain CSS file with a few variables; Clerk's components bring their own look. Sharing tokens with
   the stage theme is the design-system decision in the web README, later.
 
 ## Timeline
-- **Effort:** W0 + W1 about a day, W2–W6 about three and a half days. That fits before 2026-10-25 if W0, A1, WC1 and
-  K1 land by 2026-10-20.
-- **Outside items the demo needs:** A1, WC1 and K1 by about 2026-10-20. For a deployed demo, the Blueprint with the
-  api and engine, then I1, by about 2026-10-23, leaving time for the deployed check. Otherwise, the local fallback.
-- **The biggest risk** is the deploy, which depends on the api and engine being on Render first; the local demo is
-  the fallback. The next is Clerk's org flow, checked by hand in W2.
+- **Effort:** W0 + W1 about a day, I1 about two hours, W2–W6 about three and a half days. That fits before
+  2026-10-25 if W0, A1, WC1 and K1 land by 2026-10-20.
+- **Outside items the demo needs:** A1, WC1 and K1 by about 2026-10-20; I1 by about 2026-10-21 (the engine and api
+  are on Render already). For a start from the deployed site, D5's limits set by about 2026-10-23. Otherwise, the
+  local fallback.
+- **The biggest risk** is now Clerk's org flow, checked by hand in W2, and on the deployed site from W2 on. The
+  deploy is smaller than before: the Blueprint and CD exist, and I1 lands early with a page that calls nothing. The
+  other risk is a merge that redeploys the engine during someone's meeting (W1, WC1).
