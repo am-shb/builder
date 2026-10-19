@@ -390,11 +390,13 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     }
   }
 
-  // The bot has ended, so Recall's charges are known: bot time and transcription (src/service-costs.ts). Then logs
-  // the session's cost by kind. Never rejects: a failed write is logged and the session still ends.
+  // The bot has ended, so Recall's charges are known: bot time and transcription (src/service-costs.ts). Local mode
+  // ran no Recall bot, so it has none. Then logs the session's cost by kind. Never rejects: a failed write is logged
+  // and the session still ends.
   async function recordEndCosts(s: Session, bot: RecallBot) {
     try {
-      for (const row of recallCosts(s.id, bot.status_changes ?? [], config.botVariant)) await store.addServiceCost({ ...row, sessionId: s.id });
+      const recallRows = config.local ? [] : recallCosts(s.id, bot.status_changes ?? [], config.botVariant);
+      for (const row of recallRows) await store.addServiceCost({ ...row, sessionId: s.id });
       const c = await store.sessionCosts(s.id);
       log("session.cost", { session_id: s.id, model_usd: c.model, tts_usd: c.tts, recall_usd: c.recall, total_usd: c.total });
     } catch (err) {

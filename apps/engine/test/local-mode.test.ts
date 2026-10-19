@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { loadConfig, loadLocalConfig } from "../src/config.ts";
 import { createLocalRecall } from "../src/local-recall.ts";
-import { createRecallClient } from "../src/recall-client.ts";
+import { createRecallClient, type RecallClient } from "../src/recall-client.ts";
 import { settle, testStore } from "./helpers/store.ts";
 import { createApp, REALTIME_PATH } from "../src/app.ts";
 import { createFakePort } from "../src/agent/llm.ts";
@@ -12,7 +12,7 @@ import { signForTest } from "../src/verify.ts";
 const openServers = new Set<http.Server>();
 after(() => { for (const s of openServers) { s.closeAllConnections(); s.close(); } });
 
-async function startLocal(opts: { speaking?: boolean } = {}) {
+async function startLocal(opts: { speaking?: boolean; recall?: RecallClient } = {}) {
   const config = loadLocalConfig({});
   const store = await testStore();
   const stops: string[] = [];
@@ -22,7 +22,7 @@ async function startLocal(opts: { speaking?: boolean } = {}) {
     speech: { say: async () => "u", stop: (id: string) => void stops.push(id), speaking: () => opts.speaking! },
   };
   const app = await createApp({
-    config, store, recall: createLocalRecall(), log: (msg, fields) => logs.push({ msg, fields }),
+    config, store, recall: opts.recall ?? createLocalRecall(), log: (msg, fields) => logs.push({ msg, fields }),
     indexHtml: "<html></html>", stageHtml: "<html>stage</html>", localHtml: "<html>local</html>", ...(agent ? { agent } : {}),
   });
   const server = http.createServer(app.handler);
@@ -97,6 +97,21 @@ test("local speech is validated, refused once the session ended, and never reach
   assert.equal((await fetch(`${base}/api/sessions/${session.id}/leave`, { method: "POST" })).status, 200);
   await app.pollOnce();
   assert.equal((await post(url, { kind: "utterance", speaker: "Amir", text: "hi" })).status, 409);
+});
+
+test("a local session records no Recall cost, because no Recall bot ran", async () => {
+  // The stand-in bot reads as ten minutes in the call, which Recall's rates would bill.
+  const at = (t: string) => ({ sub_code: null, message: null, created_at: `2026-10-19T${t}.000Z` });
+  const recall: RecallClient = {
+    ...createLocalRecall(),
+    getBot: async (id) => ({ id, status_changes: [{ code: "in_call_recording", ...at("17:00:00") }, { code: "done", ...at("17:10:00") }] }),
+  };
+  const { base, store, logs } = await startLocal({ recall });
+  const session = await newLocalSession(base);
+  assert.deepEqual(await store.listServiceCosts(session.id), []);
+  const logged = logs.find((l) => l.msg === "session.cost");
+  assert.ok(logged, "the session's cost is still logged");
+  assert.equal(logged.fields?.recall_usd, 0);
 });
 
 test("the Recall webhook accepts nothing in local mode", async () => {
