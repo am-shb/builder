@@ -84,7 +84,7 @@ test("stage stops audio within 300ms of a human transcript message and notifies 
       const send = (m: unknown) => { for (const s of sockets) s.send(JSON.stringify(m)); };
 
       const speech = createSpeech({
-        tts: createFakeTts(tone(6), { delayMs: 30 }), runtime, channel, store,
+        usdPerChar: 0, tts: createFakeTts(tone(6), { delayMs: 30 }), runtime, channel, store,
         recall: { sendChatMessage: async () => {} },
       });
       const said = speech.say(sessionId, "A sidebar could work here.");

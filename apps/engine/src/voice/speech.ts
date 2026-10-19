@@ -1,7 +1,8 @@
 // Builder's voice (spec §13): each line goes to the TTS provider whole, and its PCM streams to the
 // stage over the stage WebSocket as it's generated (speech_start, binary frames, speech_end); the
 // stage plays it, and Output Media carries the page's audio into the call. stop() cuts it at once.
-// When the provider fails or stalls past timeoutMs, the line goes to meeting chat instead.
+// When the provider fails or stalls past timeoutMs, the line goes to meeting chat instead. Every line the provider
+// took is recorded as a TTS cost, by characters at `usdPerChar`, whether it played whole, was cut off or timed out.
 // Logs ids, byte counts and durations only: never the line or the audio.
 import { randomUUID } from "node:crypto";
 import { PCM_BYTES_PER_MS } from "./tts.ts";
@@ -11,6 +12,8 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { StageSink } from "../stage/channel.ts";
 import type { RecallClient } from "../recall-client.ts";
 import type { Store } from "../store.ts";
+import { ttsCost } from "../service-costs.ts";
+import { errorCode } from "../error-code.ts";
 
 export const TTS_TIMEOUT_MS = 4000;
 // The provider sends a line's audio only once it has generated it, so a longer line's first chunk
@@ -51,9 +54,11 @@ function sampleAligner() {
 
 export function createSpeech(deps: {
   tts: TtsProvider;
+  /** The TTS model's price per input character (src/service-costs.ts). */
+  usdPerChar: number;
   runtime: (sessionId: string) => SessionRuntime;
   recall: Pick<RecallClient, "sendChatMessage">;
-  store: Pick<Store, "getSession" | "addEvent">;
+  store: Pick<Store, "getSession" | "addEvent" | "addServiceCost">;
   channel: StageSink;
   timeoutMs?: number;
   botName?: string;
@@ -92,6 +97,13 @@ export function createSpeech(deps: {
     await store.addEvent({ sessionId, recallMsgId: null, kind: "bot_chat", speaker: botName, text: line });
   }
 
+  // Not awaited: the line goes on while the cost is written. A failed write is logged by code.
+  function recordCost(sessionId: string, utteranceId: string, text: string) {
+    const { chars, usd } = ttsCost(text, deps.usdPerChar);
+    store.addServiceCost({ id: utteranceId, sessionId, kind: "tts", quantity: chars, unit: "chars", usd })
+      .catch((err) => log("tts.cost_write_failed", { session_id: sessionId, error: errorCode(err) }));
+  }
+
   async function say(sessionId: string, text: string): Promise<string> {
     stop(sessionId); // one voice at a time
     const utteranceId = randomUUID();
@@ -121,6 +133,8 @@ export function createSpeech(deps: {
     let bytes = 0;
     let playsUntil = 0; // when the stage will have played everything sent so far
     let it: AsyncIterator<Uint8Array> | undefined;
+    // An HTTP error status means the provider refused the line, so it generated nothing to pay for.
+    let refused = false;
     try {
       arm(firstChunkTimeout(text, timeoutMs));
       it = tts.stream(text, controller.signal)[Symbol.asyncIterator]();
@@ -142,6 +156,7 @@ export function createSpeech(deps: {
       if (!bytes) throw new Error("no audio");
     } catch (err) {
       it?.return?.()?.catch(() => {});
+      refused = typeof (err as { status?: unknown }).status === "number";
       if (a.stopped) return utteranceId; // interrupted: stop() has told the stage
       if (bytes) channel.send(sessionId, { type: "speech_stop" });
       finish(sessionId, a);
@@ -154,6 +169,7 @@ export function createSpeech(deps: {
       return utteranceId;
     } finally {
       clearTimeout(timer);
+      if (!refused) recordCost(sessionId, utteranceId, text);
     }
     if (a.stopped) return utteranceId;
     channel.send(sessionId, { type: "speech_end", utteranceId });

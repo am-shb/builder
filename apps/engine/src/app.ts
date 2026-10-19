@@ -29,6 +29,7 @@ import { z } from "zod";
 import { StartSessionRequest, StartSessionResponse } from "@builder/contracts";
 import type { SessionStatus } from "@builder/contracts";
 import { errorCode } from "./error-code.ts";
+import { recallCosts } from "./service-costs.ts";
 
 export const REALTIME_PATH = "/recall/realtime/";
 const BOT_NAME = "Builder";
@@ -323,6 +324,9 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       const last = bot.status_changes?.at(-1);
       let status = s.bot_status;
       if (last && (last.code !== s.bot_status || last.sub_code !== s.bot_sub_code)) {
+        // Before the status is saved: a status that fails to save is seen again next poll, and the costs are
+        // written again, which stores them once.
+        if (isTerminal(last.code)) await recordEndCosts(s, bot);
         try {
           await store.updateBotStatus(s.id, last.code, last.sub_code);
         } catch (err) {
@@ -383,6 +387,18 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       }
     } catch (err) {
       log("session.limit_check_failed", { session_id: s.id, error: errorCode(err) });
+    }
+  }
+
+  // The bot has ended, so Recall's charges are known: bot time and transcription (src/service-costs.ts). Then logs
+  // the session's cost by kind. Never rejects: a failed write is logged and the session still ends.
+  async function recordEndCosts(s: Session, bot: RecallBot) {
+    try {
+      for (const row of recallCosts(s.id, bot.status_changes ?? [], config.botVariant)) await store.addServiceCost({ ...row, sessionId: s.id });
+      const c = await store.sessionCosts(s.id);
+      log("session.cost", { session_id: s.id, model_usd: c.model, tts_usd: c.tts, recall_usd: c.recall, total_usd: c.total });
+    } catch (err) {
+      log("session.cost_write_failed", { session_id: s.id, error: errorCode(err) });
     }
   }
 
@@ -468,8 +484,8 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     res.end(JSON.stringify(body));
   }
   async function sessionView(s: Session) {
-    const [stage_url, handoff, cost_usd, events] = await Promise.all([stageUrl(s), handoffPath(s), store.sessionCost(s.id), store.listEvents(s.id)]);
-    return { ...s, stage_url, handoff_url: `${config.publicBaseUrl}${handoff}`, cost_usd, events };
+    const [stage_url, handoff, costs, events] = await Promise.all([stageUrl(s), handoffPath(s), store.sessionCosts(s.id), store.listEvents(s.id)]);
+    return { ...s, stage_url, handoff_url: `${config.publicBaseUrl}${handoff}`, cost_usd: costs.total, costs, events };
   }
   function openStream(req: http.IncomingMessage, res: http.ServerResponse, s: Session) {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });

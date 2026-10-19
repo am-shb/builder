@@ -14,6 +14,7 @@ import { createStageChannel } from "./stage/channel.ts";
 import { createOpenRouterPort } from "./agent/llm.ts";
 import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tts.ts";
 import { createSpeech } from "./voice/speech.ts";
+import { TTS_USD_PER_CHAR } from "./service-costs.ts";
 import { signForTest } from "./verify.ts";
 
 const SHUTDOWN_GRACE_MS = 25_000;
@@ -75,6 +76,7 @@ async function main() {
   if (config.agentEnabled && !config.ttsVoice) console.warn("TTS_VOICE is not set: Builder's lines go to meeting chat instead of voice.");
   const speech = config.agentEnabled && config.ttsVoice ? createSpeech({
     tts: createOpenRouterTts({ apiKey: config.openrouterApiKey!, voice: config.ttsVoice, model: OPENROUTER_TTS_MODEL }),
+    usdPerChar: TTS_USD_PER_CHAR[OPENROUTER_TTS_MODEL]!,
     runtime, recall, store, channel, log,
   }) : undefined;
   voice = speech;

@@ -144,12 +144,13 @@ so R2 is the one left of those.
 
 - **R1. Spend limits weren't enforced.** *Fixed 2026-10-18.* Every lifecycle poll checks each session the api
   started (`enforceLimits` in `apps/engine/src/app.ts`). At `maxMinutes` of bot time, counted from Recall's first
-  in-call status, or `maxUsd` of model spend, the agent stops, Builder says why in chat and the bot leaves. A leave
+  in-call status, or `maxUsd` of spend, the agent stops, Builder says why in chat and the bot leaves. A leave
   that fails is tried again 30 s later. `end_reason` (`db/0003`) keeps the reason, so a restart doesn't resume the
   session or repeat the message.
-  - Still open: a model call in flight finishes, so the spend can end a little over. TTS isn't in `maxUsd`, because
-    the engine doesn't price it yet. The api isn't told why a session ended until the engine sends `session.status`
-    events.
+  - Still open: a model call in flight finishes, so the spend can end a little over. The api isn't told why a
+    session ended until the engine sends `session.status` events.
+  - Since 2026-10-19 `maxUsd` counts TTS as well as models (`service_costs`). Recall's charges are recorded when
+    the bot ends, so the time limit is what bounds them.
 - **R2. A deploy ends live meetings, and two engines can run the same meeting.** Session state lives in memory, so
   the new instance doesn't know the old one's sessions. During Render's overlap, both instances also resume active
   sessions from the database, with no fence to stop the old one. Until this is fixed, merge engine changes outside
