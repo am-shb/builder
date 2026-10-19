@@ -1,7 +1,7 @@
-import { test } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { emptyPrototype, applyBatch, findNode, fromToolBatch } from "../src/ui/tree.ts";
+import { emptyPrototype, applyBatch, findNode, fromToolBatch, themeStatusOp, withAgreedTheme } from "../src/ui/tree.ts";
 import { Prototype, patchBatchJsonSchema } from "../src/ui/schema.ts";
 import type { UiNode, PatchOp } from "../src/ui/schema.ts";
 
@@ -145,4 +145,80 @@ test("fromToolBatch drops __proto__/constructor/prototype keys", () => {
   assert.ok(add.op === "add");
   assert.deepEqual(Object.keys(add.node.props), ["ok"]);
   assert.equal(Object.getPrototypeOf(add.node.props), Object.prototype);
+});
+
+describe("theme", () => {
+  const apply = (p: Prototype, ops: PatchOp[]) => {
+    const r = applyBatch(p, batch(ops));
+    assert.ok(r.ok, r.ok ? "" : r.error);
+    return r;
+  };
+  const base = () => emptyPrototype("X");
+
+  test("set_theme makes a draft and remembers the agreed value", () => {
+    const r = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]);
+    assert.deepEqual(r.proto.theme!.accent, { value: "gold", status: "draft", decisionId: "d1", previous: "slate" });
+    assert.deepEqual(r.proto.theme!.radius, { value: "soft", status: "agreed", previous: "soft" });
+    assert.deepEqual(r.changes, [{ kind: "theme", id: "app", label: "test" }]);
+  });
+
+  test("set_theme rejects an unknown value", () => {
+    const r = applyBatch(base(), batch([{ op: "set_theme", values: { accent: "neon" } } as PatchOp]));
+    assert.equal(r.ok, false);
+  });
+
+  test("set_theme rejects empty values", () => {
+    assert.equal(applyBatch(base(), batch([{ op: "set_theme", values: {} }])).ok, false);
+  });
+
+  test("theme_status agreed then a second proposal keeps the agreed one as previous", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", previous: "gold" });
+    p = apply(p, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d2" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "green", status: "draft", decisionId: "d2", previous: "gold" });
+  });
+
+  test("theme revert after an agreed theme returns to that agreed value", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
+    p = apply(p, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d2" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d2", to: "revert" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", previous: "gold" });
+    assert.equal("decisionId" in p.theme!.accent, false);
+  });
+
+  test("theme_status only touches slots carrying that decisionId", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { radius: "round" }, decisionId: "d3" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d3", to: "agreed" }]).proto;
+    p = apply(p, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d4" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d4", to: "revert" }]).proto;
+    assert.deepEqual(p.theme!.radius, { value: "round", status: "agreed", previous: "round" });
+    assert.deepEqual(p.theme!.accent, { value: "slate", status: "agreed", previous: "slate" });
+  });
+
+  test("a theme_status that matches nothing is valid and records no change", () => {
+    const r = apply(base(), [{ op: "theme_status", decisionId: "nope", to: "revert" }]);
+    assert.deepEqual(r.changes, []);
+  });
+
+  test("themeStatusOp returns null when nothing carries the decision", () => {
+    const p0 = base();
+    assert.equal(themeStatusOp(p0, "d1", "revert"), null);
+    let p = apply(p0, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    assert.deepEqual(themeStatusOp(p, "d1", "revert"), { op: "theme_status", decisionId: "d1", to: "revert" });
+    assert.deepEqual(themeStatusOp(p, "d1", "agreed"), { op: "theme_status", decisionId: "d1", to: "agreed" });
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
+    p.theme!.accent.decisionId = "d1";
+    assert.equal(themeStatusOp(p, "d1", "agreed"), null);
+  });
+
+  test("withAgreedTheme shows previous for draft slots", () => {
+    const p = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    const before = structuredClone(p);
+    const shown = withAgreedTheme(p);
+    assert.equal(shown.theme!.accent.value, "slate");
+    assert.equal(shown.theme!.accent.status, "agreed");
+    assert.deepEqual(p, before);
+  });
 });

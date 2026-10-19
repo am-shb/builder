@@ -1,5 +1,6 @@
 import { MAX_DEPTH, MAX_NODES, PatchBatch, Prototype } from "./schema.ts";
-import type { Change, PatchOp, ToolPatchBatch, ToolProp, UiNode } from "./schema.ts";
+import type { Change, PatchOp, Theme, ThemeSlotName, ToolPatchBatch, ToolProp, UiNode } from "./schema.ts";
+import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
 
 export type ApplyResult =
   | { ok: true; proto: Prototype; changes: Change[] }
@@ -16,6 +17,37 @@ export function emptyPrototype(appName: string): Prototype {
       children: [{ id: "home", type: "Screen", props: { title: "Home" }, status: "draft", children: [] }],
     },
   };
+}
+
+function defaultTheme(): Theme {
+  const theme = {} as Theme;
+  for (const slot of THEME_SLOTS as ThemeSlotName[]) {
+    const value = DEFAULT_THEME_VALUES[slot];
+    theme[slot] = { value, status: "agreed", previous: value };
+  }
+  return theme;
+}
+
+/** The op that agrees or reverts every theme slot carrying `decisionId`; null when it would change nothing. */
+export function themeStatusOp(proto: Prototype, decisionId: string, to: "agreed" | "revert"): PatchOp | null {
+  const slots = Object.values(proto.theme ?? {}).filter((s) => s.decisionId === decisionId);
+  if (slots.length === 0) return null;
+  if (to === "agreed" && !slots.some((s) => s.status === "draft")) return null;
+  return { op: "theme_status", decisionId, to };
+}
+
+/** The prototype with draft theme slots shown at their last agreed value. Does not mutate the input. */
+export function withAgreedTheme(proto: Prototype): Prototype {
+  if (!proto.theme) return proto;
+  const out = structuredClone(proto);
+  for (const slot of Object.values(out.theme!)) {
+    if (slot.status === "draft") {
+      slot.value = slot.previous;
+      slot.status = "agreed";
+      delete slot.decisionId;
+    }
+  }
+  return out;
 }
 
 export function findNode(proto: Prototype, id: string): UiNode | undefined {
@@ -124,6 +156,40 @@ export function applyBatch(input: Prototype, batchInput: PatchBatch): ApplyResul
         if (findNode(proto, op.screenId)?.type !== "Screen") return fail(`"${op.screenId}" is not a Screen`);
         proto.currentScreen = op.screenId;
         note("screen", op.screenId);
+        break;
+      }
+      case "set_theme": {
+        const theme = proto.theme ?? defaultTheme();
+        for (const slot of THEME_SLOTS as ThemeSlotName[]) {
+          const value = op.values[slot];
+          if (value === undefined) continue;
+          const cur = theme[slot];
+          cur.previous = cur.status === "agreed" ? cur.value : cur.previous;
+          cur.value = value;
+          cur.status = "draft";
+          if (op.decisionId !== undefined) cur.decisionId = op.decisionId;
+          else delete cur.decisionId;
+        }
+        proto.theme = theme;
+        note("theme", proto.root.id);
+        break;
+      }
+      case "theme_status": {
+        let changed = false;
+        for (const slot of Object.values(proto.theme ?? {})) {
+          if (slot.decisionId !== op.decisionId) continue;
+          if (op.to === "agreed") {
+            if (slot.status !== "draft") continue;
+            slot.status = "agreed";
+            slot.previous = slot.value;
+          } else {
+            slot.value = slot.previous;
+            slot.status = "agreed";
+          }
+          delete slot.decisionId;
+          changed = true;
+        }
+        if (changed) note("theme", proto.root.id);
         break;
       }
     }

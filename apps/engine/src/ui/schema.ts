@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { THEME_OPTIONS } from "../../public/renderer/theme.js";
 
 export const COMPONENT_TYPES = [
   "App", "Screen", "NavBar", "Tabs", "Stack", "Card", "Text", "Heading", "Button", "Input",
@@ -49,9 +50,32 @@ export const UiNode: z.ZodType<UiNode> = z.strictObject({
   children: z.array(z.lazy(() => UiNode)),
 });
 
+export type ThemeSlotName = "accent" | "warmth" | "radius" | "density";
+export type ThemeSlot = { value: string; status: "draft" | "agreed"; decisionId?: string; previous: string };
+export type Theme = Record<ThemeSlotName, ThemeSlot>;
+
+const themeSlotSchema = (slot: ThemeSlotName) => {
+  const option = z.string().refine((v) => THEME_OPTIONS[slot].includes(v), { message: `unknown ${slot} value` });
+  return z.strictObject({
+    value: option, status: NodeStatus, decisionId: z.string().optional(), previous: option,
+  });
+};
+
+export const Theme: z.ZodType<Theme> = z.strictObject({
+  accent: themeSlotSchema("accent"),
+  warmth: themeSlotSchema("warmth"),
+  radius: themeSlotSchema("radius"),
+  density: themeSlotSchema("density"),
+});
+
+const themeValueSchema = (slot: ThemeSlotName) =>
+  z.string().refine((v) => THEME_OPTIONS[slot].includes(v), { message: `unknown ${slot} value` }).optional();
+
 export const Prototype = z.strictObject({
   root: UiNode,
   currentScreen: NodeId,
+  // Absent means the house theme, all agreed.
+  theme: Theme.optional(),
 });
 export type Prototype = z.infer<typeof Prototype>;
 
@@ -64,6 +88,17 @@ export const PatchOp = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("remove"), id: NodeId }),
   z.strictObject({ op: z.literal("move"), id: NodeId, parentId: NodeId, index: z.number().int().min(0) }),
   z.strictObject({ op: z.literal("set_screen"), screenId: NodeId }),
+  z.strictObject({
+    op: z.literal("set_theme"),
+    values: z.strictObject({
+      accent: themeValueSchema("accent"),
+      warmth: themeValueSchema("warmth"),
+      radius: themeValueSchema("radius"),
+      density: themeValueSchema("density"),
+    }).refine((v) => Object.values(v).some((x) => x !== undefined), { message: "values must set at least one slot" }),
+    decisionId: z.string().optional(),
+  }),
+  z.strictObject({ op: z.literal("theme_status"), decisionId: z.string(), to: z.enum(["agreed", "revert"]) }),
 ]);
 export type PatchOp = z.infer<typeof PatchOp>;
 
@@ -75,7 +110,7 @@ export const PatchBatch = z.strictObject({
 export type PatchBatch = z.infer<typeof PatchBatch>;
 
 export type Change = {
-  kind: "added" | "removed" | "moved" | "updated" | "screen";
+  kind: "added" | "removed" | "moved" | "updated" | "screen" | "theme";
   id: string;
   label: string;
   by?: string;
