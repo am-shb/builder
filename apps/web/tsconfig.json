@@ -9,5 +9,5 @@
     // node stays: vite.config.ts, build/ and the source-scan tests use node:fs and node:path.
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "build", "test", "vite.config.ts"]
+  "include": ["src", "build", "scripts", "test", "vite.config.ts"]
 }

@@ -1,2 +1,4 @@
 # Vite's build output.
 dist/
+# npm run screenshots writes here.
+screenshots/

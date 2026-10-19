@@ -70,3 +70,20 @@ describe("no URLs of ours in the code", () => {
     expect(offenders(shipped, /onrender\.com/)).toEqual([]);
   });
 });
+
+describe("colors come from the tokens", () => {
+  // Raw colors live in src/styles/globals.css only (ADR 0013); components use the tokens through Tailwind.
+  const RAW_COLOR = /#[0-9a-f]{3}(?:[0-9a-f]{3})?(?:[0-9a-f]{2})?\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch)\(/i;
+
+  it("no component or page names a raw color", () => {
+    const outside = src.filter(({ file }) => !file.endsWith("globals.css"));
+    expect(offenders(outside, RAW_COLOR)).toEqual([]);
+  });
+
+  it("the guard catches a raw color", () => {
+    expect(RAW_COLOR.test('className="bg-[#0d5c4c]"')).toBe(true);
+    expect(RAW_COLOR.test("color: rgb(0 0 0)")).toBe(true);
+    expect(RAW_COLOR.test('href="#main"')).toBe(false);
+  });
+});
+
