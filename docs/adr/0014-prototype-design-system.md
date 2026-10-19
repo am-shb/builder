@@ -36,9 +36,20 @@ Option 4.
   status, a `decisionId` and the last agreed value.
 - **Theme changes are patch ops.** `set_theme` and `drop_theme` are model-facing; `theme_status` is internal.
   Variants, streaming, validation and the handoff then carry theme with no new channel.
+- **Derived colors.** The renderer derives the soft tint, accent ink, chart series and status colors from the four
+  slots. Status colors stay apart from the brand: a green brand moves "approved" to teal, so it never reads as the
+  accent. Text and controls meet AA contrast at 720p. The slot values and derivation rules are in the plan's
+  "Theme" section.
+- **Theme agreement uses the unchanged rules.** It comes only from what people said in the meeting and is never set
+  by the model.
 - **A draft theme is shown at once** and reverted on objection to the last agreed value for that slot, or the house
   default if none. Slots with a different `decisionId` are untouched. `drop_theme` on an agreed slot is ignored.
-- **Model-facing nodes lose `status`**; batches gain `decisionId`, which nodes and theme ops inherit. Agreement is
+- **Re-theme feedback.** A draft shows a proposal label ("Proposed: gold accent · Sara"). Agreement plays a short
+  settle animation. A revert animates back to the last agreed value.
+- **Contested choices.** When the room is split, two variants are built, each one tiny op. The main prototype does not
+  change until one is picked, and the winner applies with the re-theme animation.
+- **Model-facing nodes lose `status`**; batches gain `decisionId`, set once per batch, with a per-node override.
+  Nodes and theme ops inherit it. Agreement is
   still set only from what people said (spec sections 4 and 12).
 - **Conflict variants default to `d-<conflictId>`** as their decision id.
 - **Old data is dropped.** The old types and stored prototypes are not migrated. A stored prototype that fails to
@@ -52,4 +63,5 @@ Option 4.
 - Until part 3, `icon` props render nothing and `Image` renders a tinted block with its subject word.
 
 ## Measurements
-Filled in by Task 9.
+Task 9 records old against new token counts for the same screen. The first-change timing (a paid replay, run only
+with Amir's go-ahead) and the Meet text-size and hairline outcome are recorded here when run.
