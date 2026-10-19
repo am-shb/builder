@@ -10,7 +10,7 @@ The v0 engine moved here from the repo root in a PR that only moved files and fi
 |---|---|
 | `src/server.ts`, `src/app.ts` | HTTP server and routes, plus the Recall realtime webhook (verified by HMAC signature) |
 | `src/recall-client.ts`, `src/realtime.ts`, `src/verify.ts` | Recall.ai bot API, transcript events, signature checks |
-| `src/agent/` | Conversation loop (Haiku), build loop (Opus), prompts, voice commands, stuck detection, cost |
+| `src/agent/` | Conversation loop (Haiku), build loop (Sonnet), prompts, voice commands, stuck detection, cost |
 | `src/consensus/` | The decision document (draft, then pending, then agreed) and conflicts |
 | `src/ui/` | The prototype component tree and its atomic patches |
 | `src/session/`, `src/stage/` | The per-session runtime and the stage WebSocket channel |

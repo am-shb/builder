@@ -332,7 +332,7 @@ the prototype (see the brainstorm mockup at
 
 Naming: **Builder** is the character the room sees and hears. Inside it, the
 **conversation loop** (Haiku) listens and speaks, and the **build loop**
-(Opus) maintains the consensus document and the prototype.
+(Sonnet) maintains the consensus document and the prototype.
 
 **Conversation loop — Claude Haiku 5.5 (`anthropic/claude-haiku-5.5` on OpenRouter)** (the agent's ears and voice;
 latency-critical):
@@ -367,7 +367,8 @@ latency-critical):
   those raw lines alongside the summary and may only record agreement that
   those lines support.
 
-**Build loop — Claude Opus 5.5 (`anthropic/claude-opus-5.5` on OpenRouter)** (judgment and quality):
+**Build loop — Claude Sonnet 5.5 (`anthropic/claude-sonnet-5.5` on OpenRouter)** (judgment and quality;
+Opus 5.5 until 2026-10-19, see ADR 0013):
 - **Triggers:** an `update_build` call from Haiku. It can also run on its own
   when `next_up` is empty, to queue the next question.
 - **One run at a time:** at most one run in flight. Hand-offs that arrive
@@ -387,12 +388,13 @@ latency-critical):
 
 **Model and API notes** (verified 2026-10-16 against the live models docs and
 the bundled API reference):
-- Opus 5.5 always thinks; tune it with `output_config.effort`. Its default is
-  `medium`, and the build loop starts there.
+- Sonnet 5.5 runs adaptive thinking when `thinking` is omitted; tune it with
+  `output_config.effort`. Its default is `high`, so the build loop sets
+  `medium` explicitly.
 - Haiku 5.5 uses adaptive thinking with default effort `medium`. For speed,
   the conversation loop starts at `low`.
 - Forcing a specific tool (`tool_choice` of type `any` or `tool`) returns a
-  400 on Opus 5.5. Use `auto` with `strict: true` tools, or structured outputs.
+  400 on Sonnet 5.5 and Opus 5.5. Use `auto` with `strict: true` tools, or structured outputs.
 - Cache the fixed prefix in both loops: system prompt, component schema, and
   facilitation rules. Only new transcript lines vary between calls.
 - **Access through OpenRouter** (decided): one `OPENROUTER_API_KEY` covers
@@ -401,10 +403,10 @@ the bundled API reference):
     (`https://openrouter.ai/api/v1/messages`) using the official Anthropic
     SDK, pointed at OpenRouter with the key as a bearer token.
   - OpenRouter model ids: `anthropic/claude-haiku-5.5` (conversation) and
-    `anthropic/claude-opus-5.5` (build).
+    `anthropic/claude-sonnet-5.5` (build).
   - Refusal and outage fallback uses OpenRouter's own `fallbacks` model list
     (up to 3 models), not Anthropic's `fallbacks: "default"` beta. *My call:*
-    Opus 5.5 falls back to `anthropic/claude-opus-5`.
+    Sonnet 5.5 falls back to `anthropic/claude-sonnet-5`.
   - The live model probe confirms that streamed tool input passes through.
     If it doesn't, patches render when complete instead of progressively.
 - The key lives only in the backend, like the Recall key.
@@ -418,7 +420,7 @@ the bundled API reference):
 model call, and show a running per-meeting total in the operator UI. Build-loop
 cadence follows Haiku's `update_build` calls. *My call:* a floor of about
 10 s between build-loop runs, with hand-offs merged in the meantime, except
-immediately after a conflict resolves. Opus sees summaries, not the raw
+immediately after a conflict resolves. The build loop sees summaries, not the raw
 transcript stream, which keeps its input small.
 
 **Latency targets** (*my call*, to validate in testing):

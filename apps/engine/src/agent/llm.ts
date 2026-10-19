@@ -6,12 +6,12 @@ import type { z } from "zod";
 
 export const MODELS = {
   conversation: "anthropic/claude-haiku-5.5",
-  build: "anthropic/claude-opus-5.5",
+  build: "anthropic/claude-sonnet-5.5",
 } as const;
 export type Loop = keyof typeof MODELS;
 
 // OpenRouter `fallbacks`: tried in order when the primary model fails. Build calls only.
-export const BUILD_FALLBACKS: string[] = ["anthropic/claude-opus-5"];
+export const BUILD_FALLBACKS: string[] = ["anthropic/claude-sonnet-5"];
 
 export type ToolCall = { name: string; input: unknown };
 
@@ -280,7 +280,7 @@ export function createFakePort(script: ToolCall[][], usage: Usage = { inputToken
   };
 }
 
-// Scripted port for end-to-end replays: the conversation loop (Haiku) and the build loop (Opus)
+// Scripted port for end-to-end replays: the conversation loop (Haiku) and the build loop (Sonnet)
 // share one port, so each call is routed to its own loop's script by the request's `loop`.
 export function createRoutedFakePort(scripts: Record<Loop, ToolCall[][]>, usage?: Usage): ModelPort {
   const ports: Record<Loop, ModelPort> = {

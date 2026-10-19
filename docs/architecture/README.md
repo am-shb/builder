@@ -7,7 +7,7 @@
 Google Meet ──(Recall.ai bot)──► realtime transcript webhooks ──► src/app.ts
                                                                     │
                      ┌──────────────── session runtime (in memory) ◄┘
-                     │      conversation loop (Haiku 5.5)  ──hand-off──►  build loop (Opus 5.5)
+                     │      conversation loop (Haiku 5.5)  ──hand-off──►  build loop (Sonnet 5.5)
                      │      speaks via ElevenLabs TTS                     patches prototype + consensus doc
                      ▼
      stage WebSocket ──► public/stage.html (screenshared by the bot: prototype, decision panel, Builder character)
