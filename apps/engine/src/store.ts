@@ -16,6 +16,7 @@ import type { Prototype } from "./ui/schema.ts";
 import { connect, query, QUERY_TIMEOUT_MS } from "./db/connect.ts";
 import type { DbTarget } from "./db/connect.ts";
 import { migrate } from "./db/migrate.ts";
+import type { ServiceCost, ServiceCostKind } from "./service-costs.ts";
 
 export type Session = {
   id: string;
@@ -65,6 +66,19 @@ export type ModelCall = {
   created_at: string;
 };
 
+export type ServiceCostRow = {
+  id: string;
+  session_id: string;
+  kind: ServiceCostKind;
+  quantity: number;
+  unit: ServiceCost["unit"];
+  usd: number;
+  created_at: string;
+};
+
+/** A session's spend so far, in USD. `recall` is written once the bot has ended (src/service-costs.ts). */
+export type SessionCosts = { model: number; tts: number; recall: number; total: number };
+
 const TERMINAL = new Set(["done", "fatal", "call_ended"]);
 export const isTerminal = (status: string | null) => !!status && TERMINAL.has(status);
 
@@ -82,6 +96,7 @@ type EventRow = {
   id: RecordId<"events", number>; session_id: RecordId<"sessions", string>; kind: string; speaker: Opt<string>; text: Opt<string>; created_at: DateTime;
 };
 type ModelCallRow = Omit<ModelCall, "id" | "created_at"> & { id: RecordId<"model_calls", number>; created_at: DateTime };
+type ServiceCostDbRow = Omit<ServiceCostRow, "id" | "created_at"> & { id: RecordId<"service_costs", string>; created_at: DateTime };
 
 const iso = (d: DateTime) => d.toDate().toISOString();
 const sessionRef = (id: string) => new RecordId("sessions", id);
@@ -133,6 +148,16 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   async function getSession(id: string): Promise<Session | undefined> {
     const [[row]] = await run<[SessionRow[]]>("SELECT * FROM $id", { id: sessionRef(id) });
     return row && toSession(row);
+  }
+
+  // Model calls, TTS and Recall. The spend limit (maxUsd) checks the total.
+  async function sessionCosts(sessionId: string): Promise<SessionCosts> {
+    const [c] = await run<[Omit<SessionCosts, "total">]>(`RETURN {
+        model: math::sum((SELECT VALUE usd FROM model_calls WHERE session_id = $sid)),
+        tts: math::sum((SELECT VALUE usd FROM service_costs WHERE session_id = $sid AND kind = "tts")),
+        recall: math::sum((SELECT VALUE usd FROM service_costs WHERE session_id = $sid AND kind IN ["recall_bot", "recall_transcript"])),
+      }`, { sid: sessionId });
+    return { ...c, total: c.model + c.tts + c.recall };
   }
 
   // Issues the token only while the field is empty, so two callers racing get the same one.
@@ -260,9 +285,20 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
       const [rows] = await run<[ModelCallRow[]]>("SELECT * FROM model_calls WHERE session_id = $sid ORDER BY id", { sid: sessionId });
       return rows.map((r) => ({ ...r, id: r.id.id, created_at: iso(r.created_at) }));
     },
+    // A write sent again (same id) is ignored, so a cost is stored once.
+    async addServiceCost(c: ServiceCost & { sessionId: string }): Promise<void> {
+      await run(`INSERT IGNORE INTO service_costs { id: $id, seq: sequence::nextval("service_costs_seq"), session_id: $sid, kind: $kind,
+          quantity: $quantity, unit: $unit, usd: $usd, created_at: $now } RETURN NONE`, {
+        id: new RecordId("service_costs", c.id), sid: c.sessionId, kind: c.kind, quantity: c.quantity, unit: c.unit, usd: c.usd, now: now(),
+      });
+    },
+    async listServiceCosts(sessionId: string): Promise<ServiceCostRow[]> {
+      const [rows] = await run<[ServiceCostDbRow[]]>("SELECT * OMIT seq FROM service_costs WHERE session_id = $sid ORDER BY seq", { sid: sessionId });
+      return rows.map((r) => ({ ...r, id: r.id.id, created_at: iso(r.created_at) }));
+    },
+    sessionCosts,
     async sessionCost(sessionId: string): Promise<number> {
-      const [total] = await run<[number]>("RETURN math::sum((SELECT VALUE usd FROM model_calls WHERE session_id = $sid))", { sid: sessionId });
-      return total;
+      return (await sessionCosts(sessionId)).total;
     },
     // Ends the connection (in-process: shuts the database down and releases its folder). A process that opened
     // a store must close it to exit cleanly. Queries already sent finish first, each within its deadline, so a

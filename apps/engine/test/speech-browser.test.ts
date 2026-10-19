@@ -30,7 +30,7 @@ test("the stage plays streamed PCM, its mouth follows the voice, and stop cuts i
     await page.eval(`import("@renderer/clock.js").then((m) => { window.__ticks = []; m.onFrame((now) => window.__ticks.push(now)); })`);
     const chats: string[] = [];
     const speech = createSpeech({
-      tts: createFakeTts(tone(6), { delayMs: 30 }), runtime, channel, store,
+      usdPerChar: 0, tts: createFakeTts(tone(6), { delayMs: 30 }), runtime, channel, store,
       recall: { sendChatMessage: async (_b: string, m: string) => { chats.push(m); } },
     });
     assert.equal(await page.eval(`window.stageVoice.level()`), 0, "silent before Builder speaks");
@@ -73,7 +73,7 @@ test("the stage plays streamed PCM, its mouth follows the voice, and stop cuts i
 
     // A line shorter than the stage's prebuffer still plays: speech_end flushes it.
     await page.eval(`window.__peak = 0; window.__peakTimer = setInterval(() => { window.__peak = Math.max(window.__peak, window.stageVoice.level()); }, 5)`);
-    const short = createSpeech({ tts: createFakeTts(tone(0.1)), runtime, channel, store, recall: { sendChatMessage: async () => {} } });
+    const short = createSpeech({ usdPerChar: 0, tts: createFakeTts(tone(0.1)), runtime, channel, store, recall: { sendChatMessage: async () => {} } });
     await short.say(sessionId, "Done.");
     await page.waitFor(`window.__peak > 0.4`, 2000);
     await sleep(300);

@@ -64,12 +64,25 @@ The session's org and limits are stored, from `db/0002_session_org_limits.surql`
 poll (every 4 s):
 - **`maxMinutes`** counts bot time from the first status Recall gives for the bot being in the call, so time in the
   waiting room doesn't count (ADR 0009).
-- **`maxUsd`** is the session's model spend, the sum in `model_calls` (the operator page's `cost_usd`).
+- **`maxUsd`** is the session's spend so far: model calls (`model_calls`) and TTS lines (`service_costs`), the
+  operator page's `cost_usd`. Recall's charges join the total once the bot has ended, so they never trigger it.
 - **At either one**, the agent stops, Builder says in chat that it's reached the meeting's time or spending limit,
   and the bot leaves. The reason is saved in `end_reason` (`db/0003_session_end_reason.surql`), so after a restart
   the engine only asks the bot to leave again. A model call already in flight still finishes, so the spend can end
   a little over `maxUsd`.
 The operator routes (`/`, `/api/*`, local mode) work as before, and their sessions have no org.
+
+### What a session costs
+Every cost is recorded per session, in USD:
+- **Models:** each call, in `model_calls` (`src/agent/cost.ts`, OpenRouter's prices).
+- **TTS:** each line sent to the voice, by characters, in `service_costs` (`src/service-costs.ts`). A line counts
+  when it played, was cut off or timed out. It doesn't count when the provider refused it with an error status.
+- **Recall:** when the bot ends, its time from `joining_call` (waiting room included, nothing for `fatal`) at the
+  variant's rate, and the recording's length at the transcription rate, in `service_costs`. The rates are Recall's
+  pay-as-you-go prices. Storage of recordings kept past 7 days isn't counted.
+
+`GET /api/sessions/<id>` returns `cost_usd` (the total) and `costs` (`model`, `tts`, `recall`, `total`). When the bot
+ends, the log line `session.cost` carries the same numbers.
 
 ## Known issues
 See [docs/known-issues.md](../../docs/known-issues.md). The deployment blockers I1, I5, I6 and I7, the

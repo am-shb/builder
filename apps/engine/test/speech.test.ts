@@ -31,6 +31,8 @@ function pcm(samples: number, from = 0): Uint8Array {
 
 type Logged = { msg: string; fields?: Record<string, unknown> };
 
+const USD_PER_CHAR = 0.00002;
+
 async function setup(opts: { tts: TtsProvider; channel?: StageSink; timeoutMs?: number; chatFails?: boolean }) {
   const store = await testStore();
   const sessionId = randomUUID();
@@ -54,7 +56,7 @@ async function setup(opts: { tts: TtsProvider; channel?: StageSink; timeoutMs?: 
   };
   const logs: Logged[] = [];
   const speech = createSpeech({
-    tts: opts.tts, runtime, recall, store, channel, log: (msg, fields) => logs.push({ msg, fields }),
+    tts: opts.tts, usdPerChar: USD_PER_CHAR, runtime, recall, store, channel, log: (msg, fields) => logs.push({ msg, fields }),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
   });
   const mood = () => (runtime(sessionId).snapshot() as Extract<StageEvent, { type: "snapshot" }>).mood;
@@ -111,7 +113,7 @@ test("say streams start→audio→end to stage and flags an agent caption withou
   const chats: string[] = [];
   const logs: Logged[] = [];
   const speech = createSpeech({
-    tts: createFakeTts(chunks, { delayMs: 5 }), runtime: stage.runtime, channel: stage.channel, store: stage.store,
+    usdPerChar: 0, tts: createFakeTts(chunks, { delayMs: 5 }), runtime: stage.runtime, channel: stage.channel, store: stage.store,
     recall: { sendChatMessage: async (_b: string, m: string) => { chats.push(m); } }, log: (msg, fields) => logs.push({ msg, fields }),
   });
   await sleep(50); // the snapshot
@@ -190,6 +192,52 @@ test("stop is instant even when the provider ignores the abort signal", async ()
   const r = await Promise.race([said.then(() => "resolved"), sleep(200).then(() => "hung")]);
   assert.equal(r, "resolved");
   assert.equal(s.speech.speaking(s.sessionId), false);
+});
+
+test("each line sent to TTS records its cost by characters, even when it's cut off or times out", async () => {
+  const done = await setup({ tts: createFakeTts([pcm(480)]) });
+  const id = await done.speech.say(done.sessionId, "Want me to add it?");
+  await flush();
+  const rows = await done.store.listServiceCosts(done.sessionId);
+  assert.deepEqual(rows.map((r) => [r.id, r.kind, r.quantity, r.unit]), [[id, "tts", 18, "chars"]]);
+  assert.ok(Math.abs(rows[0].usd - 18 * USD_PER_CHAR) < 1e-12);
+
+  // Interrupted mid-line: the provider already had the whole line, so it's billed.
+  const { tts } = heldTts([pcm(480)]);
+  const cut = await setup({ tts });
+  const said = cut.speech.say(cut.sessionId, "Let me think about that.");
+  await flush();
+  cut.speech.stop(cut.sessionId);
+  await said;
+  await flush();
+  assert.deepEqual((await cut.store.listServiceCosts(cut.sessionId)).map((r) => r.quantity), [24]);
+
+  // Timed out with no audio: the request may still have been billed, so it counts.
+  const slow = await setup({ tts: heldTts([]).tts, timeoutMs: 30 });
+  await slow.speech.say(slow.sessionId, "Hello.");
+  await flush();
+  assert.deepEqual((await slow.store.listServiceCosts(slow.sessionId)).map((r) => r.quantity), [6]);
+
+  // The provider refused the request (an HTTP error status): nothing was generated, so nothing is recorded.
+  const refused: TtsProvider = { async *stream() { throw Object.assign(new Error("TTS request failed with 402"), { status: 402 }); } };
+  const r = await setup({ tts: refused });
+  await r.speech.say(r.sessionId, "Hello.");
+  await flush();
+  assert.deepEqual(await r.store.listServiceCosts(r.sessionId), []);
+});
+
+test("a failed TTS cost write is logged by code and the line is still spoken", async () => {
+  const s = await setup({ tts: createFakeTts([pcm(480)]) });
+  const failing = { ...s.store, addServiceCost: async () => { throw Object.assign(new Error("secret text"), { kind: "Internal" }); } };
+  const logs: Logged[] = [];
+  const speech = createSpeech({
+    tts: createFakeTts([pcm(480)]), usdPerChar: USD_PER_CHAR, runtime: s.runtime, recall: { sendChatMessage: async () => {} },
+    store: failing, channel: { send: () => {}, sendAudio: () => {}, clients: () => 1 }, log: (msg, fields) => logs.push({ msg, fields }),
+  });
+  await speech.say(s.sessionId, "Hi.");
+  await flush();
+  assert.ok(logs.some((l) => l.msg === "speech.done"));
+  assert.deepEqual(logs.filter((l) => l.msg === "tts.cost_write_failed").map((l) => l.fields), [{ session_id: s.sessionId, error: "Internal" }]);
 });
 
 test("tts failure falls back to chat", async () => {

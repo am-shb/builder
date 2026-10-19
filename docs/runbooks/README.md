@@ -33,8 +33,9 @@ Live tests cost money (Recall bot minutes, models, TTS). Run one only when the m
 ## Incident: cost spike
 
 1. Find the session. The operator page shows the cost per session, and `GET /api/sessions/<id>/cost` returns
-   `cost_usd` (so does `GET /api/sessions/<id>`).
-   In the logs, every `llm_call` carries `cost_usd`, `loop` and `ms`.
+   `cost_usd`, the total. `GET /api/sessions/<id>` also returns `costs`, split into `model`, `tts` and `recall`.
+   In the logs, every `llm_call` carries `cost_usd`, `loop` and `ms`, and `session.cost` gives the session's cost by
+   kind when its bot ends.
 2. Stop it by clicking **Remove bot** (`POST /api/sessions/<id>/leave`). Once the status is terminal, the agent stops
    for that session and makes no more model calls (I5).
 3. If that doesn't stop it, stop the process. To keep transcripts flowing with no model spend, restart without
