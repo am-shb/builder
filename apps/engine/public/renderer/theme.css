@@ -584,6 +584,13 @@
 .m-settle-dashed, .m-settle-solid { position: absolute; inset: 0; border-radius: inherit; will-change: transform, opacity; }
 .m-settle-dashed { border: 3px dashed var(--b-draft); }
 .m-settle-solid { border: 3px solid var(--b-agreed); }
+/* Re-theme: the old canvas (a static copy) fades out over the new one; an agreed theme settles a
+   frame round the whole canvas. */
+.m-theme-fade { position: absolute; z-index: 10; pointer-events: none; will-change: opacity; }
+.m-theme-settle {
+  position: absolute; box-sizing: border-box; z-index: 20; pointer-events: none; will-change: transform, opacity;
+  border: 6px solid var(--b-agreed);
+}
 
 /* Spotlight: a veil with a hole (one layer), a ring, and a "what · who" label. */
 .m-focus { position: absolute; overflow: hidden; pointer-events: none; z-index: 30; will-change: opacity; --m-veil: 0.65; }

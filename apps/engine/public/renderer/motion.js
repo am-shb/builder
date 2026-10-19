@@ -1,6 +1,7 @@
 // Motion with meaning for the keyed reconcile: added nodes grow in, removed nodes collapse,
 // nodes whose layout shifted glide there (FLIP), prop edits cross-fade, a screen change
-// slides, and a draft that becomes agreed gets a short "settled" outline morph.
+// slides, and a draft that becomes agreed gets a short "settled" outline morph. A re-theme fades
+// a copy of the old canvas out over the new one; an agreed theme gets a settle frame round the canvas.
 // Only transform and opacity animate; every animation is stepped by the shared 15 fps clock.
 import { animate, logMotion, now } from "@renderer/clock.js";
 
@@ -11,7 +12,9 @@ export const FADE_MS = 250;
 export const SCREEN_MS = 450;
 export const SETTLE_MS = 400;
 const SETTLE_HOLD_MS = 700;
+export const THEME_FADE_MS = 450;
 const MAX_FADE_CLONE = 150; // descendants; bigger subtrees skip the cross-fade copy
+const MAX_THEME_CLONE = 3000; // elements; a bigger canvas re-themes without the fade
 const EASE = "ease-out";
 
 const flips = new WeakMap(); // element -> its in-flight glide
@@ -153,6 +156,50 @@ export function playSettled(el) {
   const out = animate(solid, [{ opacity: 1 }, { opacity: 0 }], { duration: SETTLE_MS, delay: SETTLE_MS + SETTLE_HOLD_MS, easing: EASE });
   whenDone(out, () => frame.remove());
   logMotion({ fn: "playSettled", id: el.dataset.nodeId });
+}
+
+// Whole-canvas layers: in the container's content coordinates, so they line up with what it shows.
+function canvasRoot(container) {
+  if (getComputedStyle(container).position === "static") container.style.position = "relative";
+  return container;
+}
+
+/** A static copy of the canvas content as it looks now, for the theme fade; null when too big to copy. */
+export function snapshotCanvas(container) {
+  const content = [...container.children].filter((c) => c.dataset.nodeId);
+  if (!content.length) return null;
+  if (content.reduce((n, c) => n + 1 + c.getElementsByTagName("*").length, 0) > MAX_THEME_CLONE) return null;
+  const snap = document.createElement("div");
+  snap.className = "m-theme-fade";
+  for (const c of content) snap.append(c.cloneNode(true));
+  // A copy must never be found as the node it shows (focus, lookups, interactions).
+  for (const n of snap.querySelectorAll("[data-node-id]")) n.removeAttribute("data-node-id");
+  snap.inert = true;
+  return snap;
+}
+
+/** Lays the old canvas (from snapshotCanvas) over the re-themed one and fades it out. */
+export function playThemeFade(container, snapshot) {
+  const root = canvasRoot(container);
+  Object.assign(snapshot.style, { left: "0px", top: "0px", width: `${root.clientWidth}px` });
+  root.append(snapshot);
+  whenDone(animate(snapshot, [{ opacity: 1 }, { opacity: 0 }], { duration: THEME_FADE_MS, easing: EASE }), () => snapshot.remove());
+  logMotion({ fn: "playThemeFade" });
+}
+
+/** A theme agreed: a solid frame settles around the whole canvas, then fades (same timing as playSettled). */
+export function playThemeSettled(container) {
+  const root = canvasRoot(container);
+  const frame = document.createElement("div");
+  frame.className = "m-theme-settle";
+  Object.assign(frame.style, {
+    left: `${root.scrollLeft}px`, top: `${root.scrollTop}px`, width: `${root.clientWidth}px`, height: `${root.clientHeight}px`,
+  });
+  root.append(frame);
+  animate(frame, [{ opacity: 0, transform: "scale(1.02)" }, { opacity: 1, transform: "none" }], { duration: SETTLE_MS, easing: EASE });
+  const out = animate(frame, [{ opacity: 1 }, { opacity: 0 }], { duration: SETTLE_MS, delay: SETTLE_MS + SETTLE_HOLD_MS, easing: EASE });
+  whenDone(out, () => frame.remove());
+  logMotion({ fn: "playThemeSettled" });
 }
 
 function visibleScreen(entries, rects) {

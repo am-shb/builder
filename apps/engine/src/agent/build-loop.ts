@@ -12,8 +12,8 @@ import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
-import type { PatchBatch, Prototype, UiNode } from "../ui/schema.ts";
-import { findNode, fromToolBatch } from "../ui/tree.ts";
+import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
+import { findNode, fromToolBatch, themeStatusOp } from "../ui/tree.ts";
 import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
 import { buildComparisonView } from "../session/runtime.ts";
@@ -140,7 +140,7 @@ function touchedIds(batch: PatchBatch): string[] {
   return [...new Set(ids)];
 }
 
-const batchLabel = (prefix: "Agreed" | "Reopened", text: string) => {
+const batchLabel = (prefix: "Agreed" | "Reopened" | "Reverted", text: string) => {
   const full = `${prefix}: ${text}`;
   return full.length <= LABEL_MAX ? full : `${full.slice(0, LABEL_MAX - 1)}…`;
 };
@@ -187,8 +187,9 @@ export function createBuildLoop(deps: {
 
   // Sets a decision's nodes (those it affects, then those drawn with its id) to one status in one
   // batch, skipping ids that no longer exist and nodes already in that state. Reopening leaves a
-  // node that another decision has agreed since. The only code path that marks nodes agreed:
-  // model batches are sanitised to draft.
+  // node that another decision has agreed since. Agreeing also agrees the theme slots it set, in the
+  // same batch. The only code path that marks nodes or theme slots agreed: model batches are
+  // sanitised to draft.
   function flipNodes(sessionId: string, rt: SessionRuntime, d: Decision, status: "agreed" | "draft") {
     const proto = view(rt).proto;
     const drawn: string[] = [];
@@ -201,12 +202,22 @@ export function createBuildLoop(deps: {
       ? n.status !== "agreed" || n.decisionId !== d.id
       : n.status === "agreed" && (n.decisionId === undefined || n.decisionId === d.id));
     const ids = [...new Set([...d.affects, ...drawn])].filter((id) => flips(findNode(proto, id)));
-    if (!ids.length) return;
-    const r = rt.applyBatch({
-      label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text),
-      ops: ids.map((id) => ({ op: "update", id, status, decisionId: d.id })),
-    });
-    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ids.length });
+    const ops: PatchOp[] = ids.map((id) => ({ op: "update", id, status, decisionId: d.id }));
+    const theme = status === "agreed" ? themeStatusOp(proto, d.id, "agreed") : null;
+    if (theme) ops.push(theme);
+    if (!ops.length) return;
+    const r = rt.applyBatch({ label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text), ops });
+    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ops.length });
+  }
+
+  // Puts the theme slots a decision set back to their last agreed value, in their own batch.
+  function revertTheme(sessionId: string, rt: SessionRuntime, d: Decision | undefined) {
+    if (!d || d.status === "agreed") return;
+    const op = themeStatusOp(view(rt).proto, d.id, "revert");
+    if (!op) return;
+    const r = rt.applyBatch({ label: batchLabel("Reverted", d.text), ops: [op] });
+    if (r.ok) log("build.theme_reverted", { session_id: sessionId, decision_id: d.id });
+    else log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status: "revert", ops: 1 });
   }
 
   function promote(sessionId: string, rt: SessionRuntime, ids: string[], via: "support" | "timeout" | "conflict") {
@@ -451,6 +462,11 @@ export function createBuildLoop(deps: {
       for (const d of reopened) {
         flipNodes(sessionId, rt, d, "draft");
         log("build.reopened", { session_id: sessionId, decision_id: d.id });
+      }
+      // An objection takes a theme back to its last agreed value, whether the decision was a draft or
+      // agreed (spec 4.4). The system does this from the stored value, not the model.
+      for (const id of new Set(grounded.ops.flatMap((op) => (op.op === "object" ? [op.decisionId] : [])))) {
+        revertTheme(sessionId, rt, doc.decisions.find((d) => d.id === id));
       }
       // One comparison on screen at a time (known issue M1): a new conflict shows only when none is
       // shown. The others wait in the doc, and the runtime shows the next when the one shown resolves.

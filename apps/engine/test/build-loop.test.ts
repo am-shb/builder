@@ -603,6 +603,92 @@ test("props the catalog does not know are dropped and counted, never logged", as
   ]);
 });
 
+// A theme proposal as the model sends it: one set_theme op under the batch's decisionId.
+const themeBatch = (decisionId: string, accent: string, by = "Amir"): ToolCall =>
+  ({ name: "apply_patches", input: { label: `Proposed: ${accent} accent`, by, decisionId, ops: [{ op: "set_theme", accent }] } });
+const themeDecision = (id: string, accent: string, ...more: unknown[]) => consensus([
+  { op: "add_decision", id, text: `${accent[0].toUpperCase()}${accent.slice(1)} accent`, proposedBy: "Amir", affects: [] },
+  { op: "mark_pending", decisionId: id },
+  ...more,
+]);
+
+test("agreeing a theme decision flips its slots", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold", { op: "support", decisionId: "d1", speaker: "Sara" })]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold"), await s.say("Sara", "yes, gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+  const flips = s.patches().filter((p) => p.changes[0]?.label === "Agreed: Gold accent");
+  assert.equal(flips.length, 1, "one batch");
+  assert.deepEqual(flips[0].changes.map((c) => [c.kind, c.id]), [["theme", "app"]]);
+});
+
+test("the 30 s timeout agrees a pending theme", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold")]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.equal(s.proto().theme!.accent.status, "draft");
+  await s.timers.advance(30_000);
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+});
+
+test("an objection reverts a draft theme", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.equal(s.proto().theme!.accent.value, "gold");
+  await s.timers.advance(10_000);
+  const before = s.patches().length;
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "no, not gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "draft");
+  assert.deepEqual(s.proto().theme!.accent, { value: "slate", status: "agreed", previous: "slate" });
+  const reverts = s.patches().slice(before).filter((p) => p.changes.some((c) => c.kind === "theme"));
+  assert.equal(reverts.length, 1);
+  assert.equal(reverts[0].changes[0].label, "Reverted: Gold accent");
+  assert.ok(s.logs.some((l) => l.msg === "build.theme_reverted" && l.fields?.decision_id === "d1" && l.fields?.session_id === s.sessionId));
+  await s.timers.advance(30_000);
+  assert.equal(s.proto().theme!.accent.value, "slate", "the timeout does not bring it back");
+});
+
+test("an objection to an agreed theme reverts to the theme before it", async () => {
+  const s = await setup([
+    [themeBatch("d0", "blue"), themeDecision("d0", "blue", { op: "support", decisionId: "d0", speaker: "Sara" })],
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold", { op: "support", decisionId: "d1", speaker: "Sara" })],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "blue"), await s.say("Sara", "yes")]));
+  await flush();
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "actually gold"), await s.say("Sara", "yes")]));
+  await flush();
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "blue" });
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "I preferred blue")]));
+  await flush();
+  assert.equal(s.doc().decisions.find((d) => d.id === "d1")!.status, "draft");
+  assert.deepEqual(s.proto().theme!.accent, { value: "blue", status: "agreed", previous: "blue" });
+});
+
+test("an ungrounded objection does not revert", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "gold it is")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "draft", decisionId: "d1", previous: "slate" });
+  assert.ok(!s.logs.some((l) => l.msg === "build.theme_reverted"));
+});
+
 test("objection to an agreed decision returns its nodes to draft", async () => {
   const s = await setup([
     [...QUICK_ADD, consensus([

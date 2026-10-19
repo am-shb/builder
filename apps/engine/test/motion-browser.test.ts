@@ -247,3 +247,94 @@ test("one 20 px draft tag per draft region: a draft inside a draft shows neither
     assert.match(read["home.t1"].tag, /draft/);
   });
 });
+
+// A theme patch as the stage receives it: the current prototype with the given accent slot, and its change.
+const themePatch = (slot: { value: string; status: string; decisionId?: string; previous: string }, label: string) => `(() => {
+  const p = JSON.parse(JSON.stringify(window.stageProto()));
+  const s = (v) => ({ value: v, status: "agreed", previous: v });
+  p.theme = { accent: ${JSON.stringify(slot)}, warmth: s("neutral"), radius: s("soft"), density: s("regular") };
+  window.stageEvent({ type: "patch", proto: p, changes: [{ kind: "theme", id: "app", label: ${JSON.stringify(label)}, by: "Sara" }] });
+})()`;
+const GOLD_DRAFT = { value: "gold", status: "draft", decisionId: "d1", previous: "slate" };
+
+test("a theme value change fades the old canvas out", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await sleep(1700); // let the first spotlight finish
+    await page.eval(`window.__motionLog = []`);
+    const right = await page.eval<{ fades: number; ids: number; accent: string; snapAccent: string; aligned: boolean }>(`(() => {
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent")};
+      const fade = document.querySelector(".m-theme-fade");
+      const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width].map(Math.round).join(); };
+      return {
+        aligned: !!fade && box(fade.firstElementChild) === box(document.querySelector('[data-node-id="app"]')),
+        fades: document.querySelectorAll(".m-theme-fade").length,
+        ids: fade ? fade.querySelectorAll("[data-node-id]").length + (fade.hasAttribute("data-node-id") ? 1 : 0) : -1,
+        accent: document.querySelector('[data-node-id="app"]').style.getPropertyValue("--b-accent"),
+        snapAccent: fade ? fade.querySelector(".b-node").style.getPropertyValue("--b-accent") : "",
+      };
+    })()`);
+    assert.equal(right.fades, 1);
+    assert.equal(right.ids, 0, "the snapshot carries no node ids");
+    assert.ok(right.aligned, "the snapshot sits exactly over the canvas it copies");
+    assert.notEqual(right.snapAccent, right.accent, "the snapshot keeps the old theme over the new one");
+    const anims = await page.eval<{ props: string[]; duration: number; easing: string }[]>(`document.getAnimations()
+      .filter((a) => a.effect.target.classList.contains("m-theme-fade"))
+      .map((a) => ({ props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((p) => !["offset", "computedOffset", "easing", "composite"].includes(p)), duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing }))`);
+    assert.deepEqual(anims, [{ props: ["opacity"], duration: 450, easing: "ease-out" }]);
+    await sleep(600);
+    assert.equal(await page.eval<number>(`document.querySelectorAll(".m-theme-fade").length`), 0, "gone once faded");
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus")`, 3000);
+    await sleep(300);
+    const focus = await page.eval<{ id: string; label: string }[]>(`window.__motionLog.filter((e) => e.fn === "playFocus")`);
+    assert.deepEqual(focus.map((f) => [f.id, f.label]), [["app", "Proposed: gold accent · Sara"]]);
+  });
+});
+
+test("a settled theme plays the agreed frame", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await page.eval(themePatch(GOLD_DRAFT, "Proposed: gold accent"));
+    await sleep(700);
+    const r = await page.eval<{ settles: number; fades: number; anims: { props: string[]; duration: number }[] }>(`(() => {
+      ${themePatch({ ...GOLD_DRAFT, status: "agreed" }, "Agreed: gold accent")};
+      return {
+        settles: document.querySelectorAll(".m-theme-settle").length,
+        fades: document.querySelectorAll(".m-theme-fade").length,
+        anims: document.getAnimations().filter((a) => a.effect.target.closest(".m-theme-settle")).map((a) => ({
+          props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((p) => !["offset", "computedOffset", "easing", "composite"].includes(p)),
+          duration: a.effect.getTiming().duration })),
+      };
+    })()`);
+    assert.equal(r.settles, 1);
+    assert.equal(r.fades, 0, "the values did not change, so nothing fades");
+    assert.ok(r.anims.length >= 1);
+    for (const a of r.anims) {
+      for (const p of a.props) assert.ok(p === "transform" || p === "opacity", `animates ${p}`);
+      assert.equal(a.duration, 400);
+    }
+    await page.waitFor(`!document.querySelector(".m-theme-settle")`, 3000);
+  });
+});
+
+test("no theme fade while covered", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await page.eval(`(() => {
+      const p = window.stageProto();
+      const variant = (label) => ({ label, summary: "Option " + label, backers: ["Ada"], proto: p, focusIds: [] });
+      window.stageEvent({ type: "comparison", view: { conflictId: "c1", topic: "Accent", variants: [variant("A"), variant("B")] } });
+    })()`);
+    await sleep(100);
+    const r = await page.eval<{ fades: number; settles: number; accent: string }>(`(() => {
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent")};
+      const fades = document.querySelectorAll(".m-theme-fade").length;
+      ${themePatch({ ...GOLD_DRAFT, status: "agreed" }, "Agreed: gold accent")};
+      return { fades, settles: document.querySelectorAll(".m-theme-settle").length,
+        accent: document.querySelector('#proto [data-node-id="app"]').style.getPropertyValue("--b-accent") };
+    })()`);
+    assert.deepEqual({ fades: r.fades, settles: r.settles }, { fades: 0, settles: 0 });
+    assert.ok(r.accent, "the prototype is still drawn, without motion");
+    assert.deepEqual(page.logs.filter((l) => l.startsWith("console.error")), []);
+  });
+});

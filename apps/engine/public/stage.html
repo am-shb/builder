@@ -205,7 +205,8 @@ import { connectStage, connectMeetingData, meetingDataUrl } from "@renderer/clie
 import { renderTree } from "@renderer/render.js";
 import { initialUiState, reduceInteraction, bindInteractions, findNode } from "@renderer/interact.js";
 import { startClock, onFrame, animate } from "@renderer/clock.js";
-import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
+import { screenTransitionEndsAt, fadeOutInPlace, playSettled, snapshotCanvas, playThemeFade, playThemeSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
+import { themeChange } from "@renderer/theme.js";
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
 import { renderTodo } from "@renderer/todo.js";
@@ -518,7 +519,12 @@ function onEvent(ev) {
       const changes = ev.changes ?? [];
       proto = ev.proto;
       if (ui) ui = { ...ui, screen: followScreen(prevProto, changes) };
+      // A re-theme fades the old canvas out over the new one; an agreed theme settles. Not under a comparison.
+      const theme = covered ? null : themeChange(prevProto, proto);
+      const snapshot = theme === "values" ? snapshotCanvas(protoEl) : null;
       draw(covered ? undefined : changes); // under the comparison: no motion; its focus waits
+      if (snapshot) playThemeFade(protoEl, snapshot);
+      else if (theme === "settled") playThemeSettled(protoEl);
       for (const c of focusTargets(focusable(prevProto, changes), nodes)) focusQueue.enqueue(c);
       break;
     }
