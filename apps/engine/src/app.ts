@@ -541,7 +541,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     }
 
     // Static renderer assets: public, no secrets.
-    const asset = path.match(/^\/renderer\/([A-Za-z0-9._-]+\.(js|css))$/);
+    const asset = path.match(/^\/renderer\/((?:components\/)?[A-Za-z0-9._-]+\.(js|css))$/);
     if (req.method === "GET" && asset) {
       let body: Buffer;
       try {

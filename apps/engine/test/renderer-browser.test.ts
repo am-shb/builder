@@ -42,7 +42,7 @@ async function withPageServer(fn: (url: string) => Promise<void>) {
   const server = http.createServer((req, res) => {
     if (req.url === "/") return void res.writeHead(200, { "Content-Type": "text/html" }).end(PAGE);
     if (req.url === "/proto.json") return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(proto));
-    const m = req.url?.match(/^\/renderer\/([\w.-]+)$/);
+    const m = req.url?.match(/^\/renderer\/((?:components\/)?[\w.-]+)$/);
     if (m) {
       try {
         const body = readFileSync(new URL(`../public/renderer/${m[1]}`, import.meta.url));
@@ -79,8 +79,9 @@ test("renders fixture proto with data-node-id for every node and draft styling",
       assert.equal(agreed, "none");
       const fs = await page.eval<number>(`parseFloat(getComputedStyle(document.querySelector('[data-node-id="home.heading"]')).fontSize)`);
       assert.ok(fs >= 20, `font ${fs}px`);
+      // Body text is 18px (design system spec, section 6).
       const base = await page.eval<number>(`parseFloat(getComputedStyle(document.querySelector('[data-node-id="app"]')).fontSize)`);
-      assert.ok(base >= 20, `base font ${base}px`);
+      assert.ok(base >= 18, `base font ${base}px`);
     });
   });
 });

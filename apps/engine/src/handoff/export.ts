@@ -7,8 +7,13 @@ import type { ConsensusDoc } from "../consensus/doc.ts";
 import type { Interaction, Prototype, UiNode } from "../ui/schema.ts";
 
 const rendererDir = new URL("../../public/renderer/", import.meta.url);
-// The handoff's import graph: render.js -> components, motion (-> clock), interact.
-const RENDERER_MODULES = ["render.js", "components.js", "motion.js", "clock.js", "interact.js"] as const;
+// The handoff's import graph: render.js -> components (-> catalog, components/*), motion (-> clock), interact.
+// Modules import each other as "@renderer/<path>", which the inline export maps to data URLs one by one.
+const RENDERER_MODULES = [
+  "render.js", "components.js", "motion.js", "clock.js", "interact.js", "catalog.js",
+  "components/dom.js", "components/frames.js", "components/data.js", "components/content.js", "components/input.js",
+  "components/feedback.js",
+] as const;
 
 let cache: { template: string; theme: string; modules: Record<string, string> } | undefined;
 function assets() {
