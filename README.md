@@ -40,7 +40,7 @@ New contributors should read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUT
    (cooldown 120 s), to confirm a conflict resolved through comparison, and for command feedback that
    is invisible or failed. At most 2 sentences or 300 characters, with at most one question.
 4. **Building.** The conversation loop hands what it heard to the build loop
-   (`anthropic/claude-opus-5.5`, fallback `anthropic/claude-opus-5`). The build loop updates the consensus
+   (`anthropic/claude-sonnet-5.5`, fallback `anthropic/claude-sonnet-5`; [ADR 0013](docs/adr/0013-build-loop-on-sonnet.md)). The build loop updates the consensus
    document and the prototype with small atomic patch batches. One run at a time, at least 10 s apart.
 5. **Agreement.** A decision goes draft, then pending, then agreed. It is promoted when a different
    participant supports it, or when nobody objects for 30 s. An agreement must be backed by the
@@ -164,12 +164,18 @@ For a real run, put your Recall and OpenRouter settings in `apps/engine/.env` an
 its own SurrealDB and token, whatever the `.env` files say. Put Clerk settings and session limits in `apps/api/.env`
 to try the api's `/v1` routes. To start over, `docker compose down -v` deletes the volumes.
 
-## Measured live results (2026-10-17)
+## Measured live results
 
-- **Model probe passed.** Strict patch schema accepted, tool input streamed, fallbacks accepted. About $0.026.
+- **Model probe passed (2026-10-17).** Strict patch schema accepted, tool input streamed, fallbacks accepted.
+  About $0.026.
 - **TTS.** PCM confirmed as 24 kHz mono. First audio arrives in about 1 to 1.2 s.
-- **Live meeting test.** Opening spoken (Haiku about 1.5 s plus TTS about 2.1 s), Opus build round about
-  6.8 s, session model cost $0.32.
+- **Live meeting test (2026-10-17, laptop).** Opening spoken (Haiku about 1.5 s plus TTS about 2.1 s), Opus build
+  round about 6.8 s, session model cost $0.32.
+- **Production meeting (2026-10-19, Render, session `df84cdfa`).** Bot alive 6 min 46 s (2 min in the waiting
+  room, 4 min 44 s in the call). Opening line's first audio after 2.1 s. Haiku calls 1.2 to 6.9 s, median 2.2 s.
+  Opus build calls 3.0 to 9.7 s, median 4.6 s. Model cost $0.369 (Opus $0.355 over 19 calls, Haiku $0.014 over
+  36), TTS about $0.011 (542 characters), Recall about $0.07 (bot time at the `web_4_core` rate). Led to
+  [ADR 0013](docs/adr/0013-build-loop-on-sonnet.md).
 - **OpenRouter does not enforce strict tool schemas**, so tool inputs are stripped of undeclared keys and
   re-validated.
 

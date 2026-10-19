@@ -1,5 +1,5 @@
 // Build loop: turns conversation hand-offs into consensus-document updates and
-// prototype patches with Opus. One run in flight per session; hand-offs that arrive
+// prototype patches with Sonnet. One run in flight per session; hand-offs that arrive
 // meanwhile merge into the next run, at most one run per 3 s unless a conflict was
 // just resolved. Each patch batch is applied as soon as the model finishes writing it.
 // Also promotes pending decisions after 30 s without objection. When the call ends,
@@ -511,7 +511,7 @@ export function createBuildLoop(deps: {
         parentRe.lastIndex = Math.max(0, buf.length - 100);
       };
 
-      // Each patch batch is applied as soon as its block closes, so it shows while Opus keeps writing.
+      // Each patch batch is applied as soon as its block closes, so it shows while the model keeps writing.
       // Never throws: a throw would reject runTools and lose the cost row for a billed call.
       let firstPatchMs: number | null = null;
       let lastPatchMs: number | null = null;

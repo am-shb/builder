@@ -25,9 +25,9 @@ const REQ = { system: "sys", messages: [{ role: "user", content: "hi" }] };
 test("costOf computes cache-aware cost", () => {
   const usage = { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 2000, cacheWriteTokens: 400 };
   const p = PRICES[MODELS.build];
-  assert.deepEqual(p, { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 });
-  // (1000*4 + 500*20 + 2000*0.2 + 400*5) / 1e6
-  assert.ok(Math.abs(costOf(MODELS.build, usage) - 0.0164) < 1e-12);
+  assert.deepEqual(p, { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 });
+  // (1000*2 + 500*10 + 2000*0.1 + 400*2.5) / 1e6
+  assert.ok(Math.abs(costOf(MODELS.build, usage) - 0.0082) < 1e-12);
   assert.ok(costOf(MODELS.conversation, usage) < costOf(MODELS.build, usage));
   // Provider-reported cost wins over the computed value.
   assert.equal(costOf(MODELS.build, { ...usage, costUsd: 0.5 }), 0.5);
@@ -145,9 +145,10 @@ test("port sends baseURL openrouter, model slugs, and fallbacks only on build ca
   const [build, conv] = sent;
   assert.equal(build.url, "https://openrouter.ai/api/v1/messages");
   assert.equal(build.auth, "Bearer or-test-key");
-  assert.equal(build.body.model, "anthropic/claude-opus-5.5");
+  assert.equal(build.body.model, "anthropic/claude-sonnet-5.5");
   assert.deepEqual(build.body.fallbacks, BUILD_FALLBACKS.map((model) => ({ model })));
-  assert.deepEqual(build.body.fallbacks, [{ model: "anthropic/claude-opus-5" }]);
+  assert.deepEqual(build.body.fallbacks, [{ model: "anthropic/claude-sonnet-5" }]);
+  for (const model of BUILD_FALLBACKS) assert.ok(PRICES[model], `${model} has a price`);
   assert.equal(build.body.output_config.effort, "medium");
   assert.equal(conv.body.model, "anthropic/claude-haiku-5.5");
   assert.equal("fallbacks" in conv.body, false);
