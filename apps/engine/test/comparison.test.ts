@@ -449,3 +449,26 @@ test("a second open conflict opens once the first one's resolve has played out (
     assert.ok(r.options.every((o) => o.nodes.includes("home.done")), "the options show the first winner merged");
   });
 });
+
+const themeVariant = (accent: string): PatchBatch => ({ label: `${accent} accent`, ops: [{ op: "set_theme", values: { accent } }] });
+const THEMED = conflict([
+  { label: "A", summary: "Gold accent", backers: ["Sara"], batch: themeVariant("gold") },
+  { label: "B", summary: "Green accent", backers: ["Amir"], batch: themeVariant("green") },
+]);
+
+test("variant previews carry their own theme", () => {
+  const view = buildComparisonView(baseProto(), THEMED);
+  assert.ok(view);
+  assert.deepEqual(view.variants.map((v) => v.proto.theme?.accent.value), ["gold", "green"]);
+});
+
+test("themed previews render side by side", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const view = buildComparisonView(baseProto(), THEMED);
+    await script([{ batch: BASE, doc: docWith(THEMED) }, { wait: 400, comparison: view }]);
+    await page.waitFor(`document.querySelectorAll("#comparison .c-option").length === 2`);
+    await sleep(700);
+    const accents = await page.eval<string[]>(`[...document.querySelectorAll("#comparison .c-option .c-preview [data-type='App']")].map((e) => getComputedStyle(e).getPropertyValue("--b-accent").trim())`);
+    assert.deepEqual(accents, ["#c8961e", "#15803d"]);
+  });
+});

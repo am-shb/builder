@@ -10,7 +10,7 @@ import { withChrome } from "./helpers/chrome.ts";
 import type { Page } from "./helpers/chrome.ts";
 import { COMPONENT_TYPES } from "../public/renderer/catalog.js";
 
-const proto = JSON.parse(readFileSync(new URL("./fixtures/gallery-proto.json", import.meta.url), "utf8"));
+const proto: any = JSON.parse(readFileSync(new URL("./fixtures/gallery-proto.json", import.meta.url), "utf8"));
 const SCREENS: string[] = proto.root.children.map((s: { id: string }) => s.id);
 const WIDTH = 900;
 const HEIGHT = 720;
@@ -25,6 +25,7 @@ import { renderTree, initialUiState } from "@renderer/render.js";
 import { bindInteractions } from "@renderer/interact.js";
 const root = document.getElementById("root");
 const proto = await (await fetch("/proto.json")).json();
+window.proto = proto;
 let state = initialUiState(proto);
 window.draw = () => { window.nodes = renderTree(root, proto, state); };
 window.show = (screen, open = {}) => { state = { ...state, screen, open }; window.draw(); window.scrollTo(0, 0); };
@@ -56,12 +57,12 @@ async function withGalleryServer(fn: (url: string) => Promise<void>) {
 }
 
 // Saves the screen in viewport-high slices (the gallery screens are taller than the canvas).
-async function shoot(page: Page, dir: string, name: string): Promise<string[]> {
+async function shoot(page: Page, dir: string, name: string, variant = "neutral"): Promise<string[]> {
   const height = await page.eval<number>(`document.documentElement.scrollHeight`);
   const files: string[] = [];
   for (let y = 0, i = 1; y < height; y += HEIGHT, i++) {
     await page.eval(`window.scrollTo(0, ${y})`);
-    const file = path.join(dir, `${name}${i > 1 ? `-${i}` : ""}-neutral.png`);
+    const file = path.join(dir, `${name}${i > 1 ? `-${i}` : ""}-${variant}.png`);
     await page.screenshot(file);
     files.push(file);
   }
@@ -123,6 +124,47 @@ test("gallery: every catalog type renders without overflow, small text or errors
       shots.push(...(await shoot(page, dir, "gallery-a-modal")));
 
       // no page errors
+      assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
+      t.diagnostic(`screenshots: ${dir} (${shots.length} files)`);
+    });
+  }, { width: WIDTH, height: HEIGHT });
+});
+
+const slot = (value: string) => ({ value, status: "agreed", previous: value });
+const themed = (accent: string, warmth = "neutral") => ({ accent: slot(accent), warmth: slot(warmth), radius: slot("soft"), density: slot("regular") });
+
+test("each theme sets its variables on the App element", async (t) => {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), "design-")), "screens");
+  mkdirSync(dir, { recursive: true });
+  const base = structuredClone(proto);
+  await withChrome(t, async (page) => {
+    await withGalleryServer(async (url) => {
+      await page.goto(url);
+      await page.waitFor("window.ready === true");
+      const appVar = (name: string) => page.eval<string>(`getComputedStyle(document.querySelector('[data-node-id="${base.root.id}"]')).getPropertyValue("${name}").trim()`);
+      const setTheme = (theme: unknown) => page.eval(`(() => { const p = ${JSON.stringify(theme)}; if (p) window.proto.theme = p; else delete window.proto.theme; window.draw(); })()`);
+
+      // no theme: the house defaults
+      assert.equal(await appVar("--b-accent"), "#1e293b");
+
+      await setTheme(themed("gold"));
+      assert.equal(await appVar("--b-accent"), "#c8961e");
+      const ink = await appVar("--b-accent-ink");
+      const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+      const primary = await page.eval<string>(`getComputedStyle(document.querySelector('[data-node-id="a.header.add"]')).color`);
+      assert.equal(primary, rgb(ink));
+      await page.eval(`window.show(${JSON.stringify(SCREENS[0])})`);
+      const shots = await shoot(page, dir, `gallery-${SCREENS[0].replace(/^gallery-/, "")}`, "gold");
+
+      // a second render of the same proto changes nothing
+      const mutations = await page.eval<number>(`(() => { const o = new MutationObserver(() => {}); o.observe(document.getElementById("root"), { subtree: true, attributes: true, childList: true, characterData: true }); window.draw(); return o.takeRecords().length; })()`);
+      assert.equal(mutations, 0, "idempotent render");
+
+      await setTheme(themed("green", "warm"));
+      assert.equal(await appVar("--b-accent"), "#15803d");
+      assert.equal(await appVar("--b-bg"), "#faf8f3");
+      shots.push(...(await shoot(page, dir, `gallery-${SCREENS[0].replace(/^gallery-/, "")}`, "green-warm")));
+
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
       t.diagnostic(`screenshots: ${dir} (${shots.length} files)`);
     });

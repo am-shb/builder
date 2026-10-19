@@ -2,6 +2,7 @@
 // re-rendering an unchanged prototype creates, moves and removes nothing.
 // Pass `changes` (a patch's Change[]; [] for a local interaction) to animate the difference.
 import { buildElement, updateElement, slotOf } from "@renderer/components.js";
+import { themeValues, themeVars } from "@renderer/theme.js";
 import { captureRects, animateReconcile, cloneForCrossFade } from "@renderer/motion.js";
 export { initialUiState } from "@renderer/interact.js";
 
@@ -42,6 +43,13 @@ export function renderTree(container, proto, uiState, changes) {
   }
 
   visit(proto.root, container, 0);
+
+  // The theme is a set of CSS custom properties on the App element, so each rendered prototype
+  // (and each comparison preview) is themed on its own. Every key is always present.
+  const app = next.get(proto.root.id);
+  for (const [name, value] of Object.entries(themeVars(themeValues(proto.theme)))) {
+    if (app.style.getPropertyValue(name) !== value) app.style.setProperty(name, value);
+  }
 
   // Whatever was not visited (or was rebuilt) leaves the DOM; with motion it leaves animated.
   const removed = new Map();

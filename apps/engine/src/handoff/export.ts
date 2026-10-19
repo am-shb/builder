@@ -4,13 +4,14 @@
 // All doc and prototype text is escaped here; nothing is ever interpolated as markup.
 import { readFileSync } from "node:fs";
 import type { ConsensusDoc } from "../consensus/doc.ts";
+import { withAgreedTheme } from "../ui/tree.ts";
 import type { Interaction, Prototype, UiNode } from "../ui/schema.ts";
 
 const rendererDir = new URL("../../public/renderer/", import.meta.url);
 // The handoff's import graph: render.js -> components (-> catalog, components/*), motion (-> clock), interact.
 // Modules import each other as "@renderer/<path>", which the inline export maps to data URLs one by one.
-const RENDERER_MODULES = [
-  "render.js", "components.js", "motion.js", "clock.js", "interact.js", "catalog.js",
+export const RENDERER_MODULES = [
+  "render.js", "components.js", "motion.js", "clock.js", "interact.js", "catalog.js", "theme.js",
   "components/dom.js", "components/frames.js", "components/data.js", "components/content.js", "components/input.js",
   "components/feedback.js",
 ] as const;
@@ -90,8 +91,9 @@ function decisionHtml(d: ConsensusDoc["decisions"][number], doc: ConsensusDoc): 
   return `<li class="decision"><p class="decision-text">${esc(d.text)}${d.status !== "agreed" ? ` ${FLAG}` : ""}</p><dl class="meta">${meta}</dl></li>`;
 }
 
-function render(doc: ConsensusDoc, proto: Prototype, mode: { inline: true } | { inline: false; exportHref?: string }): string {
+function render(doc: ConsensusDoc, fullProto: Prototype, mode: { inline: true } | { inline: false; exportHref?: string }): string {
   const a = assets();
+  const proto = withAgreedTheme(fullProto); // a draft theme slot shows its last agreed value
   const importMap = mode.inline
     ? { imports: Object.fromEntries(RENDERER_MODULES.map((m) => [`@renderer/${m}`, `data:text/javascript;base64,${Buffer.from(a.modules[m]).toString("base64")}`])) }
     : { imports: { "@renderer/": "/renderer/" } };

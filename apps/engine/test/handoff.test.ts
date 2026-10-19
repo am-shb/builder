@@ -14,7 +14,7 @@ import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
-import { buildExportHtml } from "../src/handoff/export.ts";
+import { buildExportHtml, RENDERER_MODULES } from "../src/handoff/export.ts";
 
 const proto: Prototype = JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
 const EVIL = `Use </script><img src=x onerror=alert(1)> everywhere`;
@@ -173,4 +173,29 @@ test("live handoff page renders the prototype and flags drafts", async (t) => {
       assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
     }, { width: 1440, height: 900 });
   } finally { h.close(); }
+});
+
+test("the export shows the agreed theme and opens offline", async (t) => {
+  const themed: Prototype = {
+    ...proto,
+    theme: {
+      accent: { value: "gold", status: "draft", decisionId: "d1", previous: "blue" },
+      warmth: { value: "neutral", status: "agreed", previous: "neutral" },
+      radius: { value: "soft", status: "agreed", previous: "soft" },
+      density: { value: "regular", status: "agreed", previous: "regular" },
+    },
+  };
+  const html = buildExportHtml(doc, themed);
+  for (const m of RENDERER_MODULES) assert.match(html, new RegExp(`"@renderer/${m.replace(/[./]/g, "\\$&")}":"data:text/javascript;base64,`), m);
+  const dir = mkdtempSync(join(tmpdir(), "handoff-"));
+  try {
+    const file = join(dir, "handoff.html");
+    writeFileSync(file, html);
+    await withChrome(t, async (page) => {
+      await page.goto(`file://${file}`);
+      await page.waitFor(`document.querySelector('#prototype [data-node-id="${proto.root.id}"]')`);
+      assert.equal(await page.eval(`getComputedStyle(document.querySelector('#prototype [data-node-id="${proto.root.id}"]')).getPropertyValue("--b-accent").trim()`), "#2563eb");
+      assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
+    }, { width: 1440, height: 900 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
