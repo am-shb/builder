@@ -26,7 +26,8 @@ browser (Clerk, active org)
 ```
 
 **Not in this slice:** live updates (the api doesn't receive engine events yet), cost so far, hand-off links and
-library, billing, calendar, staff pages, invitations beyond what Clerk's components already offer, a design system.
+library, billing, calendar, staff pages, invitations beyond what Clerk's components already offer, a full design
+system (this slice has the foundation in [Visual design](#visual-design), not a component library for every future page).
 
 ## What changed on 2026-10-19
 Read against `main` at `e9b01b5`. `apps/web`, `contracts/` and the api's routes are unchanged since this plan was
@@ -148,6 +149,13 @@ service to this choice). Step W0 records it as ADR 0012.
   and `zod` 4.6.7 (the api's version; the web app parses replies with it).
   `@clerk/react` accepts React `~19.3.0-0`. None has a TypeScript peer, so no `overrides` entry is needed (unlike
   `surrealdb`). Check again at install: if a peer conflict shows up, use a scoped override, as the root does.
+- **Design packages** ([ADR 0013](../adr/0013-web-visual-design.md); checked on npm on 2026-10-19, every peer range
+  accepts React 19.3 and Vite 8), also installed in W1 so the lockfile changes once:
+  `radix-ui` 1.8.1, `class-variance-authority` 0.7.1, `clsx` 2.1.1, `tailwind-merge` 3.7.0, `lucide-react` 1.56.0
+  (not 1.59.0, which is two days old), `sonner` 2.0.8, `@fontsource-variable/geist` and
+  `@fontsource-variable/geist-mono` 5.3.0; dev only: `tailwindcss` and `@tailwindcss/vite` 4.3.3, `tw-animate-css`
+  1.4.0, `axe-core` 4.14.0 and `playwright-core` 1.64.1. Not added: the `shadcn` CLI package, `vaul`, an animation
+  library and `@clerk/themes` (reasons in ADR 0013).
 - **TypeScript:** `apps/web/tsconfig.json` extends the root base and changes only what a browser bundle needs:
   `module: "esnext"`, `moduleResolution: "bundler"`, `jsx: "react-jsx"`, `lib: ["esnext", "dom"]` (add
   `"dom.iterable"` only if TypeScript 7 still needs it), and `types: ["vite/client", "node"]`. Keeping `node` matters:
@@ -377,6 +385,72 @@ outcome (201 aside) shows the 504 warning**, because a bot may exist.
   added later, it must strip URLs and bodies first.
 - **Tenancy** is enforced by the api from the token. The web app never sends an org id, and the tests prove it.
 
+## Visual design
+Settled in [ADR 0013](../adr/0013-web-visual-design.md). UI and design are a judging criterion and the app will be
+shown to investors, so the look is part of "done" for every screen step, not polish for later. In short:
+
+- **Stack:** Tailwind CSS 4 and shadcn/ui-style components on Radix primitives, copied into `src/components/ui/` and
+  restyled; `lucide-react` icons; `sonner` toasts; Geist fonts, self-hosted.
+- **Tokens:** semantic CSS variables in OKLCH in `src/styles/globals.css`, light and dark, following the system
+  setting. Every text pair is AA or better (measured). The palette and its contrast are in ADR 0013:
+
+  | | Light | Dark |
+  |---|---|---|
+  | page / card | `#f9fafd` / `#ffffff` | `#0b0e15` / `#13171f` |
+  | text / secondary | `#111826` / `#5b6375` | `#f2f3f7` / `#a2a8b5` |
+  | primary (indigo) | `#4f52e7` | `#8d9eff` (echoes the stage's accent) |
+  | violet (gradient stop) | `#914de6` | `#ba93fb` (the stage's question color) |
+  | success / warning / danger | `#007f4e` / `#a45e00` / `#d01a34` | `#56d089` / `#f5b34c` / `#f96f70` |
+
+- **Brand:** `PRODUCT_NAME` as a wordmark beside a gradient tile with its first letter. `BOT_NAME` in every line that
+  names the bot. Both from `src/brand.ts`.
+- **Navigation:** the slice has one top-level page (Sessions), so no bottom tab bar yet: a one- or two-tab bar would
+  look empty and add a tap for nothing. Instead:
+
+  | | Phone (below 768px) | Tablet and desktop |
+  |---|---|---|
+  | Top bar | sticky: mark, org switcher, user button | the same, wider |
+  | New session | full-width button in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | the form inline in a card above the list |
+  | Session detail | a pushed screen: back button in the top bar, slides in | a page with a back link; two columns from `lg` |
+  | Confirmations | bottom sheet | centered dialog |
+
+  When the library, billing and settings pages arrive (three to five top-level pages), phones get a bottom tab bar
+  and desktop a sidebar; the app shell keeps the slot.
+- **Each screen's states:** skeletons shaped like the content (after 150 ms), busy buttons with a spinner, an empty
+  state with an icon, a headline and the primary action, error callouts with the error table's text and action,
+  centered page states (not configured, no such session), toasts only for non-critical confirmations ("Link
+  copied"). The unknown-outcome warning is always a persistent callout, never a toast.
+- **Status badges:** a dot plus the label; Starting and Joining in primary, In the meeting in success (both with a soft
+  pulse), Check the meeting in warning, Didn't start and Failed in danger, Ended and Unknown neutral.
+- **Motion:** 150–250 ms, ease-out: sheets slide up, dialogs fade and scale, a pushed screen slides 16px, lists fade
+  in, buttons press. All behind `motion-safe:`; nothing moves under reduced motion.
+- **Responsive:** 360px phones to large desktops, no sideways scrolling, content at most 1120px wide, gutters 16, 24
+  and 32px. Touch targets 44px or more on phones, inputs at 16px (no iOS zoom), safe-area insets, `theme-color`.
+- **Accessibility (WCAG 2.2 AA):** contrast as measured, a visible focus ring everywhere, labels with linked errors,
+  landmarks and headings in order, start results in `role="status"`, the warning in `role="alert"`, Radix dialogs and
+  sheets (focus trapped and restored, Escape closes), nothing that depends on hover.
+- **Clerk** is themed through `appearance.variables` pointing at the same CSS variables, so sign-in, sign-up, the org
+  switcher and the user menu match in light and dark.
+
+### How the look is checked
+- **`/_design`** (dev server only, not in the production build): every component and state, light and dark
+  (`?theme=light|dark`), with a reduced-motion switch.
+- **Screenshots** by `apps/web/scripts/screenshots.ts` (`npm run screenshots -w @builder/web`): `playwright-core`
+  drives the installed Chrome against the local dev server only, at 360×780, 390×844, 768×1024, 1280×800 and
+  1536×960, light and dark, full page, into `apps/web/screenshots/` (git-ignored). It also runs `axe-core` in the page,
+  contrast included, and fails on any violation and on any page wider than the viewport. It never runs in
+  `npm test` or CI. `/_design` loads no Clerk script and calls nothing. Screens from W2 on are captured against the
+  local setup (engine in local mode, so no bot and no model spend) and the free Clerk development instance.
+- **While building:** each screen and state is opened in a real browser at those widths, in both modes, and fixed
+  until it looks right.
+- **Approval gate:** after W1b, the `/_design` screenshots (phone and desktop, light and dark) are shown for approval
+  before W2 starts. Changes asked for there are made in W1b.
+- **Review per screen step (W2–W6):** a separate review agent, which didn't build the step, judges that step's
+  screenshots for polish, consistency with `/_design` and responsiveness. Its findings are fixed, or listed with a
+  reason, before the step is reported done.
+- **In the tests:** `axe-core` on each rendered screen and state in jsdom (names, roles, structure; jsdom can't
+  compute contrast), and a guard that fails on a raw color outside `globals.css` and the favicon.
+
 ## Local development
 Three terminals, all on Node 24 (`.nvmrc`). This setup sends **no bot and spends nothing**: the engine runs in local
 mode, which uses a stand-in for Recall, and with no model key set.
@@ -435,7 +509,8 @@ mode, which uses a stand-in for Recall, and with no model key set.
     the link has `rel="noopener noreferrer"`.
   - A reply that doesn't match the schema shows an error instead of crashing; a new status or extra field doesn't.
   - Guards: no `VITE_*` name other than the two; no `dangerouslySetInnerHTML`, `innerHTML`, `localStorage` or
-    `console.` in `src/`.
+    `console.` in `src/`; no raw colors outside `globals.css` and the favicon.
+  - `axe-core` finds no violations on each screen and state (see [How the look is checked](#how-the-look-is-checked)).
 - **Not in this slice:** browser end-to-end tests (Clerk's testing helpers need a real instance and its secret key).
   Instead, the [manual check](#manual-check-before-the-demo).
 
@@ -508,7 +583,8 @@ to 2 hours, M = about half a day, L = about a day.
 | # | Branch | What | Size | Safe alone because |
 |---|---|---|---|---|
 | W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with the split CSP, names and origins from configuration. Settles WD1, WD2, WD5–WD11 for the web app | S | docs only |
-| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
+| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk and the design packages included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
+| W1b | `web/design-foundation` | ADR 0013 in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, Clerk's layer), Geist fonts, `src/lib/cn.ts`, the components in `src/components/ui/` (button, input, label, card, badge, status badge, skeleton, callout, dialog, sheet, alert dialog, responsive modal, tooltip, toaster, empty state, page state), the app shell (top bar, bottom action bar, content container) with the wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
 | I1 | `infra/render-web` | `builder-web` static site in `render.yaml`, the runbook's production section; then, in the dashboard, its two variables and `{WEB_ORIGIN}` in the api's `CLERK_AUTHORIZED_PARTIES`. Placeholder checked live: loads, routes rewrite, headers present, no CSP errors | S | the site calls nothing yet; the Blueprint change adds a service and touches no other |
 | W2 | `web/clerk-auth` | `ClerkProvider` with the wiring above, the routes and guard, sign-in/up, `/choose-organization` with its fallback, header with `<OrganizationSwitcher hidePersonal />` and `<UserButton />`, "not configured" screen, `test/helpers/clerk.tsx`. Org flow checked by hand on the dev instance | M–L | no api calls yet |
 | W3 | `web/api-client` | `src/api/client.ts`, `src/api/schemas.ts` (tolerant), `ApiError`, the error mapping, `test/helpers/fake-api.ts`; `GET /v1/me` shows the role in the header | M | `/v1/me` exists; reads only. Needs A1 to work in a real browser |
@@ -516,9 +592,12 @@ to 2 hours, M = about half a day, L = about a day.
 | W5 | `web/start-session` | The form, every `POST` outcome, the warnings, the WD8 guard | M–L | the api reuses active sessions and the engine refuses a second bot per org and meeting; no retries |
 | W6 | `web/session-detail` | `/sessions/:id`, status explanation, limits, error code, the stage link behind "Show" | M | reads only |
 
-- **Order:** W0 and the outside items A1, WC1 and K1 first (they're small and others wait on them). W1–W3 can start
-  at once. I1 right after W1. W4–W6 need WC1 (or the temporary copy below). After each step from W2 on merges, its
-  screens are checked on the deployed site too.
+- **Order:** W0 and the outside items A1, WC1 and K1 first (they're small and others wait on them). Then W1, W1b and
+  I1. **W2 starts only after the W1b screenshots are approved.** W2–W3 can then start at once; W4–W6 need WC1 (or the
+  temporary copy below). After each step from W2 on merges, its screens are checked on the deployed site too.
+- **Done for a screen step** means, besides its tests: every state styled from the shared components; checked in a
+  real browser at 360, 390, 768, 1280 and 1536px, light and dark, reduced motion on and off; no sideways scrolling;
+  `npm run screenshots` passes (axe included); and the separate visual review's findings fixed or listed with a reason.
 - **Merges that redeploy the engine** (and so end live meetings): W1 (lockfile) and WC1 (`contracts/`). Merge them
   when no meeting is running, or pause the engine's auto-deploy first (runbook). The other web steps change only
   `apps/web/` and deploy only the site.
@@ -526,12 +605,14 @@ to 2 hours, M = about half a day, L = about a day.
   1. The WD8 guard's confirmation step (the 504 warning itself is never cut; the engine already refuses a second
      bot for the same org and meeting in nearly every case).
   2. The role in the header (`GET /v1/me`).
-  3. The session detail page: show the status in the list and drop the stage link from the web app for the demo.
-  4. Checking every screen on the deployed site: if the deployed site misbehaves late, demo locally instead.
-  5. Styling beyond Clerk's defaults and one CSS file.
+  3. Route transitions and the pulsing status dots (the rest of the motion stays).
+  4. The two-column detail layout on large screens (one column everywhere).
+  5. Checking every screen on the deployed site: if the deployed site misbehaves late, demo locally instead.
+  6. The session detail page: show the status in the list and drop the stage link from the web app for the demo.
 
-  Never cut: sign-in, org choice and switching, the list, the start form, the `POST` warnings, and (when deployed)
-  the CSP.
+  Never cut: sign-in, org choice and switching, the list, the start form, the `POST` warnings, the design foundation
+  (tokens, components, light and dark), responsive layout down to 360px, WCAG 2.2 AA, the per-step visual review, and
+  (when deployed) the CSP.
 
 ## Changes outside apps/web
 Each needs review from that area. None of them changes how another area behaves except as written.
@@ -586,7 +667,7 @@ Each needs review from that area. None of them changes how another area behaves 
 - **R1 (optional).** A root `npm run dev` that starts the engine in local mode, the api and the web app together.
 
 ## Decisions
-Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID need their areas' agreement.
+Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 records WD12; D-INFRA and D-ID need their areas' agreement.
 
 - **WD1. Framework.** *Recommended:* Vite + React static site. Alternative: Next.js on a $7 web service.
 - **WD2. Routing.** *Recommended:* React Router with five routes, Clerk on `routing="path"`. Alternative: one page
@@ -612,15 +693,21 @@ Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID
   `VITE_*` variables, plus a URL-free header policy in `render.yaml` for `frame-ancestors`. Alternatives: the whole
   policy as a `render.yaml` header (writes the api and Clerk origins into the repo, and needs editing when the domain
   changes), or a looser `connect-src https:` (allows any host).
-- **Styling.** One plain CSS file with a few variables; Clerk's components bring their own look. Sharing tokens with
-  the stage theme is the design-system decision in the web README, later.
+- **WD12. Visual design.** *Recommended:* Tailwind CSS with shadcn/ui-style components on Radix, one OKLCH token
+  set for light and dark, mobile-first with a bottom sheet and sticky action bar on phones, and an approval gate
+  before the screens ([ADR 0013](../adr/0013-web-visual-design.md)). Alternatives: plain CSS tokens and our own
+  components (no dependencies, but accessible dialogs, sheets and toasts by hand), or a full library such as MUI or
+  Mantine (its own recognizable look, harder to match to Clerk). The engine's `theme.css` isn't reused: it's the
+  prototype kit sized for the screenshare, and the web app copies related values instead of importing it.
 
 ## Timeline
-- **Effort:** W0 + W1 about a day, I1 about two hours, W2–W6 about three and a half days. That fits before
-  2026-10-25 if W0, A1, WC1 and K1 land by 2026-10-20.
+- **Effort:** W0 and W1 done (W1 gets the design packages before it merges). W1b about a day, I1 about two hours,
+  W2–W6 about four days with the visual review in each. That fits before 2026-10-25 if W1b is approved by about
+  2026-10-21, and A1, WC1 and K1 land by then too.
 - **Outside items the demo needs:** A1, WC1 and K1 by about 2026-10-20; I1 by about 2026-10-21 (the engine and api
   are on Render already). For a start from the deployed site, D5's limits set by about 2026-10-23. Otherwise, the
   local fallback.
-- **The biggest risk** is now Clerk's org flow, checked by hand in W2, and on the deployed site from W2 on. The
+- **The biggest risks** are now the time the visual work takes (W1b's approval gate keeps it from spreading into
+  every screen step) and Clerk's org flow, checked by hand in W2, and on the deployed site from W2 on. The
   deploy is smaller than before: the Blueprint and CD exist, and I1 lands early with a page that calls nothing. The
   other risk is a merge that redeploys the engine during someone's meeting (W1, WC1).
