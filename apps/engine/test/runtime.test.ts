@@ -477,3 +477,20 @@ test("after a restart, load() starts a session's runtime from what was saved, on
   assert.equal(reads, 1, "a loaded session is not read again");
   await store.close();
 });
+
+test("R3: flush waits for every session's queued saves", async () => {
+  const store = await testStore();
+  const ids = ["55555555-0000-0000-0000-000000000001", "55555555-0000-0000-0000-000000000002"];
+  for (const id of ids) await store.createIntent(id, "https://meet.google.com/x");
+  let saving = 0;
+  const slow = { getConsensus: store.getConsensus, saveConsensus: async (...a: Parameters<typeof store.saveConsensus>) => {
+    saving++;
+    await new Promise((r) => setTimeout(r, 30));
+    return store.saveConsensus(...a);
+  } };
+  const runtime = createRuntime({ store: slow, channel: { send() {}, sendAudio() {}, clients: () => 0 } });
+  for (const id of ids) runtime(id).setDoc(conflictDoc());
+  await runtime.flush();
+  assert.equal(saving, 2);
+  for (const id of ids) assert.equal((await store.getConsensus(id))?.doc.conflicts[0].id, "c1");
+});

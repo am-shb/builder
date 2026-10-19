@@ -206,3 +206,26 @@ test("R4: a store query that takes longer than its deadline fails with STORE_TIM
     await db.close();
   }
 });
+
+test("R3: close waits for the writes already asked for, so a shutdown doesn't lose them", async () => {
+  const path = tmpDir();
+  const id = "77777777-7777-7777-7777-777777777777";
+  const first = await testStore({ path });
+  await first.createIntent(id, "https://meet.google.com/x");
+  const doc = emptyDoc();
+  const proto = emptyPrototype(UNTITLED_APP);
+  // Not awaited, as a write still in flight when SIGTERM arrives.
+  const writes = [
+    first.addEvent({ sessionId: id, recallMsgId: "m1", kind: "utterance", speaker: "Ada", text: "hi" }),
+    first.saveConsensus(id, doc, proto),
+    first.addModelCall({ sessionId: id, loop: "build", model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, usd: 0.25, ms: 1 }),
+  ];
+  await first.close();
+  await Promise.all(writes);
+
+  const second = await testStore({ path });
+  assert.equal((await second.listEvents(id)).length, 1);
+  assert.deepEqual(await second.getConsensus(id), { doc, proto });
+  assert.equal(await second.sessionCost(id), 0.25);
+  await second.close();
+});

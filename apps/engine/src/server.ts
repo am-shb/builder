@@ -16,6 +16,8 @@ import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tt
 import { createSpeech } from "./voice/speech.ts";
 import { signForTest } from "./verify.ts";
 
+const SHUTDOWN_GRACE_MS = 25_000;
+
 // The settings errors name the variable that is wrong, never its value, so they are shown as they are.
 function loadSettings() {
   try {
@@ -80,14 +82,23 @@ async function main() {
   const app = await createApp({ config, recall, store, runtime, log, agent });
   server.on("request", app.handler);
 
-  setInterval(() => void app.pollOnce(), 4000).unref();
-  if (agent) setInterval(() => app.tickAgent(), 1000).unref();
-  // Shut the database down cleanly on Ctrl-C or a platform stop, so an in-process SurrealKV folder is left whole.
-  // A pending write gets a few seconds; after that the process exits anyway.
+  const poll = setInterval(() => void app.pollOnce(), 4000).unref();
+  const tick = agent ? setInterval(() => app.tickAgent(), 1000).unref() : undefined;
+  // On Ctrl-C or a platform stop (every deploy sends SIGTERM): take no new requests, finish the events already
+  // answered and the saves they led to, then close the store once its queries in flight are done (known issue R3).
+  // That also leaves an in-process SurrealKV folder whole. Each query has its own deadline (R4); past
+  // SHUTDOWN_GRACE_MS the process exits anyway, inside the 30 s Render waits before it kills the process.
   const shutdown = () => {
-    setTimeout(() => process.exit(0), 5000).unref();
+    setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
+    clearInterval(poll);
+    clearInterval(tick);
     server.close();
-    store.close().catch((err) => log("store.close_failed", { error: errorCode(err) })).finally(() => process.exit(0));
+    log("process.shutdown");
+    app.drain()
+      .catch((err) => log("app.drain_failed", { error: errorCode(err) }))
+      .then(() => store.close())
+      .catch((err) => log("store.close_failed", { error: errorCode(err) }))
+      .finally(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

@@ -138,6 +138,14 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
   // Finding an unfinished session for a meeting and writing a new intent happen together, so two requests
   // for the same meeting at once can't both send a bot. In this process; the engine runs as one instance.
   const perMeeting = createSerialQueue();
+  // Work that runs after its request was answered (a Recall event, a line from the local mic), until it settles.
+  // A shutdown waits for it (known issue R3).
+  const background = new Set<Promise<void>>();
+  const inBackground = (task: () => Promise<void>, onError: (err: unknown) => void) => {
+    const p = new Promise<void>((r) => setImmediate(r)).then(task).catch(onError);
+    background.add(p);
+    void p.finally(() => background.delete(p));
+  };
 
   // ---- live fan-out to browsers (SSE) ----
   const subscribers = new Map<string, Set<http.ServerResponse>>();
@@ -460,9 +468,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       json(res, 200, { ok: true });
       // Runs outside the request: an error here would otherwise take the whole process down,
       // and again on every later event for the session (known issue I6).
-      setImmediate(() => {
-        processRealtime(raw, msgId).catch((err) => log("realtime.process_failed", { error: errorCode(err) }));
-      });
+      inBackground(() => processRealtime(raw, msgId), (err) => log("realtime.process_failed", { error: errorCode(err) }));
       return;
     }
 
@@ -547,10 +553,8 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
         const { kind, speaker, text } = parsed.data;
         if ((kind === "partial" || kind === "utterance") && !text) return json(res, 400, { error: "text is required" });
         json(res, 200, { ok: true });
-        setImmediate(() => {
-          perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null))
-            .catch((err) => log("local.speech_failed", { error: errorCode(err) }));
-        });
+        inBackground(() => perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null)),
+          (err) => log("local.speech_failed", { error: errorCode(err) }));
         return;
       }
 
@@ -604,6 +608,13 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       });
     },
     pollOnce,
+    // For a shutdown (known issue R3): resolves once the events already answered are handled and every change to
+    // a session's prototype and doc so far is saved. Stop the server first, so no new events arrive. Model calls in
+    // flight aren't waited for; what they return is lost, as on any restart (M2).
+    async drain(): Promise<void> {
+      while (background.size) await Promise.allSettled([...background]);
+      await runtime.flush?.();
+    },
     // Stuck detection; server.ts calls it about once a second.
     tickAgent: () => conversation?.poll(clock()),
   };

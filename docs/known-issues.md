@@ -149,8 +149,11 @@ outside the team gets an api token, or before meetings run on Render often.
   the new instance doesn't know the old one's sessions. During Render's overlap, both instances also resume active
   sessions from the database, with no fence to stop the old one. Until this is fixed, merge engine changes outside
   meetings, or pause auto-deploy on `builder-engine` first (runbook).
-- **R3. Shutdown doesn't wait for pending writes.** On SIGTERM, every deploy, the store closes without waiting
-  for in-flight Recall events and consensus writes, so the last few can be lost.
+- **R3. Shutdown didn't wait for pending writes.** *Fixed 2026-10-18.* On SIGTERM the engine stops taking requests
+  and timers, then `app.drain()` waits for the Recall events already answered and for every session's consensus
+  saves (`runtime.flush`). `store.close()` then waits for the queries still in flight before it closes. Past 25 s
+  the process exits anyway, inside Render's 30 s. Not waited for: model calls in flight, whose results are lost as
+  on any restart (M2).
 - **R4. Store queries had no timeout.** *Fixed 2026-10-18.* Every store query has a 5 s deadline
   (`QUERY_TIMEOUT_MS` in `apps/engine/src/db/connect.ts`) over the wait for a reconnect, the conflict retries and the
   answer, and fails with `STORE_TIMEOUT` after it. A hung connection to SurrealDB Cloud now fails that event's

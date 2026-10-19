@@ -114,9 +114,17 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
   const newToken = () => randomBytes(24).toString("base64url");
   let closing: Promise<void> | undefined;
 
+  // Queries sent and not yet answered, which close() waits for (known issue R3).
+  const inFlight = new Set<Promise<unknown>>();
+
   // One statement, sent again when it hits a transaction conflict, within the query deadline. Results are per
   // statement.
-  const run = <R extends unknown[]>(sql: string, vars?: Record<string, unknown>) => query<R>(db, sql, vars, QUERY_TIMEOUT_MS);
+  const run = <R extends unknown[]>(sql: string, vars?: Record<string, unknown>) => {
+    const p = query<R>(db, sql, vars, QUERY_TIMEOUT_MS);
+    inFlight.add(p);
+    p.then(() => inFlight.delete(p), () => inFlight.delete(p));
+    return p;
+  };
 
   async function getSession(id: string): Promise<Session | undefined> {
     const [[row]] = await run<[SessionRow[]]>("SELECT * FROM $id", { id: sessionRef(id) });
@@ -246,9 +254,13 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
       return total;
     },
     // Ends the connection (in-process: shuts the database down and releases its folder). A process that opened
-    // a store must close it to exit cleanly. Safe to call more than once.
+    // a store must close it to exit cleanly. Queries already sent finish first, each within its deadline, so a
+    // shutdown keeps the last writes (known issue R3). Safe to call more than once.
     close(): Promise<void> {
-      closing ??= db.close().then(() => {});
+      closing ??= (async () => {
+        while (inFlight.size) await Promise.allSettled([...inFlight]);
+        await db.close();
+      })();
       return closing;
     },
   };
