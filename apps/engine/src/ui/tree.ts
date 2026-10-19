@@ -181,12 +181,11 @@ export function applyBatch(input: Prototype, batchInput: PatchBatch): ApplyResul
           if (op.to === "agreed") {
             if (slot.status !== "draft") continue;
             slot.status = "agreed";
-            slot.previous = slot.value;
           } else {
             slot.value = slot.previous;
             slot.status = "agreed";
+            delete slot.decisionId;
           }
-          delete slot.decisionId;
           changed = true;
         }
         if (changed) note("theme", proto.root.id);

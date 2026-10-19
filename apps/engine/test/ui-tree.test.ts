@@ -174,7 +174,7 @@ describe("theme", () => {
   test("theme_status agreed then a second proposal keeps the agreed one as previous", () => {
     let p = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
-    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", previous: "gold" });
+    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
     p = apply(p, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d2" }]).proto;
     assert.deepEqual(p.theme!.accent, { value: "green", status: "draft", decisionId: "d2", previous: "gold" });
   });
@@ -193,8 +193,17 @@ describe("theme", () => {
     p = apply(p, [{ op: "theme_status", decisionId: "d3", to: "agreed" }]).proto;
     p = apply(p, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d4" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d4", to: "revert" }]).proto;
-    assert.deepEqual(p.theme!.radius, { value: "round", status: "agreed", previous: "round" });
+    assert.deepEqual(p.theme!.radius, { value: "round", status: "agreed", decisionId: "d3", previous: "soft" });
     assert.deepEqual(p.theme!.accent, { value: "slate", status: "agreed", previous: "slate" });
+  });
+
+  test("agreeing keeps previous so reverting an agreed decision restores the theme before it", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { accent: "blue" }, decisionId: "d0" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d0", to: "agreed" }]).proto;
+    p = apply(p, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "revert" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "blue", status: "agreed", previous: "blue" });
   });
 
   test("a theme_status that matches nothing is valid and records no change", () => {
