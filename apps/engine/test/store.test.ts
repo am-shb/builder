@@ -229,3 +229,17 @@ test("R3: close waits for the writes already asked for, so a shutdown doesn't lo
   assert.equal(await second.sessionCost(id), 0.25);
   await second.close();
 });
+
+test("R1: markEnding keeps the first reason only, and the schema refuses any other reason", async () => {
+  const store = await testStore();
+  const id = "88888888-8888-8888-8888-888888888888";
+  assert.equal((await store.createIntent(id, "https://meet.google.com/x")).end_reason, null);
+  const [a, b] = await Promise.all([store.markEnding(id, "max_minutes"), store.markEnding(id, "max_usd")]);
+  assert.equal([a, b].filter(Boolean).length, 1, "one of two racing calls sets it");
+  const kept = (await store.getSession(id))?.end_reason;
+  assert.equal(kept, a ? "max_minutes" : "max_usd");
+  assert.equal(await store.markEnding(id, "max_minutes"), false);
+  const other = "99999999-9999-9999-9999-999999999999";
+  await store.createIntent(other, "https://meet.google.com/y");
+  await assert.rejects(store.markEnding(other, "bogus" as "max_usd"));
+});

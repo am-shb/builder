@@ -137,14 +137,19 @@ Everything below has tests, and `npm run check` passes. The visual items were ch
 
 From the reviews of the SurrealDB port and the Render setup (ADR 0011, ADR 0005). Production runs on Render with
 SurrealDB Cloud, and the first real meeting worked end to end. These are what's left. R1 to R4 come before anyone
-outside the team gets an api token, or before meetings run on Render often.
+outside the team gets an api token, or before meetings run on Render often; R1, R3 and R4 were fixed on 2026-10-18,
+so R2 is the one left of those.
 
 ### Before other people start sessions
 
-- **R1. Spend limits aren't enforced.** The api sends `limits: { maxUsd, maxMinutes }` and the engine stores them
-  with the session (`createIntent` in `apps/engine/src/store.ts`), but nothing ends a session when it reaches either
-  one. A bot runs, and costs Recall and model money, until the call ends or someone removes it. ADR 0008 says the
-  engine enforces them and ends the session with a clear message.
+- **R1. Spend limits weren't enforced.** *Fixed 2026-10-18.* Every lifecycle poll checks each session the api
+  started (`enforceLimits` in `apps/engine/src/app.ts`). At `maxMinutes` of bot time, counted from Recall's first
+  in-call status, or `maxUsd` of model spend, the agent stops, Builder says why in chat and the bot leaves. A leave
+  that fails is tried again 30 s later. `end_reason` (`db/0003`) keeps the reason, so a restart doesn't resume the
+  session or repeat the message.
+  - Still open: a model call in flight finishes, so the spend can end a little over. TTS isn't in `maxUsd`, because
+    the engine doesn't price it yet. The api isn't told why a session ended until the engine sends `session.status`
+    events.
 - **R2. A deploy ends live meetings, and two engines can run the same meeting.** Session state lives in memory, so
   the new instance doesn't know the old one's sessions. During Render's overlap, both instances also resume active
   sessions from the database, with no fence to stop the old one. Until this is fixed, merge engine changes outside
