@@ -79,7 +79,8 @@ Every cost is recorded per session, in USD:
   when it played, was cut off or timed out. It doesn't count when the provider refused it with an error status.
 - **Recall:** when the bot ends, its time from `joining_call` (waiting room included, nothing for `fatal`) at the
   variant's rate, and the recording's length at the transcription rate, in `service_costs`. The rates are Recall's
-  pay-as-you-go prices. Storage of recordings kept past 7 days isn't counted.
+  pay-as-you-go prices. Storage of recordings kept past 7 days isn't counted. Local mode has no Recall bot, so
+  nothing.
 
 `GET /api/sessions/<id>` returns `cost_usd` (the total) and `costs` (`model`, `tts`, `recall`, `total`). When the bot
 ends, the log line `session.cost` carries the same numbers.
