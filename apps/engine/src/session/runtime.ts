@@ -31,7 +31,11 @@ export type SessionRuntime = ReturnType<typeof makeRuntime>;
  * say) and must come first wherever a session can be met for the first time: an event, the stage, a resume.
  * Calling the lookup itself for a session not loaded yet starts it empty, as for a brand-new session.
  */
-export type RuntimeLookup = ((sessionId: string) => SessionRuntime) & { load?: (sessionId: string) => Promise<SessionRuntime> };
+export type RuntimeLookup = ((sessionId: string) => SessionRuntime) & {
+  load?: (sessionId: string) => Promise<SessionRuntime>;
+  // Resolves once every session's changes so far are saved (or their failures logged). A shutdown waits for it.
+  flush?: () => Promise<void>;
+};
 
 
 /**
@@ -108,6 +112,9 @@ export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveC
       loading.set(sessionId, pending);
     }
     return pending;
+  };
+  lookup.flush = async (): Promise<void> => {
+    await Promise.all([...runtimes.values()].map((rt) => rt.saved()));
   };
   return lookup;
 }

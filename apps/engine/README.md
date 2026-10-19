@@ -60,7 +60,15 @@ for an org. It takes and answers the `StartSessionRequest` and `StartSessionResp
     `recall_rejected` (422).
   - 504 `recall_outcome_unknown` means a bot may exist.
 
-The session's org and limits are stored, from `db/0002_session_org_limits.surql`. Enforcing the limits comes later.
+The session's org and limits are stored, from `db/0002_session_org_limits.surql`, and enforced on every lifecycle
+poll (every 4 s):
+- **`maxMinutes`** counts bot time from the first status Recall gives for the bot being in the call, so time in the
+  waiting room doesn't count (ADR 0009).
+- **`maxUsd`** is the session's model spend, the sum in `model_calls` (the operator page's `cost_usd`).
+- **At either one**, the agent stops, Builder says in chat that it's reached the meeting's time or spending limit,
+  and the bot leaves. The reason is saved in `end_reason` (`db/0003_session_end_reason.surql`), so after a restart
+  the engine only asks the bot to leave again. A model call already in flight still finishes, so the spend can end
+  a little over `maxUsd`.
 The operator routes (`/`, `/api/*`, local mode) work as before, and their sessions have no org.
 
 ## Known issues
@@ -80,4 +88,5 @@ ruling, a move of an agreed node, and the live checks.
 - [x] Fix I2 and I3 together (agreement correctness)
 - [x] Move `src/`, `public/`, `test/` and `scripts/` here
 - [x] Accept `orgId` and `limits` on `POST /internal/sessions` (ADR 0008)
-- [ ] Stop at the limits, and send events to the api (ADR 0008)
+- [x] Stop at the limits (ADR 0008, known issue R1)
+- [ ] Send events to the api (ADR 0008), with `end_reason` as the `session.status` error code

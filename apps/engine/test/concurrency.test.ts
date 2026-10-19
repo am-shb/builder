@@ -126,3 +126,25 @@ test("events for a session are stored in the order they arrived, even when the f
   const events = await ctx.store.listEvents(session.id);
   assert.deepEqual(events.map((e) => e.text), ["first", "second"], "ids follow arrival order");
 });
+
+test("R3: drain waits for realtime events that were answered but not yet stored", async () => {
+  let slow = false;
+  const ctx = await start(
+    async () => Response.json({ id: "bot-4" }, { status: 201 }),
+    (store) => ({
+      ...store,
+      async getSession(id: string) {
+        if (slow) await sleep(40);
+        return store.getSession(id);
+      },
+    }),
+  );
+  const { session } = (await (await post(`${ctx.base}/api/sessions`, { meeting_url: "https://meet.google.com/dra-inin-gok" })).json()) as { session: { id: string } };
+  slow = true;
+  const first = utterance(session.id, "bot-4", ["first"]);
+  const second = utterance(session.id, "bot-4", ["second"]);
+  assert.equal((await post(`${ctx.base}${REALTIME_PATH}`, first, signForTest(SECRET, first, "d-1"))).status, 200);
+  assert.equal((await post(`${ctx.base}${REALTIME_PATH}`, second, signForTest(SECRET, second, "d-2"))).status, 200);
+  await ctx.app.drain();
+  assert.deepEqual((await ctx.store.listEvents(session.id)).map((e) => e.text), ["first", "second"]);
+});

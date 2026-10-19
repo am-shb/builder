@@ -5,9 +5,9 @@ import http from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Config } from "./config.ts";
-import type { RecallClient } from "./recall-client.ts";
+import type { RecallBot, RecallClient } from "./recall-client.ts";
 import { RecallApiError } from "./recall-client.ts";
-import type { Store, Session } from "./store.ts";
+import type { EndReason, Store, Session } from "./store.ts";
 import { isTerminal } from "./store.ts";
 import { verifyRequestFromRecall } from "./verify.ts";
 import { parseRealtimeEvent } from "./realtime.ts";
@@ -36,6 +36,24 @@ const MAX_BODY = 1_000_000;
 const MEETING_HOSTS = /^(meet\.google\.com|([a-z0-9-]+\.)?zoom\.us|teams\.microsoft\.com|teams\.live\.com)$/i;
 
 const MAX_STAGE_HTML = 200_000;
+
+// Spend limits (known issue R1, ADR 0008). What Builder says in chat before it leaves, and how long to wait before
+// asking Recall again when a leave didn't go through.
+const LIMIT_LINES: Record<EndReason, string> = {
+  max_minutes: "This meeting has reached its time limit, so I'm leaving now. What we built so far is saved.",
+  max_usd: "This meeting has reached its spending limit, so I'm leaving now. What we built so far is saved.",
+};
+const LEAVE_RETRY_MS = 30_000;
+
+// Bot minutes so far, counted from the first status Recall gave for the bot being in the call, so time in the
+// waiting room doesn't count (ADR 0009). Recall's own timestamp, so a restart doesn't reset it. A timestamp that
+// doesn't parse counts from when the session was created, which errs towards leaving early.
+function botMinutes(s: Session, bot: RecallBot, now: number): number {
+  const joined = bot.status_changes?.find((c) => c.code.startsWith("in_call"));
+  if (!joined) return 0;
+  const at = Date.parse(joined.created_at);
+  return Math.max(0, now - (Number.isFinite(at) ? at : Date.parse(s.created_at))) / 60_000;
+}
 
 // What the /local page sends from the operator's mic, in place of Recall's transcript (local mode only).
 const LocalSpeech = z.object({
@@ -97,7 +115,8 @@ export const tokenMatches = (given: string | null, expected: string | null) => {
 export type AgentDeps = { port: ModelPort; speech?: Speech; clock?: () => number; timers?: Timers };
 
 // Async because a restart reloads the calls still going from the database before any request is served.
-export async function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: RuntimeLookup; agent?: AgentDeps }) {
+// `clock`, for the spend limits, defaults to the agent's clock and then to real time.
+export async function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: RuntimeLookup; agent?: AgentDeps; clock?: () => number }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -108,7 +127,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
   // outside (an event, the stage, a restart) loads it first; the loops then use runtime(id) as before.
   const loadRuntime = (sessionId: string): Promise<SessionRuntime> =>
     runtime.load ? runtime.load(sessionId) : Promise.resolve().then(() => runtime(sessionId));
-  const clock = deps.agent?.clock ?? Date.now;
+  const clock = deps.clock ?? deps.agent?.clock ?? Date.now;
   const buildLoop = deps.agent
     ? createBuildLoop({ port: deps.agent.port, runtime, store, clock, botName: BOT_NAME, log, ...(deps.agent.timers ? { timers: deps.agent.timers } : {}) })
     : null;
@@ -117,10 +136,20 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     uiCommand: createUiCommandRunner({ runtime, clock }),
     speech: deps.agent.speech ?? createChatSpeech({ recall, runtime, store, botName: BOT_NAME }),
   }) : null;
+  // Sessions this process has stopped the agent for because they reached a limit (R1). The bot may still be
+  // leaving; `lastLeave` is when this process last asked Recall for that.
+  const ending = new Set<string>();
+  const lastLeave = new Map<string, number>();
   // After a restart, pick up the calls still going (known issue M2): the conversation loop reloads
-  // its transcript window, and the build loop restarts the no-objection timer.
+  // its transcript window, and the build loop restarts the no-objection timer. A call already ending at a
+  // limit isn't picked up: the next poll asks the bot to leave again.
   for (const s of buildLoop ? await store.listActiveSessions() : []) {
     await loadRuntime(s.id);
+    if (s.end_reason) {
+      ending.add(s.id);
+      endSession(s.id, s.end_reason);
+      continue;
+    }
     if (s.bot_status === "in_call_recording") await conversation?.resume(s.id);
     buildLoop?.resume(s.id);
   }
@@ -138,6 +167,14 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
   // Finding an unfinished session for a meeting and writing a new intent happen together, so two requests
   // for the same meeting at once can't both send a bot. In this process; the engine runs as one instance.
   const perMeeting = createSerialQueue();
+  // Work that runs after its request was answered (a Recall event, a line from the local mic), until it settles.
+  // A shutdown waits for it (known issue R3).
+  const background = new Set<Promise<void>>();
+  const inBackground = (task: () => Promise<void>, onError: (err: unknown) => void) => {
+    const p = new Promise<void>((r) => setImmediate(r)).then(task).catch(onError);
+    background.add(p);
+    void p.finally(() => background.delete(p));
+  };
 
   // ---- live fan-out to browsers (SSE) ----
   const subscribers = new Map<string, Set<http.ServerResponse>>();
@@ -276,25 +313,76 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       return;
     }
     for (const s of active) {
-      let last;
+      let bot: RecallBot;
       try {
-        const bot = await recall.getBot(s.bot_id!);
-        last = bot.status_changes?.at(-1);
+        bot = await recall.getBot(s.bot_id!);
       } catch (err) {
         log("bot.poll_failed", { session_id: s.id, error: err instanceof RecallApiError ? err.status : "network" });
         continue;
       }
-      if (!last || (last.code === s.bot_status && last.sub_code === s.bot_sub_code)) continue;
-      try {
-        await store.updateBotStatus(s.id, last.code, last.sub_code);
-      } catch (err) {
-        log("bot.status_save_failed", { session_id: s.id, error: errorCode(err) });
-        continue;
+      const last = bot.status_changes?.at(-1);
+      let status = s.bot_status;
+      if (last && (last.code !== s.bot_status || last.sub_code !== s.bot_sub_code)) {
+        try {
+          await store.updateBotStatus(s.id, last.code, last.sub_code);
+        } catch (err) {
+          log("bot.status_save_failed", { session_id: s.id, error: errorCode(err) });
+          continue;
+        }
+        status = last.code;
+        log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
+        publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
+        if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
+        if (isTerminal(last.code)) {
+          lastLeave.delete(s.id);
+          endSession(s.id, last.code);
+        }
       }
-      log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
-      publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
-      if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
-      if (isTerminal(last.code)) endSession(s.id, last.code);
+      if (s.org_id && !isTerminal(status)) await enforceLimits(s, bot);
+    }
+  }
+
+  // Known issue R1 (ADR 0008): a session the api started ends when it reaches `max_minutes` of bot time or
+  // `max_usd` of model spend, checked on every poll. The first time, the agent stops, Builder says why in chat
+  // and the bot is asked to leave; the reason is saved, so after a restart it only asks to leave again. A model
+  // call already in flight still finishes, so the spend can end up a little over. Never rejects.
+  async function enforceLimits(s: Session, bot: RecallBot) {
+    try {
+      const now = clock();
+      let reason = s.end_reason;
+      let announce = false;
+      if (!reason) {
+        const minutes = botMinutes(s, bot, now);
+        const usd = s.max_usd === null ? 0 : await store.sessionCost(s.id);
+        reason = s.max_minutes !== null && minutes >= s.max_minutes ? "max_minutes"
+          : s.max_usd !== null && usd >= s.max_usd ? "max_usd" : null;
+        if (!reason) return;
+        announce = await store.markEnding(s.id, reason);
+        if (announce) log("session.limit_reached", { session_id: s.id, limit: reason, minutes: Math.floor(minutes), usd: Math.round(usd * 100) / 100 });
+      }
+      if (!ending.has(s.id)) {
+        ending.add(s.id);
+        endSession(s.id, reason);
+      }
+      if (announce) {
+        try {
+          await recall.sendChatMessage(s.bot_id!, LIMIT_LINES[reason]);
+          await store.addEvent({ sessionId: s.id, recallMsgId: null, kind: "bot_chat", speaker: BOT_NAME, text: LIMIT_LINES[reason] });
+        } catch (err) {
+          log("session.limit_message_failed", { session_id: s.id, error: err instanceof RecallApiError ? err.status : errorCode(err) });
+        }
+      }
+      const asked = lastLeave.get(s.id);
+      if (asked !== undefined && now - asked < LEAVE_RETRY_MS) return;
+      lastLeave.set(s.id, now);
+      try {
+        await recall.leaveCall(s.bot_id!);
+        log("session.leaving", { session_id: s.id, limit: reason });
+      } catch (err) {
+        log("session.leave_failed", { session_id: s.id, status: err instanceof RecallApiError ? err.status : "network" });
+      }
+    } catch (err) {
+      log("session.limit_check_failed", { session_id: s.id, error: errorCode(err) });
     }
   }
 
@@ -460,9 +548,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       json(res, 200, { ok: true });
       // Runs outside the request: an error here would otherwise take the whole process down,
       // and again on every later event for the session (known issue I6).
-      setImmediate(() => {
-        processRealtime(raw, msgId).catch((err) => log("realtime.process_failed", { error: errorCode(err) }));
-      });
+      inBackground(() => processRealtime(raw, msgId), (err) => log("realtime.process_failed", { error: errorCode(err) }));
       return;
     }
 
@@ -547,10 +633,8 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
         const { kind, speaker, text } = parsed.data;
         if ((kind === "partial" || kind === "utterance") && !text) return json(res, 400, { error: "text is required" });
         json(res, 200, { ok: true });
-        setImmediate(() => {
-          perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null))
-            .catch((err) => log("local.speech_failed", { error: errorCode(err) }));
-        });
+        inBackground(() => perSession(session.id, () => handleEvent(session, { kind, botId: session.bot_id, sessionId: session.id, speaker, text: text || null }, null)),
+          (err) => log("local.speech_failed", { error: errorCode(err) }));
         return;
       }
 
@@ -604,6 +688,13 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       });
     },
     pollOnce,
+    // For a shutdown (known issue R3): resolves once the events already answered are handled and every change to
+    // a session's prototype and doc so far is saved. Stop the server first, so no new events arrive. Model calls in
+    // flight aren't waited for; what they return is lost, as on any restart (M2).
+    async drain(): Promise<void> {
+      while (background.size) await Promise.allSettled([...background]);
+      await runtime.flush?.();
+    },
     // Stuck detection; server.ts calls it about once a second.
     tickAgent: () => conversation?.poll(clock()),
   };
