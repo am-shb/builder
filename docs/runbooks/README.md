@@ -39,7 +39,9 @@ Live tests cost money (Recall bot minutes, models, TTS). Run one only when the m
    for that session and makes no more model calls (I5).
 3. If that doesn't stop it, stop the process. To keep transcripts flowing with no model spend, restart without
    `OPENROUTER_API_KEY` (listen-only).
-4. Nothing caps spend automatically yet. The api will enforce limits per session and per org ([ADR 0008](../adr/0008-api-engine-boundary.md)).
+4. Sessions the api starts stop on their own at their `maxMinutes` or `maxUsd` (`session.limit_reached` in the
+   logs, then `session.leaving`). Sessions started from the operator routes have no limits. Per-org caps are the
+   api's ([ADR 0008](../adr/0008-api-engine-boundary.md)).
 
 ## Rotating secrets
 

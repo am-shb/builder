@@ -37,5 +37,5 @@ Production has run on Render since 2026-10-18, with SurrealDB Cloud, and CD from
 [runbook](runbooks/README.md)). People start sessions through the api with a Clerk token, and the engine's operator
 surface is off behind Render's proxy. That settles the earlier blockers on login, a stable public URL and storage.
 
-What's left before other people use it is R1 to R7 in [known-issues.md](known-issues.md#open-since-the-first-production-deploy-2026-10-18).
+What's left before other people use it is R2 and R5 to R7 in [known-issues.md](known-issues.md#open-since-the-first-production-deploy-2026-10-18).
 The most urgent are R1, nothing caps spend yet, and R2, a deploy ends live meetings.

@@ -34,9 +34,13 @@ export type Session = {
   org_id: string | null;
   max_usd: number | null;
   max_minutes: number | null;
+  // Set when the engine decided to end the session itself, at one of its limits (db/0003, known issue R1).
+  end_reason: EndReason | null;
   created_at: string;
   updated_at: string;
 };
+
+export type EndReason = "max_minutes" | "max_usd";
 
 export type StoredEvent = {
   id: number;
@@ -71,7 +75,7 @@ type Opt<T> = T | undefined;
 type SessionRow = {
   id: RecordId<"sessions", string>; meeting_url: string; state: Session["state"]; bot_id: Opt<string>; bot_status: Opt<string>;
   bot_sub_code: Opt<string>; error: Opt<string>; stage_token: Opt<string>; handoff_token: Opt<string>; stage_html: Opt<string>;
-  org_id: Opt<string>; max_usd: Opt<number>; max_minutes: Opt<number>;
+  org_id: Opt<string>; max_usd: Opt<number>; max_minutes: Opt<number>; end_reason: Opt<EndReason>;
   created_at: DateTime; updated_at: DateTime;
 };
 type EventRow = {
@@ -88,7 +92,7 @@ const toSession = (r: SessionRow): Session => ({
   id: r.id.id, meeting_url: r.meeting_url, state: r.state, bot_id: r.bot_id ?? null, bot_status: r.bot_status ?? null,
   bot_sub_code: r.bot_sub_code ?? null, error: r.error ?? null, stage_token: r.stage_token ?? null,
   handoff_token: r.handoff_token ?? null, stage_html: r.stage_html ?? null,
-  org_id: r.org_id ?? null, max_usd: r.max_usd ?? null, max_minutes: r.max_minutes ?? null,
+  org_id: r.org_id ?? null, max_usd: r.max_usd ?? null, max_minutes: r.max_minutes ?? null, end_reason: r.end_reason ?? null,
   created_at: iso(r.created_at), updated_at: iso(r.updated_at),
 });
 const toEvent = (r: EventRow): StoredEvent => ({
@@ -173,6 +177,13 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
     async updateBotStatus(id: string, status: string, subCode: string | null): Promise<void> {
       await run("UPDATE $id SET bot_status = $status, bot_sub_code = $sub, updated_at = $now RETURN NONE",
         { id: sessionRef(id), status, sub: none(subCode), now: now() });
+    },
+    // Records why the engine is ending the session. Only the first reason is kept, so two callers racing agree
+    // on one; returns true for the call that set it.
+    async markEnding(id: string, reason: EndReason): Promise<boolean> {
+      const [[set]] = await run<[EndReason[]]>("UPDATE $id SET end_reason = $reason, updated_at = $now WHERE end_reason = NONE RETURN VALUE end_reason",
+        { id: sessionRef(id), reason, now: now() });
+      return set === reason;
     },
     // Sessions created without a stage token get one on first use.
     ensureStageToken: (id: string): Promise<string> => ensureToken(id, "stage_token"),
