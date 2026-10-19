@@ -1,6 +1,7 @@
 import { MAX_DEPTH, MAX_NODES, PatchBatch, Prototype } from "./schema.ts";
 import type { Change, PatchOp, Theme, ThemeSlotName, ToolPatchBatch, ToolProp, UiNode } from "./schema.ts";
 import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
+import { normalizeProps } from "../../public/renderer/catalog.js";
 
 export type ApplyResult =
   | { ok: true; proto: Prototype; changes: Change[] }
@@ -201,26 +202,62 @@ export function applyBatch(input: Prototype, batchInput: PatchBatch): ApplyResul
 
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-function propsToRecord(props: ToolProp[]): UiNode["props"] {
-  const out: UiNode["props"] = {};
+function propsToRecord(props: ToolProp[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const { key, value } of props) if (!UNSAFE_KEYS.has(key)) out[key] = value;
   return out;
 }
 
-/** Pure conversion from the model-facing batch (props as pairs, childless nodes) to the internal PatchBatch. */
-export function fromToolBatch(t: ToolPatchBatch): PatchBatch {
+/**
+ * Pure conversion from the model-facing batch to the internal PatchBatch. Props become a record,
+ * checked against the catalog: unknown keys, wrong kinds and values outside an enum are dropped
+ * and counted in `dropped` (unsafe keys too). An update is checked against the type of the node it
+ * names: added earlier in this batch, else in `proto`; a node of unknown type takes no props.
+ * Added nodes are drafts. Adds, updates and set_theme take the op's or node's own decisionId, else
+ * the batch's, else `defaults.decisionId`. drop_theme becomes a theme_status revert.
+ */
+export function fromToolBatch(
+  t: ToolPatchBatch, defaults: { decisionId?: string } = {}, proto?: Prototype,
+): { batch: PatchBatch; dropped: number } {
+  const batchDecision = t.decisionId ?? defaults.decisionId;
+  const withDecision = (own: string | undefined) => {
+    const id = own ?? batchDecision;
+    return id === undefined ? {} : { decisionId: id };
+  };
+  const added = new Map<string, string>();
+  let dropped = 0;
+  const normalize = (type: string | undefined, props: ToolProp[]): UiNode["props"] => {
+    const record = propsToRecord(props);
+    dropped += props.length - Object.keys(record).length;
+    const out = normalizeProps(type ?? "", record);
+    dropped += out.dropped.length;
+    return out.props;
+  };
   const ops = t.ops.map((op): PatchOp => {
-    if (op.op === "add") {
-      const { props, ...rest } = op.node;
-      return { ...op, node: { ...rest, props: propsToRecord(props), children: [] } };
+    switch (op.op) {
+      case "add": {
+        const { props, decisionId, ...rest } = op.node;
+        added.set(op.node.id, op.node.type);
+        const node: UiNode = { ...rest, props: normalize(op.node.type, props), status: "draft", ...withDecision(decisionId), children: [] };
+        return { ...op, node };
+      }
+      case "update": {
+        const { props, decisionId, ...rest } = op;
+        const type = added.get(op.id) ?? (proto ? findNode(proto, op.id)?.type : undefined);
+        return { ...rest, ...(props ? { props: normalize(type, props) } : {}), ...withDecision(decisionId) };
+      }
+      case "set_theme": {
+        const values: Partial<Record<ThemeSlotName, string>> = {};
+        for (const slot of THEME_SLOTS as ThemeSlotName[]) if (op[slot] !== undefined) values[slot] = op[slot];
+        return { op: "set_theme", values, ...withDecision(undefined) };
+      }
+      case "drop_theme":
+        return { op: "theme_status", decisionId: op.decisionId, to: "revert" };
+      default:
+        return op;
     }
-    if (op.op === "update") {
-      const { props, ...rest } = op;
-      return props ? { ...rest, props: propsToRecord(props) } : rest;
-    }
-    return op;
   });
-  const out: PatchBatch = { ops, label: t.label };
-  if (t.by !== undefined) out.by = t.by;
-  return out;
+  const batch: PatchBatch = { ops, label: t.label };
+  if (t.by !== undefined) batch.by = t.by;
+  return { batch, dropped };
 }

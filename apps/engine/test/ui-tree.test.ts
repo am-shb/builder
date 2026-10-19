@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { emptyPrototype, applyBatch, findNode, fromToolBatch, themeStatusOp, withAgreedTheme } from "../src/ui/tree.ts";
-import { Prototype, patchBatchJsonSchema } from "../src/ui/schema.ts";
+import { Prototype, patchBatchJsonSchema, ToolPatchBatch } from "../src/ui/schema.ts";
 import type { UiNode, PatchOp } from "../src/ui/schema.ts";
 
 const leaf = (id: string, type: UiNode["type"] = "Text", children: UiNode[] = []): UiNode =>
@@ -73,15 +73,15 @@ test("rejects duplicate ids, Screen outside App, unknown type, depth > 12, > 400
   bad([{ op: "move", id: "home", parentId: "home", index: 0 }]);
 
   // depth: app(1) > home(2) > d0..d9 (10 more) = 12 levels is fine; 13 is not
-  let deep = leaf("d9", "Stack");
-  for (let i = 8; i >= 0; i--) deep = leaf(`d${i}`, "Stack", [deep]);
+  let deep = leaf("d9", "Section");
+  for (let i = 8; i >= 0; i--) deep = leaf(`d${i}`, "Section", [deep]);
   assert.ok(applyBatch(p, batch([{ op: "add", parentId: "home", node: deep }])).ok);
-  bad([{ op: "add", parentId: "home", node: leaf("top", "Stack", [deep]) }]);
+  bad([{ op: "add", parentId: "home", node: leaf("top", "Section", [deep]) }]);
 
   // node count: app + home = 2; wrapper + 397 leaves = 400 total is fine, one more is not
   const kids = (n: number) => Array.from({ length: n }, (_, i) => leaf(`n${i}`));
-  assert.ok(applyBatch(p, batch([{ op: "add", parentId: "home", node: leaf("w", "Stack", kids(397)) }])).ok);
-  bad([{ op: "add", parentId: "home", node: leaf("w", "Stack", kids(398)) }]);
+  assert.ok(applyBatch(p, batch([{ op: "add", parentId: "home", node: leaf("w", "Section", kids(397)) }])).ok);
+  bad([{ op: "add", parentId: "home", node: leaf("w", "Section", kids(398)) }]);
 });
 
 test("set_screen requires an existing Screen id", () => {
@@ -121,30 +121,109 @@ test("patchBatchJsonSchema is strict (additionalProperties false at every object
 });
 
 test("fromToolBatch converts props pairs to a record and the result applies via applyBatch", () => {
-  const batch = fromToolBatch({ label: "Added: form", by: "Amir", ops: [
-    { op: "add", parentId: "app", node: { id: "form", type: "Screen", props: [{ key: "title", value: "Form" }], status: "draft" } },
-    { op: "add", parentId: "form", node: { id: "form.name", type: "Input", props: [{ key: "placeholder", value: "Name" }, { key: "tags", value: ["a", "b"] }], status: "draft" } },
-    { op: "update", id: "form.name", props: [{ key: "required", value: true }] },
+  const { batch } = fromToolBatch({ label: "Added: form", by: "Amir", ops: [
+    { op: "add", parentId: "app", node: { id: "form", type: "Screen", props: [{ key: "title", value: "Form" }] } },
+    { op: "add", parentId: "form", node: { id: "form.size", type: "Select", props: [{ key: "label", value: "Size" }, { key: "options", value: ["S", "M"] }] } },
+    { op: "update", id: "form.size", props: [{ key: "value", value: "M" }] },
   ] });
   const add = batch.ops[1]!;
   assert.ok(add.op === "add");
-  assert.deepEqual(add.node.props, { placeholder: "Name", tags: ["a", "b"] });
+  assert.deepEqual(add.node.props, { label: "Size", options: ["S", "M"] });
   assert.deepEqual(add.node.children, []);
   const r = applyBatch(emptyPrototype("X"), batch);
   assert.ok(r.ok);
-  assert.deepEqual(findNode(r.proto, "form.name")!.props, { placeholder: "Name", tags: ["a", "b"], required: true });
+  assert.deepEqual(findNode(r.proto, "form.size")!.props, { label: "Size", options: ["S", "M"], value: "M" });
 });
 
 test("fromToolBatch drops __proto__/constructor/prototype keys", () => {
-  const batch = fromToolBatch({ label: "x", ops: [
-    { op: "add", parentId: "home", node: { id: "t", type: "Text", status: "draft", props: [
-      { key: "__proto__", value: "x" }, { key: "constructor", value: "x" }, { key: "prototype", value: "x" }, { key: "ok", value: 1 },
+  const { batch, dropped } = fromToolBatch({ label: "x", ops: [
+    { op: "add", parentId: "home", node: { id: "t", type: "Text", props: [
+      { key: "__proto__", value: "x" }, { key: "constructor", value: "x" }, { key: "prototype", value: "x" }, { key: "text", value: "ok" },
     ] } },
   ] });
   const add = batch.ops[0]!;
   assert.ok(add.op === "add");
-  assert.deepEqual(Object.keys(add.node.props), ["ok"]);
+  assert.deepEqual(Object.keys(add.node.props), ["text"]);
+  assert.equal(dropped, 3);
   assert.equal(Object.getPrototypeOf(add.node.props), Object.prototype);
+});
+
+describe("trimmed tool format", () => {
+  test("fromToolBatch fills status and the batch decisionId", () => {
+    const { batch } = fromToolBatch({ label: "x", decisionId: "d7", ops: [
+      { op: "add", parentId: "home", node: { id: "a", type: "Text", props: [{ key: "text", value: "A" }] } },
+      { op: "add", parentId: "home", node: { id: "b", type: "Text", props: [], decisionId: "d8" } },
+      { op: "update", id: "a", props: [{ key: "text", value: "A2" }] },
+      { op: "set_theme", accent: "gold" },
+    ] });
+    const [a, b, upd, theme] = batch.ops;
+    assert.ok(a.op === "add" && b.op === "add");
+    assert.deepEqual([a.node.status, a.node.decisionId], ["draft", "d7"]);
+    assert.deepEqual([b.node.status, b.node.decisionId], ["draft", "d8"], "a node's own decisionId wins");
+    assert.deepEqual(upd, { op: "update", id: "a", props: { text: "A2" }, decisionId: "d7" });
+    assert.deepEqual(theme, { op: "set_theme", values: { accent: "gold" }, decisionId: "d7" });
+    assert.equal("decisionId" in batch, false, "the internal batch has no batch-level decisionId");
+  });
+
+  test("fromToolBatch uses the default decisionId when the batch has none", () => {
+    const { batch } = fromToolBatch({ label: "x", ops: [
+      { op: "add", parentId: "home", node: { id: "a", type: "Text", props: [] } },
+    ] }, { decisionId: "d-c1" });
+    const [a] = batch.ops;
+    assert.ok(a.op === "add");
+    assert.equal(a.node.decisionId, "d-c1");
+    const bare = fromToolBatch({ label: "x", ops: [{ op: "add", parentId: "home", node: { id: "a", type: "Text", props: [] } }] }).batch.ops[0];
+    assert.ok(bare.op === "add");
+    assert.equal("decisionId" in bare.node, false);
+  });
+
+  test("fromToolBatch drops bad props and counts them", () => {
+    const { batch, dropped } = fromToolBatch({ label: "x", ops: [
+      { op: "add", parentId: "home", node: { id: "b", type: "Button", props: [
+        { key: "label", value: "Go" }, { key: "variant", value: "neon" }, { key: "color", value: "#f00" }, { key: "size", value: "lg" },
+      ] } },
+      { op: "add", parentId: "home", node: { id: "c", type: "ChartCard", props: [{ key: "data", value: [1, 2, 3] }, { key: "kind", value: "pie" }] } },
+      { op: "update", id: "b", props: [{ key: "label", value: true }, { key: "icon", value: "wallet" }] },
+      { op: "update", id: "nope", props: [{ key: "label", value: "x" }] },
+    ] });
+    const [b, c, upd, missing] = batch.ops;
+    assert.ok(b.op === "add" && c.op === "add");
+    assert.deepEqual(b.node.props, { label: "Go", size: "lg" });
+    assert.deepEqual(c.node.props, { data: [1, 2, 3] });
+    assert.deepEqual(upd, { op: "update", id: "b", props: { icon: "wallet" } }, "an update is checked against the type it names in the batch");
+    assert.deepEqual(missing, { op: "update", id: "nope", props: {} }, "a node of unknown type takes no props; the op still fails to apply");
+    assert.equal(dropped, 5);
+  });
+
+  test("an update is checked against the current prototype's node type", () => {
+    const proto = emptyPrototype("X");
+    proto.root.children[0].children.push({ id: "t", type: "Toggle", props: { label: "On" }, status: "draft", children: [] });
+    const { batch, dropped } = fromToolBatch({ label: "x", ops: [
+      { op: "update", id: "t", props: [{ key: "on", value: true }, { key: "rows", value: ["a"] }] },
+    ] }, {}, proto);
+    assert.deepEqual(batch.ops[0], { op: "update", id: "t", props: { on: true } });
+    assert.equal(dropped, 1);
+  });
+
+  test("drop_theme becomes a theme_status revert", () => {
+    const { batch } = fromToolBatch({ label: "x", decisionId: "d2", ops: [{ op: "drop_theme", decisionId: "d1" }] });
+    assert.deepEqual(batch.ops, [{ op: "theme_status", decisionId: "d1", to: "revert" }]);
+  });
+
+  test("the tool schema has no status field", () => {
+    assert.equal(JSON.stringify(patchBatchJsonSchema()).includes('"status"'), false);
+  });
+
+  test("an unknown component type is rejected", () => {
+    const parsed = ToolPatchBatch.safeParse({ label: "x", ops: [{ op: "add", parentId: "home", node: { id: "s", type: "Stack", props: [] } }] });
+    assert.equal(parsed.success, false);
+    assert.ok(ToolPatchBatch.safeParse({ label: "x", ops: [{ op: "add", parentId: "home", node: { id: "s", type: "Section", props: [] } }] }).success);
+  });
+
+  test("a tool node with status is rejected", () => {
+    const parsed = ToolPatchBatch.safeParse({ label: "x", ops: [{ op: "add", parentId: "home", node: { id: "s", type: "Text", props: [], status: "agreed" } }] });
+    assert.equal(parsed.success, false);
+  });
 });
 
 describe("theme", () => {

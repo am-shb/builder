@@ -369,10 +369,17 @@ export function createBuildLoop(deps: {
 
   // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
   // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
+  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses).
   function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
     const credit = groundCredit(input, speakers);
     const snap = view(rt);
-    return { batch: sanitizeModelBatch(fromToolBatch(credit.batch), snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped };
+    const { batch, dropped } = fromToolBatch(credit.batch, {}, snap.proto);
+    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped };
+  }
+
+  // Ids and counts only: never the props themselves.
+  function logPropsDropped(sessionId: string, count: number, source?: "conflict") {
+    if (count > 0) log("build.props_dropped", { session_id: sessionId, count, ...(source ? { source } : {}) });
   }
 
   type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number };
@@ -410,15 +417,16 @@ export function createBuildLoop(deps: {
     const grounded = enforceGrounding(ops, speakers);
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
-    const planned = applyConsensusOps(current, grounded.ops, clock()).doc;
+    const planned = applyConsensusOps(current, grounded.ops, clock(), view(rt).proto).doc;
     const reopening = new Set(current.decisions
       .filter((d) => d.status === "agreed" && planned.decisions.find((p) => p.id === d.id)?.status !== "agreed")
       .map((d) => d.id));
 
     // Deferred patches before the ops, so decisions and conflicts can reference the nodes they add.
     for (const input of deferred) {
-      const { batch, creditDropped } = prepareBatch(input, rt, speakers, reopening);
+      const { batch, creditDropped, propsDropped } = prepareBatch(input, rt, speakers, reopening);
       patchCounts.creditDropped += creditDropped;
+      logPropsDropped(sessionId, propsDropped);
       applyPrepared(sessionId, rt, batch, input.ops.length, patchCounts);
     }
     const counts = {
@@ -430,8 +438,9 @@ export function createBuildLoop(deps: {
     if (grounded.ops.length) {
       // Applied to the doc as it is now, so a promotion made during the run is kept.
       const before = view(rt).doc;
-      const { doc, addedConflicts } = applyConsensusOps(before, grounded.ops, clock());
+      const { doc, addedConflicts, propsDropped } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
       rt.setDoc(doc);
+      logPropsDropped(sessionId, propsDropped, "conflict");
       const wasAgreed = (id: string) => before.decisions.find((b) => b.id === id)?.status === "agreed";
       const promoted = doc.decisions.filter((d) => d.status === "agreed" && !wasAgreed(d.id)).map((d) => d.id);
       counts.promoted = promoted.length;
@@ -526,12 +535,13 @@ export function createBuildLoop(deps: {
           }
           // A batch this run's reopenings could change (it removes an agreed node) waits for them.
           const agreedIds = new Set(view(live).doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
-          const { batch, creditDropped } = prepareBatch(parsed.data, live, speakers, new Set());
+          const { batch, creditDropped, propsDropped } = prepareBatch(parsed.data, live, speakers, new Set());
           if (batch.ops.length !== prepareBatch(parsed.data, live, speakers, agreedIds).batch.ops.length) {
             deferred.push(parsed.data);
             return;
           }
           patchCounts.creditDropped += creditDropped;
+          logPropsDropped(sessionId, propsDropped);
           if (!applyPrepared(sessionId, live, batch, parsed.data.ops.length, patchCounts)) return;
           lastPatchMs = clock() - startedAt;
           firstPatchMs ??= lastPatchMs;

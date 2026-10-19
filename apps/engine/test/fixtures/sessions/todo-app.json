@@ -320,7 +320,6 @@
                       "value": "Add a task"
                     }
                   ],
-                  "status": "draft",
                   "decisionId": "d-quick-add"
                 }
               },
@@ -336,7 +335,6 @@
                       "value": "Add"
                     }
                   ],
-                  "status": "draft",
                   "decisionId": "d-quick-add",
                   "on": {
                     "click": [
@@ -356,7 +354,6 @@
                   "id": "home.list",
                   "type": "List",
                   "props": [],
-                  "status": "draft",
                   "decisionId": "d-quick-add"
                 }
               }
@@ -427,7 +424,6 @@
                       "value": "Owner: Ada"
                     }
                   ],
-                  "status": "draft",
                   "decisionId": "d-owner-badge"
                 }
               }
@@ -488,7 +484,6 @@
                       "value": "Due date"
                     }
                   ],
-                  "status": "draft",
                   "decisionId": "d-due-dates"
                 }
               }
@@ -547,8 +542,7 @@
                                 "key": "label",
                                 "value": "Show done"
                               }
-                            ],
-                            "status": "draft"
+                            ]
                           }
                         }
                       ]
@@ -577,8 +571,7 @@
                                   "Done"
                                 ]
                               }
-                            ],
-                            "status": "draft"
+                            ]
                           }
                         }
                       ]

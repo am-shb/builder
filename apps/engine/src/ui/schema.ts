@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { THEME_OPTIONS } from "../../public/renderer/theme.js";
+import { COMPONENT_TYPES as CATALOG_TYPES } from "../../public/renderer/catalog.js";
 
-export const COMPONENT_TYPES = [
-  "App", "Screen", "NavBar", "Tabs", "Stack", "Card", "Text", "Heading", "Button", "Input",
-  "Select", "Toggle", "Checkbox", "List", "ListItem", "Table", "Badge", "Modal",
-  "ImagePlaceholder", "ChartPlaceholder", "EmptyState",
-] as const;
-export type ComponentType = (typeof COMPONENT_TYPES)[number];
+// The catalog (public/renderer/catalog.js) is the one list of component types.
+export const COMPONENT_TYPES = CATALOG_TYPES as [string, ...string[]];
+export type ComponentType = string;
+const ComponentTypeSchema = z.enum(COMPONENT_TYPES);
 
 export const MAX_DEPTH = 12;
 export const MAX_NODES = 400;
@@ -23,14 +22,14 @@ export const Interaction = z.union([
 ]);
 export type Interaction = z.infer<typeof Interaction>;
 
-export const PropValue = z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]);
+export const PropValue = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]);
 export const Props = z.record(z.string(), PropValue);
 export const NodeStatus = z.enum(["draft", "agreed"]);
 
 export type UiNode = {
   id: string;
   type: ComponentType;
-  props: Record<string, string | number | boolean | string[]>;
+  props: Record<string, string | number | boolean | string[] | number[]>;
   on?: { click?: Interaction[]; change?: Interaction[] };
   status: "draft" | "agreed";
   decisionId?: string;
@@ -39,7 +38,7 @@ export type UiNode = {
 
 export const UiNode: z.ZodType<UiNode> = z.strictObject({
   id: NodeId,
-  type: z.enum(COMPONENT_TYPES),
+  type: ComponentTypeSchema,
   props: Props,
   on: z.strictObject({
     click: z.array(Interaction).optional(),
@@ -119,33 +118,39 @@ export type Change = {
 /**
  * Model-facing shapes. Strict tool schemas need closed objects and no recursion, so props are
  * key/value pairs and nodes carry no children (deeper structure comes from later `add` ops).
- * `fromToolBatch` in tree.ts converts these to the internal PatchBatch.
+ * Nodes carry no status (every node the model adds is a draft), and a batch names its decision
+ * once, with a per-node or per-op override. `fromToolBatch` in tree.ts converts these to the
+ * internal PatchBatch.
  */
 export const ToolProp = z.strictObject({ key: z.string(), value: PropValue });
 export type ToolProp = z.infer<typeof ToolProp>;
 
 export const ToolNode = z.strictObject({
   id: NodeId,
-  type: z.enum(COMPONENT_TYPES),
+  type: ComponentTypeSchema,
   props: z.array(ToolProp),
   on: z.strictObject({
     click: z.array(Interaction).optional(),
     change: z.array(Interaction).optional(),
   }).optional(),
-  status: NodeStatus,
   decisionId: z.string().optional(),
 });
 export type ToolNode = z.infer<typeof ToolNode>;
 
+const toolThemeValue = (slot: ThemeSlotName) => z.enum(THEME_OPTIONS[slot] as [string, ...string[]]).optional();
+
 export const ToolPatchOp = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("add"), parentId: NodeId, index: z.number().int().min(0).optional(), node: ToolNode }),
-  z.strictObject({
-    op: z.literal("update"), id: NodeId, props: z.array(ToolProp).optional(),
-    status: NodeStatus.optional(), decisionId: z.string().optional(),
-  }),
+  z.strictObject({ op: z.literal("update"), id: NodeId, props: z.array(ToolProp).optional(), decisionId: z.string().optional() }),
   z.strictObject({ op: z.literal("remove"), id: NodeId }),
   z.strictObject({ op: z.literal("move"), id: NodeId, parentId: NodeId, index: z.number().int().min(0) }),
   z.strictObject({ op: z.literal("set_screen"), screenId: NodeId }),
+  z.strictObject({
+    op: z.literal("set_theme"),
+    accent: toolThemeValue("accent"), warmth: toolThemeValue("warmth"),
+    radius: toolThemeValue("radius"), density: toolThemeValue("density"),
+  }),
+  z.strictObject({ op: z.literal("drop_theme"), decisionId: z.string() }),
 ]);
 export type ToolPatchOp = z.infer<typeof ToolPatchOp>;
 
@@ -153,6 +158,7 @@ export const ToolPatchBatch = z.strictObject({
   ops: z.array(ToolPatchOp),
   label: z.string().max(60),
   by: z.string().optional(),
+  decisionId: z.string().optional(),
 });
 export type ToolPatchBatch = z.infer<typeof ToolPatchBatch>;
 

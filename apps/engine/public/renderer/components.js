@@ -6,64 +6,14 @@
 // The catalog's builders live in components/<group>.js; the style options a type declares (tone, size, pad,
 // emphasis, span) are applied here, the same way for every type.
 import { CATALOG, STYLE_OPTIONS } from "@renderer/catalog.js";
-import { h, str, setText, setVariant, withParts } from "@renderer/components/dom.js";
+import { str, setVariant } from "@renderer/components/dom.js";
 import { FRAMES } from "@renderer/components/frames.js";
 import { DATA } from "@renderer/components/data.js";
 import { CONTENT } from "@renderer/components/content.js";
 import { INPUT } from "@renderer/components/input.js";
 import { FEEDBACK } from "@renderer/components/feedback.js";
 
-// The old types with no catalog entry. They stay until the server switches to the catalog.
-const LEGACY = {
-  NavBar: {
-    create() {
-      const el = h("nav", "b-navbar");
-      const title = h("div", "b-navbar-title");
-      const items = h("div", "b-navbar-items");
-      el.append(title, items);
-      return withParts(el, { title, items });
-    },
-    update(el, node) {
-      setText(el.parts.title, str(node.props.title));
-    },
-    slot: (el) => el.parts.items,
-  },
-
-  Stack: {
-    create: () => h("div", "b-stack"),
-    update(el, node) {
-      el.classList.toggle("is-row", node.props.direction === "row");
-    },
-    slot: (el) => el,
-  },
-
-  ImagePlaceholder: {
-    create: () => h("div", "b-img-block b-legacy-image"),
-    update(el, node) {
-      setText(el, str(node.props.label, "Image"));
-    },
-  },
-
-  ChartPlaceholder: {
-    create() {
-      const el = h("div", "b-panel b-legacy-chart");
-      const bars = h("div", "b-chart-bars");
-      for (const hgt of [45, 70, 55, 90, 65]) {
-        const b = h("span", "b-chart-bar");
-        b.style.height = `${hgt}%`;
-        bars.append(b);
-      }
-      const label = h("div", "b-panel-title");
-      el.append(bars, label);
-      return withParts(el, { label });
-    },
-    update(el, node) {
-      setText(el.parts.label, str(node.props.label, "Chart"));
-    },
-  },
-};
-
-const BUILDERS = { ...LEGACY, ...FRAMES, ...DATA, ...CONTENT, ...INPUT, ...FEEDBACK };
+const BUILDERS = { ...FRAMES, ...DATA, ...CONTENT, ...INPUT, ...FEEDBACK };
 
 export const COMPONENT_BUILDERS = BUILDERS;
 

@@ -147,6 +147,11 @@ const holdsAgreed = (node: UiNode, reopened: Set<string>): boolean =>
  * An update that changes nothing is dropped. A remove that would take an agreed node off the
  * prototype is dropped, unless that node's decision is in `current.reopened` (reopened by this
  * run's consensus ops). Ops on nodes that don't exist are kept, so the batch still fails validation.
+ *
+ * Theme: set_theme is kept (applyBatch makes it a draft). A theme_status agreed is always removed.
+ * A theme_status revert (the model's drop_theme) is removed when a slot carrying that decision is
+ * agreed and the decision is not in `current.reopened`; without `current` (conflict variants, which
+ * never revert) every theme_status is removed.
  */
 export function sanitizeModelBatch(
   batch: PatchBatch, doc: ConsensusDoc, current?: { proto: Prototype; reopened: Set<string> },
@@ -173,6 +178,11 @@ export function sanitizeModelBatch(
       const { status: _status, decisionId, ...rest } = op;
       const next = decisionId !== undefined && agreed.has(decisionId) ? { ...rest, decisionId } : rest;
       if (next.props !== undefined || "decisionId" in next) ops.push(next);
+    } else if (op.op === "theme_status") {
+      if (op.to !== "revert" || !current) continue;
+      const holds = Object.values(current.proto.theme ?? {})
+        .some((slot) => slot.decisionId === op.decisionId && slot.status === "agreed");
+      if (!holds || current.reopened.has(op.decisionId)) ops.push(op);
     } else if (op.op === "remove" && current) {
       const node = findNode(current.proto, op.id);
       if (!node || !holdsAgreed(node, current.reopened)) ops.push(op);
@@ -193,10 +203,16 @@ function nextQuestionId(doc: ConsensusDoc): string {
 /**
  * Applies the model's ops to the doc in order. Pure. Ops naming an unknown decision or question
  * are no-ops; an add with an id already taken is ignored, as is a conflict with repeated labels.
+ * A conflict's variant batches default to the decision its resolution records (`d-<conflictId>`),
+ * and their updates are checked against `proto`'s node types. `propsDropped` counts the props the
+ * catalog dropped from the conflicts added.
  */
-export function applyConsensusOps(input: ConsensusDoc, ops: ConsensusUpdate[], now: number): { doc: ConsensusDoc; addedConflicts: string[] } {
+export function applyConsensusOps(
+  input: ConsensusDoc, ops: ConsensusUpdate[], now: number, proto: Prototype,
+): { doc: ConsensusDoc; addedConflicts: string[]; propsDropped: number } {
   let doc = input;
   const addedConflicts: string[] = [];
+  let propsDropped = 0;
   for (const op of ops) {
     switch (op.op) {
       case "add_decision":
@@ -223,9 +239,11 @@ export function applyConsensusOps(input: ConsensusDoc, ops: ConsensusUpdate[], n
         if (doc.conflicts.some((c) => c.id === op.id) || labels.size !== op.variants.length) break;
         const conflict: Conflict = {
           id: op.id, topic: op.topic, status: "open", openedAt: now,
-          variants: op.variants.map((v) => ({
-            label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(fromToolBatch(v.batch), doc),
-          })),
+          variants: op.variants.map((v) => {
+            const { batch, dropped } = fromToolBatch(v.batch, { decisionId: `d-${op.id}` }, proto);
+            propsDropped += dropped;
+            return { label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(batch, doc) };
+          }),
         };
         doc = { ...doc, conflicts: [...doc.conflicts, conflict] };
         addedConflicts.push(op.id);
@@ -243,5 +261,5 @@ export function applyConsensusOps(input: ConsensusDoc, ops: ConsensusUpdate[], n
       }
     }
   }
-  return { doc, addedConflicts };
+  return { doc, addedConflicts, propsDropped };
 }

@@ -557,20 +557,6 @@
 .b-comment-time { color: var(--b-ink-3); font-size: 14px; }
 .b-comment-text { color: var(--b-ink-2); }
 
-/* ---------- old types, until the server switches to the catalog ---------- */
-.b-navbar {
-  display: flex; align-items: center; gap: 16px; padding: 12px 18px; background: var(--b-surface);
-  border: 1px solid var(--b-line); border-radius: var(--b-radius); box-shadow: var(--b-shadow);
-}
-.b-navbar-title { flex: 1; font-size: 20px; font-weight: 800; }
-.b-navbar-items { display: flex; gap: 10px; }
-.b-stack { display: flex; flex-direction: column; gap: var(--b-gap); }
-.b-stack.is-row { flex-direction: row; align-items: center; flex-wrap: wrap; }
-.b-legacy-image { min-height: 140px; }
-.b-legacy-chart .b-chart-bars { height: 110px; }
-.b-legacy-chart .b-chart-bar { background: var(--b-chart-1); }
-.b-legacy-chart .b-panel-title { margin: 8px 0 0; }
-
 /* Draft: not agreed yet. Dashed outline plus a "draft" tag (20px, the stage minimum), once per
    draft region: a draft inside another draft shows neither, because the outer one already marks it.
    Containers (App, Screen) stay quiet. focus.js and comparison.js read the tag's offset from here. */
