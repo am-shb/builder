@@ -149,13 +149,12 @@ service to this choice). Step W0 records it as ADR 0012.
   and `zod` 4.6.7 (the api's version; the web app parses replies with it).
   `@clerk/react` accepts React `~19.3.0-0`. None has a TypeScript peer, so no `overrides` entry is needed (unlike
   `surrealdb`). Check again at install: if a peer conflict shows up, use a scoped override, as the root does.
-- **Design packages** ([ADR 0013](../adr/0013-web-visual-design.md); checked on npm on 2026-10-19, every peer range
-  accepts React 19.3 and Vite 8), also installed in W1 so the lockfile changes once:
+- **Design packages** ([ADR 0013](../adr/0013-web-visual-design.md); checked on npm on 2026-10-19 and 2026-10-20,
+  every peer range accepts React 19.3 and Vite 8), also installed in W1 so the lockfile changes once:
   `radix-ui` 1.8.1, `class-variance-authority` 0.7.1, `clsx` 2.1.1, `tailwind-merge` 3.7.0, `lucide-react` 1.56.0
-  (not 1.59.0, which is two days old), `sonner` 2.0.8, `@fontsource-variable/geist` and
-  `@fontsource-variable/geist-mono` 5.3.0; dev only: `tailwindcss` and `@tailwindcss/vite` 4.3.3, `tw-animate-css`
-  1.4.0, `axe-core` 4.14.0 and `playwright-core` 1.64.1. Not added: the `shadcn` CLI package, `vaul`, an animation
-  library and `@clerk/themes` (reasons in ADR 0013).
+  (not 1.59.0, which is two days old), `sonner` 2.0.8, `@fontsource-variable/schibsted-grotesk` 5.3.0; dev only:
+  `tailwindcss` and `@tailwindcss/vite` 4.3.3, `tw-animate-css` 1.4.0, `axe-core` 4.14.0 and `playwright-core` 1.64.1.
+  Not added: the `shadcn` CLI package, `vaul`, an animation library and `@clerk/themes` (reasons in ADR 0013).
 - **TypeScript:** `apps/web/tsconfig.json` extends the root base and changes only what a browser bundle needs:
   `module: "esnext"`, `moduleResolution: "bundler"`, `jsx: "react-jsx"`, `lib: ["esnext", "dom"]` (add
   `"dom.iterable"` only if TypeScript 7 still needs it), and `types: ["vite/client", "node"]`. Keeping `node` matters:
@@ -386,51 +385,62 @@ outcome (201 aside) shows the 504 warning**, because a bot may exist.
 - **Tenancy** is enforced by the api from the token. The web app never sends an org id, and the tests prove it.
 
 ## Visual design
-Settled in [ADR 0013](../adr/0013-web-visual-design.md). UI and design are a judging criterion and the app will be
-shown to investors, so the look is part of "done" for every screen step, not polish for later. In short:
+Settled in [ADR 0013](../adr/0013-web-visual-design.md): the **Boardroom** direction, chosen from three previewed
+directions and refined after two separate reviews. UI and design are a judging criterion and the app will be shown to
+investors, so the look is part of "done" for every screen step, not polish for later. In short:
 
-- **Stack:** Tailwind CSS 4 and shadcn/ui-style components on Radix primitives, copied into `src/components/ui/` and
-  restyled; `lucide-react` icons; `sonner` toasts; Geist fonts, self-hosted.
-- **Tokens:** semantic CSS variables in OKLCH in `src/styles/globals.css`, light and dark, following the system
-  setting. Every text pair is AA or better (measured). The palette and its contrast are in ADR 0013:
+- **Character:** calm, premium, minimal. The boldness is in one place: each session is identified by its meeting
+  code, set large (`kfp-qzwd-nre`). No borders on surfaces, no grey card stacks, no default shadcn/ui styling.
+- **Stack:** Tailwind CSS 4 for layout and tokens, Radix primitives for behavior and accessibility only, our own
+  components in `src/components/`, `lucide-react` icons, `sonner` toasts, Schibsted Grotesk (one family, self-hosted).
+- **Tokens:** semantic CSS variables in `src/styles/globals.css`, light and dark, following the system setting. All
+  text is AA or better (measured; the full table, including the status pills, is in ADR 0013):
 
   | | Light | Dark |
   |---|---|---|
-  | page / card | `#f9fafd` / `#ffffff` | `#0b0e15` / `#13171f` |
-  | text / secondary | `#111826` / `#5b6375` | `#f2f3f7` / `#a2a8b5` |
-  | primary (indigo) | `#4f52e7` | `#8d9eff` (echoes the stage's accent) |
-  | violet (gradient stop) | `#914de6` | `#ba93fb` (the stage's question color) |
-  | success / warning / danger | `#007f4e` / `#a45e00` / `#d01a34` | `#56d089` / `#f5b34c` / `#f96f70` |
+  | page / surface | `#f4f6f5` / `#ffffff` | `#0f1513` / `#1b2421` |
+  | text / secondary / tertiary | `#1a2220` / `#56605d` / `#616b68` | `#eef3f1` / `#a3aeaa` / `#8f9b97` |
+  | primary (evergreen) | `#0d5c4c` | `#4fcfa6` |
+  | live dot | `#19a67a` | `#4fcfa6` |
 
-- **Brand:** `PRODUCT_NAME` as a wordmark beside a gradient tile with its first letter. `BOT_NAME` in every line that
-  names the bot. Both from `src/brand.ts`.
+- **Brand:** `PRODUCT_NAME` beside the mark: an evergreen tile with a dashed frame behind a solid one, the product's own
+  "still being decided, then agreed" rule. The favicon is the mark. `BOT_NAME` in every line that names the bot. Both
+  names from `src/brand.ts`.
+- **Signature details:** the mark; a dashed underline under the code of sessions still on their way; a faint dot grid
+  in the top-left corner that fades out.
+- **Sessions list:** one tappable row per session (the whole row is the link), inset hairlines, a soft plate on hover
+  and press, a chevron. The code first and largest, then the status pill, then platform and time. Ended and failed
+  codes fade. On phones the pill and "Google Meet, 12 min ago" share a line; on desktop the pill aligns to the right
+  edge, the list is at most 720px wide, and "Recent" shares a baseline with the page title.
+- **Status pills:** 30px, 14px semibold, a tint and a dot per status: In the meeting (mint, a breathing dot), Starting
+  and Joining (a dashed, slowly turning ring), Check the meeting (amber), Didn't start (red tint), Failed (solid red,
+  a diamond), Ended (quiet grey), Unknown (grey, a "?"). Never color alone.
 - **Navigation:** the slice has one top-level page (Sessions), so no bottom tab bar yet: a one- or two-tab bar would
   look empty and add a tap for nothing. Instead:
 
-  | | Phone (below 768px) | Tablet and desktop |
+  | | Phone (below 768px) | Desktop (768px and up) |
   |---|---|---|
-  | Top bar | sticky: mark, org switcher, user button | the same, wider |
-  | New session | full-width button in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | the form inline in a card above the list |
-  | Session detail | a pushed screen: back button in the top bar, slides in | a page with a back link; two columns from `lg` |
+  | Top bar | the mark, org switcher, account button (wordmark hidden under 400px) | the same, with the wordmark |
+  | New session | full-width pill in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | the start panel, sticky in the left column |
+  | Session detail | a pushed screen with a back button | a page with a back link |
   | Confirmations | bottom sheet | centered dialog |
 
   When the library, billing and settings pages arrive (three to five top-level pages), phones get a bottom tab bar
-  and desktop a sidebar; the app shell keeps the slot.
-- **Each screen's states:** skeletons shaped like the content (after 150 ms), busy buttons with a spinner, an empty
-  state with an icon, a headline and the primary action, error callouts with the error table's text and action,
-  centered page states (not configured, no such session), toasts only for non-critical confirmations ("Link
-  copied"). The unknown-outcome warning is always a persistent callout, never a toast.
-- **Status badges:** a dot plus the label; Starting and Joining in primary, In the meeting in success (both with a soft
-  pulse), Check the meeting in warning, Didn't start and Failed in danger, Ended and Unknown neutral.
-- **Motion:** 150–250 ms, ease-out: sheets slide up, dialogs fade and scale, a pushed screen slides 16px, lists fade
-  in, buttons press. All behind `motion-safe:`; nothing moves under reduced motion.
-- **Responsive:** 360px phones to large desktops, no sideways scrolling, content at most 1120px wide, gutters 16, 24
-  and 32px. Touch targets 44px or more on phones, inputs at 16px (no iOS zoom), safe-area insets, `theme-color`.
-- **Accessibility (WCAG 2.2 AA):** contrast as measured, a visible focus ring everywhere, labels with linked errors,
-  landmarks and headings in order, start results in `role="status"`, the warning in `role="alert"`, Radix dialogs and
-  sheets (focus trapped and restored, Escape closes), nothing that depends on hover.
+  and desktop a sidebar.
+- **Each screen's states:** skeletons shaped like the rows (after 150 ms); busy buttons with a spinner; the empty state
+  (a small dashed-to-solid illustration, "Start your first session", the three real steps, and on phones one button);
+  error callouts with the error table's text and action; centered page states (not configured, no such session);
+  toasts only for non-critical confirmations. The unknown-outcome warning is always a persistent amber callout.
+- **Motion:** 150–250 ms, ease-out: sheets slide up, dialogs fade and scale, rows and buttons press, the live dot
+  breathes, the joining ring turns. Nothing moves under reduced motion.
+- **Responsive:** 360px phones to large desktops, no sideways scrolling, content at most 1180px wide, gutters 20 and
+  40px. Touch targets 44px or more (rows 64px or more), inputs at 16px (no iOS zoom), safe-area insets, `theme-color`.
+- **Accessibility (WCAG 2.2 AA):** contrast as measured, a visible focus ring everywhere, labels with linked hints and
+  errors, landmarks and headings in order, start results in `role="status"`, the warning in `role="alert"`, Radix
+  dialogs and sheets (focus trapped and restored, Escape closes), nothing that depends on hover.
 - **Clerk** is themed through `appearance.variables` pointing at the same CSS variables, so sign-in, sign-up, the org
   switcher and the user menu match in light and dark.
+- **The previews** the direction was chosen from are outside the repo; `/_design` (W1b) becomes the reference.
 
 ### How the look is checked
 - **`/_design`** (dev server only, not in the production build): every component and state, light and dark
@@ -584,7 +594,7 @@ to 2 hours, M = about half a day, L = about a day.
 |---|---|---|---|---|
 | W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with the split CSP, names and origins from configuration. Settles WD1, WD2, WD5–WD11 for the web app | S | docs only |
 | W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk and the design packages included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
-| W1b | `web/design-foundation` | ADR 0013 in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, Clerk's layer), Geist fonts, `src/lib/cn.ts`, the components in `src/components/ui/` (button, input, label, card, badge, status badge, skeleton, callout, dialog, sheet, alert dialog, responsive modal, tooltip, toaster, empty state, page state), the app shell (top bar, bottom action bar, content container) with the wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
+| W1b | `web/design-foundation` | ADR 0013 (Boardroom) in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, the dot texture, Clerk's layer), Schibsted Grotesk, `src/lib/cn.ts`, the components in `src/components/` (button, input and field, status pill, session row, skeleton, callout, dialog, bottom sheet, responsive modal, toaster, empty state, page state, the mark), the app shell (top bar, sticky action bar, content container) with the mark and wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
 | I1 | `infra/render-web` | `builder-web` static site in `render.yaml`, the runbook's production section; then, in the dashboard, its two variables and `{WEB_ORIGIN}` in the api's `CLERK_AUTHORIZED_PARTIES`. Placeholder checked live: loads, routes rewrite, headers present, no CSP errors | S | the site calls nothing yet; the Blueprint change adds a service and touches no other |
 | W2 | `web/clerk-auth` | `ClerkProvider` with the wiring above, the routes and guard, sign-in/up, `/choose-organization` with its fallback, header with `<OrganizationSwitcher hidePersonal />` and `<UserButton />`, "not configured" screen, `test/helpers/clerk.tsx`. Org flow checked by hand on the dev instance | M–L | no api calls yet |
 | W3 | `web/api-client` | `src/api/client.ts`, `src/api/schemas.ts` (tolerant), `ApiError`, the error mapping, `test/helpers/fake-api.ts`; `GET /v1/me` shows the role in the header | M | `/v1/me` exists; reads only. Needs A1 to work in a real browser |
@@ -693,14 +703,12 @@ Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 reco
   `VITE_*` variables, plus a URL-free header policy in `render.yaml` for `frame-ancestors`. Alternatives: the whole
   policy as a `render.yaml` header (writes the api and Clerk origins into the repo, and needs editing when the domain
   changes), or a looser `connect-src https:` (allows any host).
-- **WD12. Visual design.** *Recommended:* Tailwind CSS with shadcn/ui-style components on Radix, one OKLCH token
-  set for light and dark, mobile-first with a bottom sheet and sticky action bar on phones, and an approval gate
-  before the screens ([ADR 0013](../adr/0013-web-visual-design.md)). Alternatives: plain CSS tokens and our own
-  components (no dependencies, but accessible dialogs, sheets and toasts by hand), or a full library such as MUI or
-  Mantine (its own recognizable look, harder to match to Clerk). The engine's `theme.css` isn't reused: it's the
-  prototype kit sized for the screenshare, and the web app copies related values instead of importing it.
-
-## Timeline
+- **WD12. Visual design.** *Decided:* the Boardroom direction ([ADR 0013](../adr/0013-web-visual-design.md)):
+  Tailwind CSS for layout and tokens, Radix for behavior only, our own components, one token set for light and dark,
+  mobile-first with a sticky action bar and bottom sheets on phones, and an approval gate before the screens. Chosen
+  over "Blueprint" (bold ultramarine) and "Huddle" (warm tiles) from previews, and over plain CSS (accessible dialogs
+  and sheets by hand) and a full component library (a recognizable look). The engine's `theme.css` isn't reused: it's
+  the prototype kit sized for the screenshare.
 - **Effort:** W0 and W1 done (W1 gets the design packages before it merges). W1b about a day, I1 about two hours,
   W2–W6 about four days with the visual review in each. That fits before 2026-10-25 if W1b is approved by about
   2026-10-21, and A1, WC1 and K1 land by then too.
