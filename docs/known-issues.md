@@ -151,8 +151,11 @@ outside the team gets an api token, or before meetings run on Render often.
   meetings, or pause auto-deploy on `builder-engine` first (runbook).
 - **R3. Shutdown doesn't wait for pending writes.** On SIGTERM, every deploy, the store closes without waiting
   for in-flight Recall events and consensus writes, so the last few can be lost.
-- **R4. Store queries have no timeout.** A hung connection to SurrealDB Cloud stalls that session's write queue.
-  Reconnects over the internet haven't been tested under load.
+- **R4. Store queries had no timeout.** *Fixed 2026-10-18.* Every store query has a 5 s deadline
+  (`QUERY_TIMEOUT_MS` in `apps/engine/src/db/connect.ts`) over the wait for a reconnect, the conflict retries and the
+  answer, and fails with `STORE_TIMEOUT` after it. A hung connection to SurrealDB Cloud now fails that event's
+  write instead of stalling the session's queue. The server isn't told, so a write that timed out may still land.
+  Still untested: reconnects over the internet under load.
 
 ### Security
 
