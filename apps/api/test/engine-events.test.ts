@@ -316,3 +316,17 @@ test("a session already holding its link moves on, even with another session of 
   assert.equal(await db.applyStatusEvent("org_a", a.id, "joining", null), "applied");
   assert.equal(await db.applyStatusEvent("org_a", a.id, "in_meeting", null), "applied");
 });
+
+test("a late event for a session that already ended is stale, not a conflict, even when another session holds its link", async () => {
+  const db = await testDb();
+  await db.upsertOrg("org_a");
+  const meetingUrl = newMeeting();
+  const a = (await db.createSessionUnlessActive("org_a", { id: randomUUID(), createdBy: "user_1", meetingUrl, limits: LIMITS })).session;
+  assert.equal(await db.applyStatusEvent("org_a", a.id, "ended", null), "applied");
+  const b = (await db.createSessionUnlessActive("org_a", { id: randomUUID(), createdBy: "user_1", meetingUrl, limits: LIMITS })).session;
+  await db.setSessionStart("org_a", b.id, { kind: "ok", status: "joining", stageUrl: "https://engine.example.com/stage/b" });
+  assert.equal(await db.applyStatusEvent("org_a", a.id, "in_meeting", null), "stale");
+  const c = (await db.createSessionUnlessActive("org_a", { id: randomUUID(), createdBy: "user_1", meetingUrl: newMeeting(), limits: LIMITS })).session;
+  await db.setSessionStart("org_a", c.id, { kind: "rejected", errorCode: "recall_rejected" });
+  assert.equal(await db.applyStatusEvent("org_a", c.id, "joining", null), "stale", "start_failed never moves");
+});

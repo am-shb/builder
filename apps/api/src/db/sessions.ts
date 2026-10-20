@@ -177,7 +177,7 @@ export async function applyStatusEvent(db: Surreal, orgId: string, id: string, s
   try {
     results = await db.query<unknown[]>(`
         LET $row = (SELECT status, meeting_url FROM $id WHERE org = $org)[0];
-        LET $taken = $status IN $holds AND $row.status NOT IN $holds
+        LET $taken = $status IN $holds AND $row.status IN $earlier AND $row.status NOT IN $holds
           AND count(SELECT VALUE id FROM session WHERE org = $org AND active_meeting = $row.meeting_url AND id != $id) > 0;
         UPDATE $id SET status = $status, error_code = $code WHERE org = $org AND status IN $earlier AND !$taken RETURN VALUE status;
         RETURN { found: $row != NONE, taken: $taken };
