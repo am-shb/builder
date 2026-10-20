@@ -1,13 +1,14 @@
 import { OrganizationSwitcher, UserButton } from "@clerk/react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { AppShell } from "../components/AppShell.tsx";
+import { RoleLabel } from "./RoleLabel.tsx";
 
 // The app shell for members: Clerk's org switcher (personal accounts hidden) and account menu in the top bar.
 // Switching org changes the session token, so every request after it is for the new org.
 export function SignedInShell({ actionBar, children }: { actionBar?: ReactNode; children: ReactNode }) {
   return (
     <AppShell
-      org={<LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" /></LabelInName>}
+      org={<><LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" /></LabelInName><RoleLabel /></>}
       account={<UserButton />}
       actionBar={actionBar}
     >

@@ -1,5 +1,6 @@
 import { ClerkFailed, ClerkLoaded, ClerkLoading } from "@clerk/react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { ApiProvider } from "./api/ApiProvider.tsx";
 import { ClerkWithRouter } from "./auth/ClerkWithRouter.tsx";
 import { RedirectIfSignedIn, RequireOrg } from "./auth/guards.tsx";
 import { readConfig, type WebConfig } from "./config.ts";
@@ -37,7 +38,7 @@ export function App({ config = readConfig() }: { config?: WebConfig }) {
       <ClerkWithRouter publishableKey={config.clerkPublishableKey}>
         <ClerkLoading><LoadingPage /></ClerkLoading>
         <ClerkFailed><ClerkUnavailablePage /></ClerkFailed>
-        <ClerkLoaded><AppRoutes /></ClerkLoaded>
+        <ClerkLoaded><ApiProvider baseUrl={config.apiUrl}><AppRoutes /></ApiProvider></ClerkLoaded>
       </ClerkWithRouter>
     </BrowserRouter>
   );

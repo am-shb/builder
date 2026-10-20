@@ -37,7 +37,11 @@ vi.mock("@clerk/react", () => ({
   useAuth: () => {
     const { loaded, session, orgId } = clerk.state;
     const active = session === "active";
-    return { isLoaded: loaded, isSignedIn: loaded ? active : undefined, userId: active ? "user_1" : null, orgId: active ? orgId : null };
+    return {
+      isLoaded: loaded, isSignedIn: loaded ? active : undefined, userId: active ? "user_1" : null, orgId: active ? orgId : null,
+      // A fake token per org, so tests can see which org a request was made for.
+      getToken: async () => (active && orgId ? `token-${orgId}` : null),
+    };
   },
   useSession: () => {
     const { loaded, session } = clerk.state;

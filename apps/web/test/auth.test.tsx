@@ -6,23 +6,31 @@ import { App, AppRoutes } from "../src/App.tsx";
 import { readConfig } from "../src/config.ts";
 import { safeReturnPath } from "../src/auth/guards.tsx";
 import { axeViolations } from "./helpers/axe.ts";
+import { ApiProvider } from "../src/api/ApiProvider.tsx";
+import { API, fakeApi } from "./helpers/fake-api.ts";
 
 function Where() {
   const l = useLocation();
   return <output data-testid="where">{l.pathname + l.search}</output>;
 }
 
+let api = fakeApi();
 function at(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-      <Routes><Route path="*" element={<Where />} /></Routes>
-    </MemoryRouter>,
+    <ApiProvider baseUrl={API} fetch={api.fetch}>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+        <Routes><Route path="*" element={<Where />} /></Routes>
+      </MemoryRouter>
+    </ApiProvider>,
   );
 }
 const where = () => screen.getByTestId("where").textContent;
 
-afterEach(() => setClerk({}));
+afterEach(() => {
+  setClerk({});
+  api = fakeApi();
+});
 
 describe("routes and the guard", () => {
   it("signed out: a member page goes to sign-in, and comes back after", () => {
@@ -84,7 +92,7 @@ describe("routes and the guard", () => {
     const view = at("/sessions/abc");
     setClerk({ session: "none" });
     await act(async () => view.rerender(
-      <MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter>,
+      <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
     ));
     expect(where()).toBe("/sign-in");
   });
@@ -118,9 +126,26 @@ describe("routes and the guard", () => {
     const view = at("/");
     setClerk({ session: "active", orgId: "org_b" });
     await act(async () => view.rerender(
-      <MemoryRouter initialEntries={["/"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter>,
+      <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
     ));
     expect(where()).toBe("/");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Sessions");
+  });
+
+  it("the header shows the member's role from GET /v1/me", async () => {
+    api = fakeApi({ "GET /v1/me": { status: 200, body: { userId: "user_1", orgId: "org_a", role: "org:admin" } } });
+    setClerk({ session: "active", orgId: "org_a" });
+    at("/");
+    expect((await screen.findByText("Admin")).textContent).toBe("Your role: Admin");
+    expect(api.requests[0]!.headers.Authorization).toBe("Bearer token-org_a");
+  });
+
+  it("if GET /v1/me fails, the header shows no role and nothing breaks", async () => {
+    api = fakeApi({ "GET /v1/me": "network_error" });
+    setClerk({ session: "active", orgId: "org_a" });
+    at("/");
+    await act(async () => {});
+    expect(screen.queryByText("Admin")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Sessions");
   });
 
@@ -136,7 +161,7 @@ describe("routes and the guard", () => {
     expect(where()).toBe("/sessions/abc");
     setClerk({ session: "active", orgId: "org_b" });
     await act(async () => view.rerender(
-      <MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter>,
+      <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
     ));
     expect(where()).toBe("/");
   });
