@@ -1,6 +1,6 @@
 # 0014: Prototype design system
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-10-19
 - **Deciders:** Amir Shahbandegan
 - **Area:** Meeting engine (`src/ui`, `src/agent`, `public/renderer`)
