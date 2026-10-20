@@ -61,6 +61,14 @@ services:
       # PUBLIC_API_BASE_URL isn't set: the engine uses RENDER_EXTERNAL_URL, which Render sets. Set it in the dashboard
       # only for a custom domain.
       - fromGroup: builder-internal
+      # The api's private-network address, host:port (builder-api:10000), where the engine sends session status
+      # changes (A2: POST /internal/engine-events, with ENGINE_INTERNAL_TOKEN from builder-internal). The engine reads
+      # a bare host:port as http. Unset, the engine sends nothing and the api's statuses stay at what the start said.
+      - key: API_INTERNAL_URL
+        fromService:
+          type: web
+          name: builder-api
+          property: hostport
       # SurrealDB Cloud: wss://<instance host>, and the `engine` user that infra/surrealdb/setup.surql defines.
       - key: SURREAL_URL
         sync: false

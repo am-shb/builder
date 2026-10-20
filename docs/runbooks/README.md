@@ -140,8 +140,10 @@ bandwidth. The static site is free. The SurrealDB instance is free ([ADR 0011](.
    Render asks only when the Blueprint is first created. Change a value later in the service's Environment tab. If the
    dashboard won't take an empty value for an optional variable, add it there later instead.
 3. The Blueprint sets the rest: `NODE_ENV=production`, `PORT=10000`, `RECALL_REGION=us-east-1`, the api's
-   `ENGINE_INTERNAL_URL` (the engine's private host and port, such as `builder-engine:10000`), and
-   `ENGINE_INTERNAL_TOKEN` (generated). `PUBLIC_API_BASE_URL` isn't needed: the engine uses `RENDER_EXTERNAL_URL`.
+   `ENGINE_INTERNAL_URL` (the engine's private host and port, such as `builder-engine:10000`), the engine's
+   `API_INTERNAL_URL` (the api's, such as `builder-api:10000`, where session status changes go: A2), and
+   `ENGINE_INTERNAL_TOKEN` (generated, used in both directions). Each service reads the other's address, which Render
+   fills in on each Blueprint sync; after the first sync, check that both are set on each service's Environment tab. `PUBLIC_API_BASE_URL` isn't needed: the engine uses `RENDER_EXTERNAL_URL`.
    Set it only for a custom domain.
 4. Apply. Render builds both images and deploys them as below.
 
