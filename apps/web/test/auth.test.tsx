@@ -280,7 +280,9 @@ describe("the Clerk wiring", () => {
     render(<App config={config} />);
     const elements = (clerk.providerProps?.appearance as { elements: Record<string, string> }).elements;
     expect(elements.organizationPreviewMainIdentifier).toMatch(/\bmin-w-0\b/);
-    expect(elements.organizationPreviewAvatarBox).toMatch(/max-\[400px\]:hidden/);
+    expect(elements.organizationPreviewAvatarContainer__organizationSwitcherTrigger).toMatch(/max-\[400px\]:hidden/);
+    // Only the header's: the switcher's list keeps its avatars.
+    expect(elements.organizationPreviewAvatarBox).not.toMatch(/hidden/);
   });
 
   it("when Clerk's script fails to load, says so and offers a retry", () => {

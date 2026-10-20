@@ -67,8 +67,9 @@ Its icon shows the choice (sun and moon, sun, moon) and its label says it ("Colo
   components (their appearance variables are our tokens). System removes the attribute and the OS decides again,
   live. The phone's address bar color (`theme-color`) follows the choice, and Clerk's bot check in sign-up (Cloudflare
   Turnstile, drawn in its own frame) is told the mode through `appearance.captcha.theme`.
-- **It fits a 320px phone.** The org switcher shrinks and cuts a long name short, and below 400px the org's small
-  avatar is hidden, so "Northwind Studio" still shows in full at 360px and every control stays inside the margins.
+- **It fits a 320px phone.** The org switcher shrinks and cuts a long name short, and below 400px the header button
+  drops the org's small avatar (the switcher's list keeps them), so "Northwind Studio" still shows in full at 360px and
+  every control stays inside the margins.
 - **Kept in `localStorage`, the one exception to ADR 0012's no-storage rule.** One key, `builder.color-mode`, holding
   `light` or `dark` (System removes it): a display preference with nothing private in it. Only
   `src/lib/color-mode.ts` and `public/color-mode.js` may touch storage; a test fails on storage anywhere else, or on
