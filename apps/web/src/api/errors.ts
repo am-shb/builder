@@ -24,8 +24,9 @@ export type ExplainedError = {
   botMayExist: boolean;
 };
 
-// The start replies that mean no new bot was sent (plan): 200 reused, 400, 401, 403, 404, 405, 413, 415, 502 and 503.
-const NO_NEW_BOT = new Set([400, 401, 403, 404, 405, 413, 415, 502, 503]);
+// The start replies that mean no new bot was sent (plan): 200 reused, 400, 401, 403, 404, 405, 413, 415, 429, 502 and
+// 503. (429: a start limit; the api checks it before saving or sending anything.)
+const NO_NEW_BOT = new Set([400, 401, 403, 404, 405, 413, 415, 429, 502, 503]);
 
 const somethingWrong = (code: string) => `Something went wrong (${code}).`;
 
@@ -87,6 +88,15 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
       return plain("Sessions aren't available right now.", "refresh", "Try again in a moment.");
     case "engine_unavailable":
       return plain("Starting meetings isn't available right now.", "none", "Nothing was started.");
+    // The api's start guards: limits on how many sessions can start, so one account can't run up the bill.
+    case "rate_limited":
+      return plain("Too many starts in a short time.", "none", "Wait a minute, then try again. Nothing was started.");
+    case "active_limit_reached":
+      return plain("This organization has as many sessions running as it's allowed.", "none",
+        "Wait for one to end before starting another. Nothing was started.");
+    case "daily_limit_reached":
+      return plain("This organization has started as many sessions as it's allowed in 24 hours.", "none",
+        "Try again later. Nothing was started.");
     case "limits_unavailable":
       return plain("Starting meetings isn't set up on this server yet.", "none", "Nothing was started.");
     case "engine_rejected": {

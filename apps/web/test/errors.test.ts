@@ -42,9 +42,25 @@ describe("starting", () => {
     [e(502, "engine_rejected", "session_conflict"), "Starting meetings isn't working right now (session_conflict).", "none"],
     [e(503, "engine_unavailable"), "Starting meetings isn't available right now.", "none"],
     [e(503, "limits_unavailable"), "Starting meetings isn't set up on this server yet.", "none"],
+    [e(429, "rate_limited"), "Too many starts in a short time.", "none"],
+    [e(429, "active_limit_reached"), "This organization has as many sessions running as it's allowed.", "none"],
+    [e(429, "daily_limit_reached"), "This organization has started as many sessions as it's allowed in 24 hours.", "none"],
   ] as const)("no new bot: %o", (err, title, action) => {
     const x = explainError(err, "start");
     expect([x.title, x.action, x.botMayExist]).toEqual([title, action, false]);
+  });
+
+  it("a start limit (429) says it's a limit, what to do, and that nothing was started", () => {
+    for (const [code, detail] of [
+      ["rate_limited", "Wait a minute, then try again. Nothing was started."],
+      ["active_limit_reached", "Wait for one to end before starting another. Nothing was started."],
+      ["daily_limit_reached", "Try again later. Nothing was started."],
+    ] as const) {
+      const x = explainError(e(429, code), "start");
+      expect([x.detail, x.tone, x.botMayExist], code).toEqual([detail, "error", false]);
+    }
+    // A 429 that isn't the api's own reply (a proxy's page) proves nothing: a bot may exist.
+    expect(explainError(e(429, "http_429"), "start").botMayExist).toBe(true);
   });
 
   it.each([
