@@ -24,6 +24,9 @@ export type Config = {
   // Shared bearer token for /internal/* (ADR 0008), the same value as the api's ENGINE_INTERNAL_TOKEN. null: the
   // internal routes are off and answer 404.
   internalToken: string | null;
+  // The api's private origin for session status events (A2, ADR 0008), e.g. http://builder-api:10000. null: no events
+  // are sent, and the api's statuses stay at what the start answered (its stale-session margin still applies).
+  apiInternalUrl: string | null;
 };
 
 const REGIONS = new Set(["us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1"]);
@@ -70,7 +73,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     botVariant,
     ...agentSettings(env),
     local: false,
-    internalToken: internalToken(env),
+    ...internalSettings(env),
   };
 }
 
@@ -92,7 +95,7 @@ export function loadLocalConfig(env: Record<string, string | undefined>): Config
     botVariant: null,
     ...agentSettings(env),
     local: true,
-    internalToken: internalToken(env),
+    ...internalSettings(env),
   };
 }
 
@@ -124,6 +127,30 @@ export function surrealSettings(env: Record<string, string | undefined>): Surrea
 }
 
 const MIN_INTERNAL_TOKEN_LENGTH = 32;
+
+/**
+ * API_INTERNAL_URL: where the engine sends session status events. An http or https origin with no path, or Render's
+ * `host:port` (fromService hostport), which means http on the private network. It needs ENGINE_INTERNAL_TOKEN, the
+ * bearer token for both directions. Errors never quote the value.
+ */
+export function apiInternalUrl(env: Record<string, string | undefined>, token: string | null): string | null {
+  const raw = env.API_INTERNAL_URL?.trim();
+  if (!raw) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+  const bad = () => new Error("API_INTERNAL_URL must be an http or https origin with no path, or host:port");
+  if (!URL.canParse(withScheme)) throw bad();
+  const u = new URL(withScheme);
+  const extra = u.pathname !== "/" || u.search || u.hash || /[?#]/.test(withScheme);
+  if ((u.protocol !== "http:" && u.protocol !== "https:") || u.username || u.password || extra) throw bad();
+  if (!token) throw new Error("API_INTERNAL_URL needs ENGINE_INTERNAL_TOKEN, the token the api checks");
+  return u.origin;
+}
+
+/** The token for /internal/* and the api's address for events, read together. */
+export function internalSettings(env: Record<string, string | undefined>): { internalToken: string | null; apiInternalUrl: string | null } {
+  const token = internalToken(env);
+  return { internalToken: token, apiInternalUrl: apiInternalUrl(env, token) };
+}
 
 /** ENGINE_INTERNAL_TOKEN: unset turns /internal/* off. Set, it must be long enough to guess at; the error never quotes it. */
 export function internalToken(env: Record<string, string | undefined>): string | null {
