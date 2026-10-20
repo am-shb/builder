@@ -220,7 +220,7 @@ pages or reloading the page. W0 also checks whether `@clerk/react-router` fits d
 
 **Session list (`/`):** newest first, up to 50 (no paging, as in the api). Each row: the meeting link as plain text,
 the status label, when it was started (local time, relative), and a link to its detail page. **No stage link in the
-list.** States: loading, empty (points at the form), error (by code, below). A Refresh button. No polling (WD6).
+list.** States: loading, empty (points at the form), error (by code, below). A Refresh button, and a quiet refresh every 10 seconds while a session may still change (WD6).
 
 **Start form (on `/`):**
 - One field (the meeting link) and a Start button.
@@ -655,8 +655,8 @@ Each needs review from that area. None of them changes how another area behaves 
   - The allowed list is `CLERK_AUTHORIZED_PARTIES` (WD4): the same web origins that may hold tokens. With Clerk off,
     CORS is off.
   - Tests: allowed origin on 200 and on an error, other origin, preflight, no credentials header.
-- **A2 (later). `POST /internal/engine-events`,** the api's next slice. Statuses only move after it, and then the web
-  app adds polling on the detail page (WD6).
+- **A2. `POST /internal/engine-events`.** Built on 2026-10-20: statuses move with the engine's events, and the list
+  and the session page refresh quietly while a session may still change (WD6).
 - **A3 (later). Leave `stageUrl` out of `GET /v1/sessions`,** keeping it on `GET /v1/sessions/:id` and the `POST`
   reply, so the list never carries control tokens.
 - **D5 (the api plan's open decision).** `DEFAULT_MAX_USD` and `DEFAULT_MAX_MINUTES` on `builder-api`. Not needed
@@ -705,8 +705,10 @@ Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 reco
   `CORS_ORIGINS` variable, or a Vite dev proxy plus a Render rewrite (no CORS, but local and production then differ).
 - **WD5. The stage link.** *Recommended:* detail page only, behind "Show", with the warning, until X1 gives a
   read-only link. Alternative: don't show it at all in the web app for now.
-- **WD6. Status updates.** *Recommended:* a Refresh button now; polling on the detail page after A2. Polling now
-  would show nothing new.
+- **WD6. Status updates.** *Done with A2 (2026-10-20):* a Refresh button, and the list and a session's page
+  refresh themselves quietly every 10 seconds while a session may still change (starting, joining, in the meeting
+  or unconfirmed, within its time limit plus 30 minutes), only while the tab is visible. A background refresh
+  that fails changes nothing on screen and announces nothing.
 - **WD7. Clerk instance for the demo.** *Recommended:* the development instance on the site's `onrender.com` origin.
   The domain isn't chosen, so a production instance (which needs DNS on our own domain) waits for that decision.
 - **WD8. Starting again after an unknown outcome.** *Recommended:* the web app asks first (above), as a second line

@@ -39,13 +39,27 @@ the session's status and stage URL.
 Each event has an id. Usage values are cumulative, so a retried or duplicated event is harmless. The api stores the
 latest value.
 
+**Delivering status events (added 2026-10-20 with A2).**
+- The engine sends only each session's latest status. A newer one replaces an older one not yet sent, so events
+  can't arrive out of order, and the api also applies a status only if it moves the session forward (joining, in
+  the meeting, then ended or failed). A late or repeated event is acknowledged and changes nothing.
+- The event id is `<sessionId>:status:<status>`, so sending one again is harmless.
+- 2xx means delivered. 401, 408, 429, 5xx, a timeout or a network error are retried, waiting 2 s and then twice as
+  long each time, up to 60 s. Any other 4xx is logged and dropped: sending it again can't help.
+- Waiting events are kept in the engine's memory, not its database. After a restart the engine re-sends the current
+  status of every org session changed in the last day. An outage longer than that leaves a stale status in the
+  api, and the api's stale-session margin still frees the meeting link.
+- Only sessions the api started (with an org) are reported. Without `API_INTERNAL_URL` on the engine nothing is
+  sent, and the api's statuses stay at what the start answered.
+
 **Spend limits.** The engine enforces `limits` itself and ends the session with a clear message when either is reached.
 The api decides the limits from the plan. This clears deployment blocker 4.
 
 **Auth between them.** Both internal routes require a shared bearer token from Render's environment, even on the
-private network. The engine refuses `/internal/*` requests that arrive through Render's public proxy, using the same
-proxy-header check v0 uses for its control routes. The engine's v0 operator routes (`/`, `/api/*`) stay for local mode
-and are off in production.
+private network. It's one token for both directions (`ENGINE_INTERNAL_TOKEN`, in the shared environment group). The
+engine refuses `/internal/*` requests that arrive through Render's public proxy, using the same proxy-header check v0
+uses for its control routes, and the api's `/internal/engine-events` makes the same check. The engine's v0 operator
+routes (`/`, `/api/*`) stay for local mode and are off in production.
 
 **What crosses.** Ids, statuses, counts, costs and error codes. Never transcript text, prompts or model output, the
 same rule as for logs.

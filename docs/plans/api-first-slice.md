@@ -240,8 +240,9 @@ signed-in person can make organizations, so each limit is also counted per perso
   (`last_start_at`) and the person's `starter` row, so two starts for one org or one person at once conflict and one
   is retried after the other: they can't both pass a count. Nothing is saved and the engine isn't called when one is
   refused. Clerk's per-person limit on creating organizations is a second line (dashboard).
-- **Stale sessions (stopgap until engine events, A2):** statuses don't move yet, so a session would stay `joining`
-  and block its meeting link for good. Each session has `active_until`: its time limit plus
+- **Stale sessions (a fallback since A2):** before the engine's status events, a session would stay `joining`
+  and block its meeting link for good. With A2 (below) an ended or failed session frees its link at once; this
+  margin still covers an event that never arrives. Each session has `active_until`: its time limit plus
   `ACTIVE_MARGIN_MINUTES` (default 30). The engine counts the time limit from when the bot is let in, so the margin
   covers the wait in the meeting's lobby and the leave; the engine sets no lobby timeout of its own, so keep the margin
   above Recall's. Past it, a session no longer counts as active (for reuse or the active limits); its status is left
@@ -258,7 +259,7 @@ signed-in person can make organizations, so each limit is also counted per perso
   additive change.
 - Also add `GET /v1/sessions/:id`. It answers 404 for an id in another org, the same as for an id that doesn't exist,
   so it doesn't reveal that the id exists.
-- Until engine events arrive (the next slice), the status shown is whatever the engine said at start.
+- The status shown moves with the engine's status events (A2, below).
 
 ### Shapes between the api and web
 `CreateSessionBody`, `SessionView` and `SessionList` are zod schemas in `apps/api/src/routes/schemas.ts` for now.
@@ -330,9 +331,27 @@ None of them needs the engine side to exist.
 
 Steps 1 and 2 can start right away. Steps 3 and 4 depend only on 1, so they can go in parallel. Step 6 needs 2–5.
 
-**Next slice, not this one:** `POST /internal/engine-events` (bearer token, `parseEngineEvent`, idempotent by event
-id, usage stored as the latest cumulative value). Then the Clerk webhook mirror (users, memberships, Svix signature
-check). Then billing.
+**Next slice:** A2, session status events, below. Then usage events (stored as the latest cumulative value), the
+Clerk webhook mirror (users, memberships, Svix signature check), then billing.
+
+### A2: session status events (built 2026-10-20)
+The engine tells the api when a session's status changes, so statuses move on from what the start answered:
+joining, in the meeting, ended, failed. ADR 0008 has the delivery rules.
+- **Engine** (kept small): `src/api-events.ts`, the status reporter, sends `SessionStatusEvent` from `contracts/` to
+  `POST {API_INTERNAL_URL}/internal/engine-events` with `ENGINE_INTERNAL_TOKEN` as the bearer token. The poll calls
+  it after each saved status (`createApp`'s `onStatusChange`). Only the latest status per session waits, in memory;
+  retries back off from 2 s to 60 s; a restart re-sends the statuses of org sessions changed in the last day. Only
+  sessions the api started (with an org) are reported. `API_INTERNAL_URL` unset: nothing is sent, as before. No
+  migration.
+- **api:** `src/routes/engine-events.ts`, no Clerk or CORS; the token, 404 when it's unset or the request came
+  through a public proxy. `applyStatusEvent()` moves a session forward only (`starting`/`start_unknown` <
+  `joining` < `in_meeting` < `ended`/`failed`; `start_failed` never changes), within the event's org; `error_code`
+  is the event's. An event before the start answer is saved: the start answer's stage link is still saved, and the
+  event's status stays. Usage, hand-off and unknown event types: 202, nothing stored. No migration.
+- **Web:** the list and a session's page refresh quietly every 10 seconds while a session may still change (WD6),
+  and say why a session ended or failed.
+- **Infra:** `API_INTERNAL_URL` on `builder-engine`, from `builder-api`'s private `hostport`, is on the
+  `infra/render-web` branch with the other `render.yaml` changes.
 
 ## Changes outside apps/api
 These need approval before anyone builds them. None of them blocks a step: O1, the only one that did, is on `main`.

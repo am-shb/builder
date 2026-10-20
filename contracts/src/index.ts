@@ -38,6 +38,12 @@ const eventBase = {
   at: z.iso.datetime(),
 };
 
+/**
+ * The session's status now (A2). The engine sends only the latest one, and the api never moves a session backwards.
+ * `id` is `<sessionId>:status:<status>`. `errorCode`, a plain snake_case code:
+ * - failed: Recall's fatal sub-code (meeting_not_found, ...), or bot_failed
+ * - ended: the engine's own limit (max_minutes, max_usd), or Recall's call_ended sub-code (bot_kicked_from_call, ...)
+ */
 export const SessionStatusEvent = z.object({
   ...eventBase,
   type: z.literal("session.status"),
