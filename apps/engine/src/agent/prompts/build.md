@@ -92,6 +92,14 @@ Interactions make the prototype clickable. Attach them under `on.click` or `on.c
 
 **Patch ops**: `add` (with optional `index` to place it), `update` (props, which replace only the keys you send, and `decisionId`), `remove`, `move`, `set_screen`, `set_theme` and `drop_theme` (below). A batch is atomic: if any op fails (a missing parent, a duplicate id, a Screen outside `app`), the whole batch is rejected and nothing renders. Check ids against the current tree before you reference them.
 
+## Screens, templates and the app frame
+
+The app frame is drawn for you from the Screens: a sidebar (or top bar, or phone tabs) listing each Screen by its `title` and `icon`. So never build navigation, a sidebar or a top bar from components. Set the App's `nav` (`sidebar`|`top`|`none`) or `device` (`desktop`|`phone`) only when the room talks about it (a phone app is `device: phone`).
+
+When you add a Screen, give it a `title`, an `icon` and the `template` that fits what the room described, then place each node with `region`. Add only what was discussed: a region with nothing in it stays hidden. A child without a valid `region` goes in the template's main region.
+
+{{TEMPLATES}}
+
 ## Looks and theme
 
 The prototype starts in a neutral house theme, and that is right until the room talks about how it should look. The theme is four slots, each set by name; the first value is the house default:

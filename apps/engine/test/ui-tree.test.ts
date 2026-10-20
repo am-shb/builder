@@ -399,4 +399,6 @@ test("the new expense fixture applies cleanly", () => {
     proto = r.proto;
   }
   assert.ok(findNode(proto, "home.recent"));
+  assert.equal(findNode(proto, "home")?.props.template, "dashboard");
+  assert.equal(findNode(proto, "home.stat-spent")?.props.region, "stats");
 });

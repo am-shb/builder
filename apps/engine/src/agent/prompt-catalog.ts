@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { CATALOG, STYLE_OPTIONS } from "../../public/renderer/catalog.js";
+import { CATALOG, STYLE_OPTIONS, TEMPLATES } from "../../public/renderer/catalog.js";
 import { THEME_OPTIONS } from "../../public/renderer/theme.js";
 
 // The build prompt's component and theme reference, generated from the catalog so the prompt can
@@ -36,6 +36,16 @@ export function componentTable(): string {
   ].join("\n");
 }
 
+/** Markdown table of the Screen templates: regions (the one unplaced children fall into marked main) and what usually goes where. */
+export function templatesTable(): string {
+  const rows = ["| Template | regions | suggest |", "|---|---|---|"];
+  for (const [name, t] of Object.entries(TEMPLATES)) {
+    const regions = Object.keys(t.regions).map((r) => (r === t.main ? `${r} (main)` : r)).join(", ");
+    rows.push(`| \`${name}\` | ${regions} | ${t.suggest} |`);
+  }
+  return rows.join("\n");
+}
+
 /** The theme slots and their values, first value being the house default. */
 export function themeOptions(): string {
   return Object.entries(THEME_OPTIONS).map(([slot, values]) => `- ${slot}: ${values.join("|")}`).join("\n");
@@ -45,5 +55,6 @@ export function themeOptions(): string {
 export function buildSystemPrompt(): string {
   return readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8")
     .replace("{{COMPONENTS}}", () => componentTable())
+    .replace("{{TEMPLATES}}", () => templatesTable())
     .replace("{{THEME}}", () => themeOptions());
 }

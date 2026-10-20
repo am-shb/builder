@@ -83,22 +83,26 @@ Option 4.
 - Until part 3, `icon` props render nothing and `Image` renders a tinted block with its subject word.
 
 ## Measurements
-The mockup's Overview screen without its sidebar nav (a search box, page header, three stat cards, a six-month bar
-chart and three recent expenses; only the new fixture also has the avatar) sent as `apply_patches` batches, once in
-the old format and once in the new one. Both are in `apps/engine/test/fixtures/` (`expense-batches.old.json`,
-`expense-batches.new.json`); the new one is tested to apply cleanly with no dropped props. Run
-`node scripts/measure-batches.ts` in `apps/engine` to reproduce. Tokens are estimated as characters / 3.5.
+The mockup's Overview screen (page header, three stat cards, a six-month bar chart and three recent expenses) sent as
+`apply_patches` batches, once in the old format and once in the new one. Both are in `apps/engine/test/fixtures/`
+(`expense-batches.old.json`, `expense-batches.new.json`); the new one is tested to apply cleanly with no dropped props.
+Run `node scripts/measure-batches.ts` in `apps/engine` to reproduce. Tokens are estimated as characters / 3.5.
+
+The new fixture sets the `home` Screen to the `dashboard` template and places the header, stat cards, chart and
+recent table with `region` (the table sits in `main`, under the chart; `side` stays empty and hidden). It no longer
+builds navigation or a search box: the old format had no app frame, so its fixture still hand-builds a nav bar and
+search input, while the new format gets the sidebar frame for free. Part of the gap below is that.
 
 | format | batches | ops | JSON chars | est. tokens |
 |---|---|---|---|---|
 | old (21 types, per-node status) | 5 | 28 | 5174 | 1478 |
-| new (composite components) | 5 | 12 | 2716 | 776 |
+| new (composite components, template, derived frame) | 4 | 8 | 2303 | 658 |
 
-The new format is about 0.53 of the old, so roughly half the output for the same screen. The old fixture can only
+The new format is about 0.45 of the old, so roughly half the output for the same screen. The old fixture can only
 approximate the screen (a chart placeholder, plain Badge text for status), so the real gap in what appears on
 screen is larger.
 
-The input side grew. The build prompt was about 11,952 characters (`build.md` at `fd93ec9`) and is about 20,091
+The input side grew. The build prompt was about 11,952 characters (`build.md` at `fd93ec9`) and is about 22,033
 assembled now (`buildSystemPrompt().length`), because it carries the component table and theme options. It is
 the same on every call, so it is cached.
 

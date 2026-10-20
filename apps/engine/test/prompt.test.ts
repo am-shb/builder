@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSystemPrompt, componentTable } from "../src/agent/prompt-catalog.ts";
-import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS } from "../public/renderer/catalog.js";
+import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, TEMPLATES } from "../public/renderer/catalog.js";
 import { THEME_OPTIONS } from "../public/renderer/theme.js";
 
 test("the system prompt lists every component", () => {
@@ -47,4 +47,15 @@ test("the prompt says to make a filled tab the active one", () => {
 
 test("the prompt says the prototype block starts with the theme", () => {
   assert.ok(buildSystemPrompt().includes("`<prototype>`: the theme"));
+});
+
+test("the prompt lists every template with its regions and says the frame is automatic", () => {
+  const prompt = buildSystemPrompt();
+  for (const [name, t] of Object.entries(TEMPLATES)) {
+    const row = prompt.split("\n").find((l) => l.startsWith(`| \`${name}\` |`));
+    assert.ok(row, `no row for template ${name}`);
+    for (const region of Object.keys(t.regions)) assert.ok(row.includes(region), `${name} row lacks ${region}`);
+    assert.ok(row.includes(t.suggest), `${name} row lacks suggest`);
+  }
+  assert.ok(prompt.includes("never build navigation"));
 });
