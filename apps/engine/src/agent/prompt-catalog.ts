@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { CATALOG, STYLE_OPTIONS, TEMPLATES } from "../../public/renderer/catalog.js";
 import { PHONE_TABS } from "../../public/renderer/interact.js";
 import { ICON_ALIASES, ICON_NAMES } from "../../public/renderer/icons.js";
+import { IMAGES, IMAGE_SUBJECTS } from "../../public/renderer/images.js";
 import { THEME_OPTIONS } from "../../public/renderer/theme.js";
 
 // The build prompt's component and theme reference, generated from the catalog so the prompt can
@@ -59,6 +60,14 @@ export function iconList(): string {
   return `${(ICON_NAMES as string[]).join(", ")}. Also accepted: ${aliases.map((a) => `${a} (${ICON_ALIASES[a as keyof typeof ICON_ALIASES]})`).join(", ")}.`;
 }
 
+/** Every built-in photo, one line per subject: `food: food-1 rainbow salad bowl, food-2 sliced cheese pizza, ...`. */
+export function imageList(): string {
+  return IMAGE_SUBJECTS.map((subject) => {
+    const photos = IMAGES.filter((i) => i.subject === subject).map((i) => `${i.file.replace(/\.webp$/, "")} ${i.caption.toLowerCase()}`);
+    return `- ${subject}: ${photos.join(", ")}`;
+  }).join("\n");
+}
+
 /** build.md with the generated reference filled in. */
 export function buildSystemPrompt(): string {
   return readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8")
@@ -66,5 +75,6 @@ export function buildSystemPrompt(): string {
     .replace("{{PHONE_NOTE}}", () => `A phone shows only its first ${PHONE_TABS} Screens as bottom tabs, so keep a phone app to ${PHONE_TABS} Screens.`)
     .replace("{{TEMPLATES}}", () => templatesTable())
     .replace("{{ICONS}}", () => iconList())
+    .replace("{{IMAGES}}", () => imageList())
     .replace("{{THEME}}", () => themeOptions());
 }

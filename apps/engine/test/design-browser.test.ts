@@ -46,6 +46,12 @@ async function withGalleryServer(fn: (url: string) => Promise<void>) {
         return void res.writeHead(200, { "Content-Type": m[2] === "css" ? "text/css" : "text/javascript" }).end(body);
       } catch { /* fall through */ }
     }
+    const img = req.url?.match(/^\/renderer\/images\/([a-z]+-\d+\.webp)$/);
+    if (img) {
+      try {
+        return void res.writeHead(200, { "Content-Type": "image/webp" }).end(readFileSync(new URL(`../public/renderer/images/${img[1]}`, import.meta.url)));
+      } catch { /* fall through */ }
+    }
     res.writeHead(404).end();
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -726,6 +732,84 @@ test("icons", async (t) => {
         await shoot(page, dir, "icons-content");
         t.diagnostic(`screenshots: ${dir}`);
       });
+    });
+  }, { width: WIDTH, height: HEIGHT });
+});
+
+// ---------- images: built-in photos, chosen deterministically ----------
+
+test("image resolution", async (t) => {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), "design-")), "screens");
+  mkdirSync(dir, { recursive: true });
+  await withChrome(t, async (page) => {
+    await withGalleryServer(async (url) => {
+      await page.goto(url);
+      await page.waitFor("window.ready === true");
+      const loaded = `(async () => {
+        await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+        return [...document.images].filter((i) => !i.naturalWidth).map((i) => i.src);
+      })()`;
+      const src = (id: string) => page.eval<string | null>(`document.querySelector('[data-node-id="${id}"] img')?.getAttribute("src") ?? null`);
+      const block = (id: string) => page.eval<string | null>(`document.querySelector('[data-node-id="${id}"] .b-img-block')?.textContent ?? null`);
+      const setImage = (id: string, image: string) => page.eval(`(() => {
+        const find = (n) => n.id === ${JSON.stringify(id)} ? n : n.children.map(find).find(Boolean);
+        find(window.proto.root).props.image = ${JSON.stringify(image)};
+      })()`);
+
+      await t.test("a specific name, a subject, an unknown word", async () => {
+        await page.eval(`window.show("gallery-c")`);
+        assert.match((await src("c.img1"))!, /food-3\.webp$/);
+        assert.equal(await page.eval(`document.querySelector('[data-node-id="c.img1"] img').alt`), "Pouring latte art");
+        const food = await page.eval<string>(`(window.show("gallery-c"), document.querySelector('[data-node-id="c.img2"] img').getAttribute("src"))`);
+        assert.match(food, /\/renderer\/images\/places-\d\.webp$/);
+        await setImage("c.img1", "food");
+        await page.eval(`window.show("gallery-c")`);
+        const first = (await src("c.img1"))!;
+        assert.match(first, /\/food-\d\.webp$/);
+        await page.eval(`window.show("gallery-c")`);
+        assert.equal(await src("c.img1"), first, "same on re-render");
+        await setImage("c.img1", "pizza");
+        await page.eval(`window.show("gallery-c")`);
+        assert.equal(await src("c.img1"), null);
+        assert.equal((await block("c.img1"))?.toLowerCase(), "pizza");
+        await setImage("c.img1", "food-3");
+        await page.eval(`window.show("gallery-c")`);
+        assert.match((await src("c.img1"))!, /food-3\.webp$/, "back to a photo");
+        await setImage("c.img1", "food-99");
+        await page.eval(`window.show("gallery-c")`);
+        assert.equal(await src("c.img1"), null, "a specific image that does not exist");
+        await setImage("c.img1", "food-3");
+      });
+
+      await t.test("the same subject gives the same photo on a second page load", async () => {
+        const pick = async () => {
+          await page.goto(url);
+          await page.waitFor("window.ready === true");
+          await page.eval(`window.show("gallery-c")`);
+          return src("c.product1");
+        };
+        const a = await pick();
+        assert.match(a!, /products-\d\.webp$/);
+        assert.equal(await pick(), a);
+      });
+
+      await t.test("photos fill their boxes and all load", async () => {
+        const shots: string[] = [];
+        for (const screen of SCREENS) {
+          await page.eval(`window.show(${JSON.stringify(screen)})`);
+          assert.deepEqual(await page.eval<string[]>(loaded), [], `${screen} has broken images`);
+          const bad = await page.eval<string[]>(`[...document.querySelectorAll("#root img")].filter((i) => {
+            const cs = getComputedStyle(i); const r = i.getBoundingClientRect(); const p = i.parentElement.getBoundingClientRect();
+            return cs.objectFit !== "cover" || i.loading !== "eager" || i.draggable || r.width < p.width - 1 || r.height < p.height - 1;
+          }).map((i) => i.getAttribute("src"))`);
+          assert.deepEqual(bad, [], `${screen} images not covering their box`);
+        }
+        await page.eval(`window.show("gallery-c")`);
+        shots.push(...(await shoot(page, dir, "gallery-c-photos")));
+        t.diagnostic(`screenshots: ${dir} (${shots.length} files)`);
+      });
+
+      assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     });
   }, { width: WIDTH, height: HEIGHT });
 });

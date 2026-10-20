@@ -80,7 +80,7 @@ The prototype is a tree of finished, product-grade components. You never write H
 
 **Compact cell markup.** In `rows`, `items`, `cards` and `messages`, each string is cells split by `|`, laid out as the table's note for that type says. A cell starting `@` is a person, drawn as an avatar with the name (`@Sara K.`). A cell starting `#` is a status pill (`#Approved`, `#Pending`, `#Overdue`); its colour comes from the word, so use plain status words. Example row: `"@Sara K. | Figma seats | $420 | #Approved"`.
 
-**Style options** are optional and usually left out: with nothing set, a component already looks right. Set one only when it carries meaning (a `danger` tone on an overdue banner, `span: "2"` for a wide chart in a `Grid`) or the room asks for it. There is no other way to set colours or sizes. `icon` takes one name from the icon list below (`"wallet"`) and `image` a subject word (`"food"`, `"office"`); both are optional, so set one only when it is obvious and spend no output choosing.
+**Style options** are optional and usually left out: with nothing set, a component already looks right. Set one only when it carries meaning (a `danger` tone on an overdue banner, `span: "2"` for a wide chart in a `Grid`) or the room asks for it. There is no other way to set colours or sizes. `icon` takes one name from the icon list below (`"wallet"`) and `image` a name from the image list below (`"food"`, `"workspaces-2"`); both are optional, so set one only when it is obvious and spend no output choosing.
 
 Interactions make the prototype clickable. Attach them under `on.click` or `on.change`: `navigate` (to a screen id), `toggle`, `open` and `close` (a modal, drawer or toggle target), `append` (add the text of an input to a list), `setValue`. There is no other behaviour.
 
@@ -105,6 +105,14 @@ When you add a Screen, give it a `title`, an `icon` and the `template` that fits
 `icon` (on a Screen, StatCard, Button, ListItem, Input and EmptyState, and the first cell of a FeatureGrid row) takes exactly one of these names. Never invent one: an unknown name draws nothing.
 
 {{ICONS}}
+
+## Images
+
+`image` (on Image, Hero, ProductCard and MediaCard) shows a built-in photo. These are the only photos there are, listed as `subject: name caption, ...`:
+
+{{IMAGES}}
+
+Use a subject name (`"food"`) when any photo of that kind will do; it picks one for you and keeps it. Use a specific name (`"food-2"`) only when the room described something specific (a pizza place, a leather bag). Any other word, or a name not listed, shows a plain placeholder with that word, so never invent one.
 
 ## Looks and theme
 

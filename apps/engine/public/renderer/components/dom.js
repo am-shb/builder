@@ -2,6 +2,7 @@
 // so a builder's update stays idempotent (re-rendering an unchanged prototype mutates nothing).
 import { parseCells } from "@renderer/catalog.js";
 import { iconData } from "@renderer/icons.js";
+import { resolveImage } from "@renderer/images.js";
 
 export const str = (v, d = "") => (v === undefined || v === null ? d : String(v));
 export const arr = (v) => (Array.isArray(v) ? v.map(String) : []);
@@ -137,10 +138,31 @@ export function subject(image) {
   return str(image).trim().replace(/[-_\s]*\d+$/, "").replace(/[-_]+/g, " ");
 }
 
-/** Until the built-in images land: a tinted block that names its subject. */
-export function imageBlock(image, cls = "") {
-  const el = h("div", `b-img-block${cls ? " " + cls : ""}`);
-  el.append(h("span", "b-img-word", subject(image) || "Image"));
+/** Where a built-in photo is fetched from: an inlined data URL (the self-contained export), else the page's image base. */
+function imageSrc(file) {
+  const inlined = globalThis.__builderImageData?.[file];
+  if (inlined) return inlined;
+  const base = globalThis.__builderImageBase;
+  return (typeof base === "string" ? base : "/renderer/images/") + file;
+}
+
+/** What `imageBlock` draws for this value and node: the photo's file, or the word itself. Builders compare it to stay idempotent. */
+export const imageKey = (image, nodeId) => resolveImage(image, nodeId)?.file ?? "?" + str(image);
+
+/** A built-in photo (`image` is a subject or a specific name, resolved with the node id), else a tinted block naming the word. */
+export function imageBlock(image, cls = "", nodeId = "") {
+  const photo = resolveImage(image, nodeId);
+  if (!photo) {
+    const el = h("div", `b-img-block${cls ? " " + cls : ""}`);
+    el.append(h("span", "b-img-word", subject(image) || "Image"));
+    return el;
+  }
+  const el = h("img", `b-img-photo${cls ? " " + cls : ""}`);
+  el.alt = photo.caption;
+  el.loading = "eager";
+  el.decoding = "async";
+  el.draggable = false;
+  el.src = imageSrc(photo.file);
   return el;
 }
 

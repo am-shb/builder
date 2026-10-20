@@ -313,6 +313,12 @@ test("renderer assets are public through the tunnel; script endpoint is not", as
   assert.match(js.headers.get("content-type")!, /javascript/);
   assert.equal((await fetch(`${ctx.base}/renderer/missing.js`, { headers: proxied })).status, 404);
   assert.equal((await fetch(`${ctx.base}/renderer/..%2Findex.html`, { headers: proxied })).status, 404);
+  const img = await fetch(`${ctx.base}/renderer/images/food-1.webp`, { headers: proxied });
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get("content-type"), "image/webp");
+  for (const bad of ["/renderer/images/..%2Fapp.ts", "/renderer/images/../app.ts", "/renderer/images/x.js", "/renderer/images/nope-1.webp"]) {
+    assert.equal((await fetch(`${ctx.base}${bad}`, { headers: proxied })).status, 404, bad);
+  }
   const script = await fetch(`${ctx.base}/api/sessions/${ctx.session.id}/script`, { method: "POST", body: JSON.stringify({ steps: [] }), headers: proxied });
   assert.equal(script.status, 404);
   assert.equal((await fetch(`${ctx.base}/api/sessions/${ctx.session.id}/script`, { method: "POST", body: JSON.stringify({ steps: [] }) })).status, 200);

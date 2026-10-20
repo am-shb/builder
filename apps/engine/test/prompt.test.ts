@@ -4,6 +4,7 @@ import { buildSystemPrompt, componentTable } from "../src/agent/prompt-catalog.t
 import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, TEMPLATES } from "../public/renderer/catalog.js";
 import { PHONE_TABS } from "../public/renderer/interact.js";
 import { ICON_NAMES } from "../public/renderer/icons.js";
+import { IMAGES, IMAGE_SUBJECTS } from "../public/renderer/images.js";
 import { THEME_OPTIONS } from "../public/renderer/theme.js";
 
 test("the system prompt lists every component", () => {
@@ -77,4 +78,12 @@ test("every component-like word in a template's suggest line is a real type", ()
 test("the prompt states the phone tab limit from the renderer", () => {
   assert.ok(buildSystemPrompt().includes(`first ${PHONE_TABS} Screens as bottom tabs`));
   assert.ok(buildSystemPrompt().includes("sidebar on a desktop screen"));
+});
+
+test("the prompt lists every image subject, name and caption, and says when to use which", () => {
+  const prompt = buildSystemPrompt();
+  for (const subject of IMAGE_SUBJECTS) assert.ok(prompt.includes(`${subject}:`), subject);
+  for (const img of IMAGES) assert.ok(prompt.includes(`${img.file.replace(/\.webp$/, "")} ${img.caption.toLowerCase()}`), img.file);
+  assert.match(prompt, /subject name/);
+  assert.match(prompt, /placeholder/);
 });

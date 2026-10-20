@@ -108,7 +108,7 @@
       ] },
 
       { "id": "gallery-c", "type": "Screen", "props": { "title": "Content", "icon": "file-text" }, "status": "agreed", "children": [
-        { "id": "c.hero", "type": "Hero", "props": { "title": "Expenses without the spreadsheet", "subtitle": "Snap a receipt, get approved, get paid.", "image": "workspace-2" }, "status": "agreed", "children": [
+        { "id": "c.hero", "type": "Hero", "props": { "title": "Expenses without the spreadsheet", "subtitle": "Snap a receipt, get approved, get paid.", "image": "workspaces-2" }, "status": "agreed", "children": [
           { "id": "c.hero.cta", "type": "Button", "props": { "label": "Start free", "size": "lg" }, "status": "agreed", "children": [] },
           { "id": "c.hero.more", "type": "Button", "props": { "label": "See pricing", "variant": "secondary", "size": "lg" }, "status": "agreed", "children": [] }
         ] },
@@ -135,7 +135,7 @@
         { "id": "c.products", "type": "Grid", "props": { "columns": "3" }, "status": "agreed", "children": [
           { "id": "c.product1", "type": "ProductCard", "props": { "title": "Card reader", "price": "$29", "image": "products", "rating": 4.5, "badge": "New" }, "status": "agreed", "children": [] },
           { "id": "c.product2", "type": "ProductCard", "props": { "title": "Desk stand", "price": "$49", "image": "products-2", "rating": 9 }, "status": "agreed", "children": [] },
-          { "id": "c.media1", "type": "MediaCard", "props": { "title": "Closing the month in a day", "text": "How the design team cut month-end from a week to an afternoon.", "image": "workspace", "meta": "Guide · 5 min" }, "status": "agreed", "children": [] }
+          { "id": "c.media1", "type": "MediaCard", "props": { "title": "Closing the month in a day", "text": "How the design team cut month-end from a week to an afternoon.", "image": "workspaces", "meta": "Guide · 5 min" }, "status": "agreed", "children": [] }
         ] },
         { "id": "c.images", "type": "Grid", "props": { "columns": "4" }, "status": "agreed", "children": [
           { "id": "c.img1", "type": "Image", "props": { "image": "food-3", "aspect": "wide", "span": "2" }, "status": "agreed", "children": [] },

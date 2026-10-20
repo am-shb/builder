@@ -1,14 +1,15 @@
 // Content: headings, text, marketing blocks, cards with pictures, people and labels.
 import {
   h, str, arr, num, clampInt, setText, setHidden, setOptional, setVariant, withParts, changed,
-  cells, cellEl, avatar, syncAvatar, imageBlock, subject, icon,
+  cells, cellEl, avatar, syncAvatar, imageBlock, imageKey, subject, icon,
 } from "@renderer/components/dom.js";
 
-/** Picture part of Hero and MediaCard: a tinted block naming the subject, rebuilt on change. */
-function syncImage(slot, image, cls) {
-  setHidden(slot, !image);
-  if (!image || !changed(slot, image)) return;
-  slot.replaceChildren(imageBlock(image, cls));
+/** Picture part of Hero, MediaCard, ProductCard and Image: a built-in photo (or a tinted block naming the word), rebuilt only when what it shows changes. */
+function syncImage(slot, image, cls, nodeId, hideEmpty = true) {
+  if (hideEmpty) setHidden(slot, !image);
+  if (hideEmpty && !image) return;
+  if (!changed(slot, imageKey(image, nodeId))) return;
+  slot.replaceChildren(imageBlock(image, cls, nodeId));
 }
 
 function stars(rating) {
@@ -51,7 +52,7 @@ export const CONTENT = {
       setOptional(el.parts.subtitle, str(node.props.subtitle));
       const image = str(node.props.image);
       el.classList.toggle("has-media", !!image);
-      syncImage(el.parts.media, image, "is-fill");
+      syncImage(el.parts.media, image, "is-fill", node.id);
     },
     slot: (el) => el.parts.actions,
   },
@@ -125,7 +126,7 @@ export const CONTENT = {
     },
     update(el, node) {
       const p = node.props;
-      if (changed(el.parts.pic, str(p.image))) el.parts.pic.replaceChildren(imageBlock(str(p.image), "is-fill"));
+      syncImage(el.parts.pic, str(p.image), "is-fill", node.id, false);
       setOptional(el.parts.badge, str(p.badge));
       setText(el.parts.title, str(p.title));
       setText(el.parts.price, str(p.price));
@@ -149,7 +150,7 @@ export const CONTENT = {
     },
     update(el, node) {
       const p = node.props;
-      syncImage(el.parts.media, str(p.image), "is-fill");
+      syncImage(el.parts.media, str(p.image), "is-fill", node.id);
       setOptional(el.parts.meta, str(p.meta));
       setText(el.parts.title, str(p.title));
       setOptional(el.parts.text, str(p.text));
@@ -166,7 +167,7 @@ export const CONTENT = {
     },
     update(el, node) {
       const image = str(node.props.image);
-      if (changed(el.parts.pic, image)) el.parts.pic.replaceChildren(imageBlock(image, "is-fill"));
+      syncImage(el.parts.pic, image, "is-fill", node.id, false);
       const aspect = ["wide", "square", "tall"].includes(str(node.props.aspect)) ? str(node.props.aspect) : "wide";
       setVariant(el, "is-aspect-", aspect);
       setOptional(el.parts.caption, str(node.props.label));
