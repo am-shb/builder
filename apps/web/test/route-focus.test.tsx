@@ -1,7 +1,7 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigate } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
@@ -62,5 +62,55 @@ describe("moving to another page", () => {
     act(() => back.focus());
     await loaded();
     expect(document.activeElement).toBe(back);
+  });
+
+  it("focus moved with no key or click (a screen reader can) counts too, even if it then falls to the page", async () => {
+    app();
+    await userEvent.click(await screen.findByRole("link", { name: /^kfp-qzwd-nre/ }));
+    const back = screen.getByRole("link", { name: "Back to sessions" });
+    act(() => back.focus());
+    act(() => back.blur());
+    await loaded();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("a redirect that's part of the first load isn't a move (an unknown address goes to the list)", async () => {
+    const api = fakeApi({ "GET /v1/sessions": { status: 200, body: { sessions: [] } } });
+    render(<ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/nope"]}><AppRoutes /></MemoryRouter></ApiProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Sessions" });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("after a click or a key, the page loading doesn't take focus back, even when focus fell to the page", async () => {
+    app();
+    await userEvent.click(await screen.findByRole("link", { name: /^kfp-qzwd-nre/ }));
+    // A click on text: focus leaves the heading for the page itself, with no focusin.
+    fireEvent.pointerDown(document.body);
+    act(() => (document.activeElement as HTMLElement).blur());
+    expect(document.activeElement).toBe(document.body);
+    await loaded();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("steps inside Clerk's sign-in aren't moves: Clerk focuses its own fields", async () => {
+    setClerk({ session: "none" });
+    let go: ((to: string) => void) | undefined;
+    function Nav() {
+      const navigate = useNavigate();
+      go = (to) => navigate(to);
+      return null;
+    }
+    render(<MemoryRouter initialEntries={["/sign-in"]}><AppRoutes /><Nav /></MemoryRouter>);
+    const field = document.createElement("input");
+    document.body.append(field);
+    act(() => field.focus());
+    await act(async () => go!("/sign-in/factor-one"));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field);
+    // Leaving the flow is a move.
+    await act(async () => go!("/sign-up"));
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    field.remove();
   });
 });

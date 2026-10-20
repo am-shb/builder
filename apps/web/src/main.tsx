@@ -1,3 +1,5 @@
+// First, before anything that uses zod.
+import "./lib/zod-setup.ts";
 import "./styles/globals.css";
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";

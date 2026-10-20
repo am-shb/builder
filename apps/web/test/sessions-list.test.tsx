@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
@@ -151,6 +151,35 @@ describe("the session list", () => {
     expect(screen.queryByText("Updated.")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect((await screen.findByText("Updated.")).closest("[role=status]")).not.toBeNull();
+  });
+
+  it("a second Refresh that works is announced again (a new node), and a Refresh pending when the org changes says nothing", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let hold: ((r: Response) => void) | undefined;
+    const body = () => new Response(JSON.stringify({ sessions: SESSIONS.slice(0, 1) }), { status: 200 });
+    const api = fakeApi({
+      "GET /v1/sessions": async (req) => (hold === undefined && req.headers.Authorization === "Bearer token-org_a" && api.requests.length === 4
+        ? new Promise<Response>((r) => { hold = r; })
+        : body()),
+    });
+    const view = show(api);
+    await screen.findByText("kfp-qzwd-nre");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    const first = await screen.findByText("Updated.");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("Updated.")).not.toBe(first));
+    // A third Refresh is still running when the org changes.
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(hold).toBeTypeOf("function"));
+    setClerk({ session: "active", orgId: "org_b" });
+    view.rerender(
+      <ApiProvider baseUrl={API} fetch={api.fetch}>
+        <MemoryRouter initialEntries={["/"]}><Routes><Route path="/" element={<ListUnderTest />} /></Routes><Where /></MemoryRouter>
+      </ApiProvider>,
+    );
+    await screen.findByText("kfp-qzwd-nre");
+    await act(async () => {});
+    expect(screen.queryByText("Updated.")).toBeNull();
   });
 
   it("a refresh that fails keeps the rows and shows why above them", async () => {

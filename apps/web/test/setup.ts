@@ -59,6 +59,8 @@ Object.defineProperty(window, "matchMedia", {
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
   }),
 });
+// jsdom has no scrolling; moving between pages scrolls to the top (RouteFocus).
+window.scrollTo = (() => {}) as typeof window.scrollTo;
 g.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 // axe probes a canvas for icon fonts; jsdom has none and prints a warning per call.
 HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;

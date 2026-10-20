@@ -236,7 +236,8 @@ list.** States: loading, empty (points at the form), error (by code, below). A R
   send a second bot to a meeting that already has one. If the list has a `starting`, `joining` or `in_meeting` session
   for the same normalized meeting under a different link, still within its time limit plus 10 minutes, Start asks
   first: "This meeting already has a {BOT} session ({status}), started from another copy of the link. Starting again
-  sends a second {BOT} bot." The exact same link doesn't ask: the api reuses that session. The api-side fix is ADR 0014.
+  sends a second {BOT} bot." The exact same link doesn't ask: the api reuses that session. The api-side fix is the
+  meeting-key ADR draft (0014, in review).
 - Outcomes are in [Errors](#errors-every-api-code).
 
 **Session detail (`/sessions/:id`):** from `GET /v1/sessions/:id`. Shows the status label and a one-line
@@ -246,7 +247,8 @@ such session in this organization" with "Back to sessions" (the same words as th
 A Refresh that works says "Updated." to screen readers; one that fails says "Couldn't refresh".
 
 **Moving between pages** starts the new page at its top, with focus on its `h1` (and on the loaded page's `h1` once
-it has loaded), as a full page load would. The first load is left to the browser. A page that throws while rendering
+it has loaded, until the person does anything), as a full page load would. The first load and its redirects are
+left to the browser, and so are the steps inside Clerk's sign-in and sign-up, which focus their own fields. A page that throws while rendering
 shows "Something went wrong" with Reload instead of a blank page.
 
 **Status labels:**

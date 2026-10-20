@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 type Refreshable = { refresh: () => void; status: "loading" | "ready" | "error"; loadedAt: Date | undefined; error: unknown };
@@ -12,6 +13,13 @@ export function useRefreshNews(query: Refreshable): { refresh: () => void; news:
   const [done, setDone] = useState(0);
   const [shown, setShown] = useState(false);
   const { refresh: reload, status, loadedAt, error } = query;
+  const { orgId } = useAuth();
+
+  // Switching org starts a new read that nobody asked to refresh: nothing to announce.
+  useEffect(() => {
+    asked.current = null;
+    setShown(false);
+  }, [orgId]);
 
   useEffect(() => {
     if (asked.current === null) return;

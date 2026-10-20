@@ -60,7 +60,8 @@ export function findUnconfirmedStart(sessions: readonly SessionView[], meetingUr
 // A session for this meeting that may still have its bot there, under another copy of the link (?authuser=0, a
 // different case): the api and engine match exact links, so starting this copy would send a second bot. The exact
 // same link isn't one: the api answers with the existing session and sends nothing. Starting, joining and in the
-// meeting count until the session's time limit has passed, plus a margin, as the api counts them.
+// meeting count until the session's time limit has passed, plus 10 minutes: this app's estimate of when the engine
+// has ended the bot, since statuses don't move yet. (The api's start guards use the same default margin.)
 export const ACTIVE_STATUSES: readonly string[] = ["starting", "joining", "in_meeting"];
 export const ACTIVE_MARGIN_MS = 10 * 60_000;
 
@@ -80,6 +81,8 @@ export type StartConfirmation = { kind: "unconfirmed" } | { kind: "active"; sess
 export function startConfirmation(last: StartResult | null, sessions: readonly SessionView[], meetingUrl: string, now = new Date()): StartConfirmation {
   const unknownBefore = last?.kind === "failed" && last.explained.botMayExist && sameMeetingLink(last.meetingUrl, meetingUrl);
   if (unknownBefore || findUnconfirmedStart(sessions, meetingUrl, now) !== undefined) return { kind: "unconfirmed" };
+  // An active session under this exact link means the api reuses it: nothing is sent, so nothing to ask.
+  if (sessions.some((s) => ACTIVE_STATUSES.includes(s.status) && s.meetingUrl === meetingUrl)) return null;
   const active = findActiveCopy(sessions, meetingUrl, now);
   return active ? { kind: "active", session: active } : null;
 }

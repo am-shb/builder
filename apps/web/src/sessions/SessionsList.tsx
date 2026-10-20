@@ -43,6 +43,7 @@ export function SessionsList({ list, now, emptyAction }: {
     return (
       <section aria-labelledby="recent">
         {header}
+        {news}
         {/* Skeleton rows fade in after 150 ms, so a fast reply shows nothing in between. */}
         <SessionList aria-busy="true" aria-label="Loading sessions"
           className="motion-safe:animate-in motion-safe:fade-in motion-safe:delay-150 motion-safe:fill-mode-both">
@@ -56,6 +57,7 @@ export function SessionsList({ list, now, emptyAction }: {
     return (
       <section aria-labelledby="recent">
         {header}
+        {news}
         <ErrorNotice error={list.error} context="read" onRefresh={list.refresh} className="mt-2 md:max-w-[520px]" />
       </section>
     );

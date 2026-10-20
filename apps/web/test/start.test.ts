@@ -98,7 +98,7 @@ describe("findActiveCopy: another copy of the link for a meeting that may still 
     expect(findActiveCopy([at(60_000)], LINK, NOW)).toBeUndefined();
   });
 
-  it("not once the session's time limit and the margin have passed, as the api counts it", () => {
+  it("not once the session's time limit and the margin have passed", () => {
     expect(findActiveCopy([at(LIMIT + ACTIVE_MARGIN_MS)], `${LINK}?authuser=0`, NOW)?.id).toBe("a");
     expect(findActiveCopy([at(LIMIT + ACTIVE_MARGIN_MS + 1)], `${LINK}?authuser=0`, NOW)).toBeUndefined();
   });
@@ -117,6 +117,13 @@ describe("findActiveCopy: another copy of the link for a meeting that may still 
     const unconfirmed = at(60_000, { id: "u", status: "start_unknown" });
     expect(startConfirmation(null, [active, unconfirmed], `${LINK}?authuser=0`, NOW)).toEqual({ kind: "unconfirmed" });
     expect(shouldConfirmStart(null, [active], `${LINK}?authuser=0`, NOW)).toBe(true);
+  });
+
+  it("doesn't ask for the exact link of an active session, even when another copy is active too: the api reuses it", () => {
+    const copy = at(60_000, { id: "c", meetingUrl: `${LINK}?authuser=0` });
+    const exact = at(60_000, { id: "e" });
+    expect(startConfirmation(null, [copy, exact], LINK, NOW)).toBeNull();
+    expect(startConfirmation(null, [copy, exact], `${LINK}?authuser=1`, NOW)).toEqual({ kind: "active", session: copy });
   });
 });
 

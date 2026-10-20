@@ -58,6 +58,8 @@ describe("buildCsp", () => {
     expect(directive(csp, "script-src")).toContain("https://fancy-cat-12.clerk.accounts.test");
     expect(directive(csp, "default-src")).toBe("default-src 'self'");
     expect(directive(csp, "object-src")).toBe("object-src 'none'");
+    // Clerk's components draw small SVGs as data: images (seen in the production build, M7).
+    expect(directive(csp, "img-src")).toBe("img-src 'self' https://img.clerk.com data:");
   });
 
   it("leaves out what's missing or invalid, and stays strict", () => {

@@ -24,7 +24,8 @@ export function buildCsp(input: CspInput): string {
     ["default-src", ["'self'"]],
     ["script-src", ["'self'", ...clerk, "https://challenges.cloudflare.com", "https://*.protect.clerk.com"]],
     ["connect-src", ["'self'", ...(api ? [api] : []), ...clerk, "https://*.protect.clerk.com:*"]],
-    ["img-src", ["'self'", "https://img.clerk.com"]],
+    // data: for the small SVG images Clerk's components draw (found by the production-build check, M7).
+    ["img-src", ["'self'", "https://img.clerk.com", "data:"]],
     // Clerk's components inject their styles at runtime.
     ["style-src", ["'self'", "'unsafe-inline'"]],
     ["worker-src", ["'self'", "blob:"]],
