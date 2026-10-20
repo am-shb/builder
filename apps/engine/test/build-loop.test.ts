@@ -749,6 +749,19 @@ test("a theme reverted by an objection comes back when its decision is agreed in
   assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
 });
 
+test("the model sees the theme in the prototype block", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold")], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.match(s.userText(0), /theme: house default/);
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "and add tasks")]));
+  await flush();
+  const text = s.userText(1);
+  const block = text.slice(text.indexOf("<prototype"), text.indexOf("</prototype>"));
+  assert.ok(block.includes("theme: accent=gold (draft, d1); warmth=neutral (agreed); radius=soft (agreed); density=regular (agreed)"));
+});
+
 test("an ungrounded objection does not revert", async () => {
   const s = await setup([
     [themeBatch("d1", "gold"), themeDecision("d1", "gold")],

@@ -21,6 +21,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 import { errorCode } from "../error-code.ts";
+import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
 
 export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
@@ -120,6 +121,16 @@ function mergeHandoffs(a: Handoff, b: Handoff): Handoff {
   return merged;
 }
 
+// The theme as one line: each slot's value, status and decision, or the house default.
+function themeLine(proto: Prototype): string {
+  if (!proto.theme) return `theme: house default (${THEME_SLOTS.map((s) => `${s}=${DEFAULT_THEME_VALUES[s]}`).join(", ")}), all agreed`;
+  const theme = proto.theme;
+  return `theme: ${THEME_SLOTS.map((s) => {
+    const slot = theme[s];
+    return `${s}=${slot.value} (${[slot.status, ...(slot.decisionId ? [slot.decisionId] : [])].join(", ")})`;
+  }).join("; ")}`;
+}
+
 function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto: Prototype): string {
   const lines = grounding.map((e) => `[${e.id}] ${e.speaker ?? "Unknown"}: ${e.text ?? ""}`).join("\n");
   return [
@@ -127,7 +138,7 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
     `<handoff>\n${JSON.stringify(h)}\n</handoff>`,
     `<grounding_lines>\n${lines}\n</grounding_lines>`,
     `<consensus_doc>\n${JSON.stringify(doc)}\n</consensus_doc>`,
-    `<prototype current_screen="${proto.currentScreen}">\n${JSON.stringify(proto.root)}\n</prototype>`,
+    `<prototype current_screen="${proto.currentScreen}">\n${themeLine(proto)}\n${JSON.stringify(proto.root)}\n</prototype>`,
   ].join("\n\n");
 }
 

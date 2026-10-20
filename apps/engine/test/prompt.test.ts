@@ -34,3 +34,17 @@ test("the prompt never mentions status on nodes", () => {
   assert.doesNotMatch(prompt, /\(props, status/);
   assert.doesNotMatch(prompt, /ImagePlaceholder|ChartPlaceholder|NavBar|`Stack`/);
 });
+
+test("the prompt leaves bringing back a reverted theme to the system", () => {
+  const prompt = buildSystemPrompt();
+  assert.ok(prompt.includes("the system puts the theme back to its last agreed look by itself"));
+  assert.ok(!/send `set_theme` again/.test(prompt), "no rule to re-send a reverted theme");
+});
+
+test("the prompt says to make a filled tab the active one", () => {
+  assert.ok(buildSystemPrompt().includes("When you fill a tab, set the `Tabs` `active` to it in the same batch"));
+});
+
+test("the prompt says the prototype block starts with the theme", () => {
+  assert.ok(buildSystemPrompt().includes("`<prototype>`: the theme"));
+});
