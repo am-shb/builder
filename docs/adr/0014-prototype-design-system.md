@@ -88,7 +88,14 @@ Option 4.
   fails if one cannot be found. Only geometry elements and attributes are stored, and the renderer draws them
   with `createElementNS` (never `innerHTML`) as an inline `currentColor` svg, 20px (24px in nav and stat
   cards). An unknown name draws nothing; the build prompt lists every name so the model does not invent one.
-- Until part 3, `Image` renders a tinted block with its subject word.
+- `Image` draws one of 40 bundled stock photos (food, places, people, products, workspaces: 7 each; abstract: 5),
+  sourced from unsplash.com under the free Unsplash License (each photo's page checked; Unsplash+ photos are
+  excluded; pexels.com blocks scripted fetches, so it is not used). Files are `apps/engine/public/renderer/images/<subject>-<n>.webp`,
+  at most 800 px on the long side, 80 KB each and 3 MB in total (about 1.4 MB today). `images/LICENSES.md` lists
+  file, caption, photographer, source URL and license; `images.js` carries the same data plus pixel sizes, and
+  `resolveImage` maps an exact name or a subject (picked by FNV-1a of the node id) to a file. `node scripts/check-images.ts`
+  and `assets-unit` enforce the budgets and the manifest. People photos are groups and people at work, not portraits
+  meant as avatars. An unknown name still falls back to a tinted block with the word.
 
 ## Measurements
 The mockup's Overview screen (page header, three stat cards, a six-month bar chart and three recent expenses) sent as
