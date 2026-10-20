@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { axeViolations } from "./helpers/axe.ts";
-import { media } from "./setup.ts";
+import { DESKTOP_MOUSE, PHONE, useScreen } from "./setup.ts";
 
 // The design page reads its query when the module loads, so each case imports it fresh.
 async function renderDesign(query: string) {
@@ -21,7 +21,7 @@ describe("the /_design page", () => {
   for (const [name, query] of [["components", ""], ["sessions screen", "?view=shell"], ["empty state", "?view=shell&empty=1"]] as const) {
     for (const desktop of [false, true]) {
       it(`${name} (${desktop ? "desktop" : "phone"}) has no accessibility violations`, async () => {
-        media.matches = desktop;
+        useScreen(desktop ? DESKTOP_MOUSE : PHONE);
         await renderDesign(query);
         expect(await axeViolations(document.body)).toEqual([]);
       });

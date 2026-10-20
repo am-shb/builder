@@ -27,13 +27,30 @@ if (typeof navigator !== "undefined") {
   Object.defineProperty(navigator, "sendBeacon", { value: blocked("navigator.sendBeacon"), configurable: true });
 }
 
-// jsdom has no matchMedia or ResizeObserver; Radix and the layout hook use them. Tests see the phone layout unless a
-// test sets `matchMediaMatches` (true means every query matches: the desktop layout).
-export const media = { matches: false };
+// jsdom has no matchMedia or ResizeObserver; Radix and the layout hooks use them. The fake answers each query from a
+// pretend screen: a width and a pointer. Tests see a phone (390px, touch) unless they call `useScreen`.
+export const media = { width: 390, coarse: true };
+export const PHONE = { width: 390, coarse: true };
+export const DESKTOP_MOUSE = { width: 1280, coarse: false };
+export function useScreen(screen: { width: number; coarse: boolean }) {
+  Object.assign(media, screen);
+}
+
+// Understands the queries the app uses: (min-width: Npx), (max-width: Npx) and (pointer: coarse|fine), joined by "and".
+export function mediaMatches(query: string): boolean {
+  return query.split(/\s+and\s+/).every((part) => {
+    const m = /^\(\s*(min-width|max-width|pointer)\s*:\s*([\w.]+?)(px)?\s*\)$/.exec(part.trim());
+    if (!m) return false;
+    const [, feature, value] = m;
+    if (feature === "pointer") return value === (media.coarse ? "coarse" : "fine");
+    return feature === "min-width" ? media.width >= Number(value) : media.width <= Number(value);
+  });
+}
+
 Object.defineProperty(window, "matchMedia", {
   configurable: true,
   value: (query: string) => ({
-    matches: media.matches, media: query, onchange: null,
+    matches: mediaMatches(query), media: query, onchange: null,
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
   }),
 });
@@ -43,5 +60,5 @@ HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElemen
 
 afterEach(() => {
   cleanup();
-  media.matches = false;
+  useScreen(PHONE);
 });

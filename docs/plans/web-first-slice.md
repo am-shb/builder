@@ -421,7 +421,7 @@ investors, so the look is part of "done" for every screen step, not polish for l
   | | Phone (below 768px) | Desktop (768px and up) |
   |---|---|---|
   | Top bar | the mark, org switcher, account button (wordmark hidden under 400px) | the same, with the wordmark |
-  | New session | full-width pill in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | the start panel, sticky in the left column |
+  | New session | full-width pill in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | 768-1023px: the same bar, opening a centered dialog; 1024px and up: the start panel, sticky in the left column |
   | Session detail | a pushed screen with a back button | a page with a back link |
   | Confirmations | bottom sheet | centered dialog |
 

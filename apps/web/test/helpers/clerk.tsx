@@ -50,6 +50,11 @@ vi.mock("@clerk/react", () => ({
     return { isLoaded: true, session: { status: session, currentTask: session === "pending" ? { key: "choose-organization" } : undefined } };
   },
   useClerk: () => ({ signOut: clerk.signOut }),
+  // The active org's name: "Org A" for org_a, "Org B" for org_b.
+  useOrganization: () => {
+    const { session, orgId } = clerk.state;
+    return { isLoaded: true, organization: session === "active" && orgId ? { id: orgId, name: `Org ${orgId.slice(-1).toUpperCase()}` } : null };
+  },
   SignIn: stub("clerk-sign-in"),
   SignUp: stub("clerk-sign-up"),
   TaskChooseOrganization: stub("clerk-task-choose-organization"),

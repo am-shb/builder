@@ -14,5 +14,5 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-// The desktop layout starts at 768px (ADR 0013): dialogs instead of sheets, the start panel instead of the action bar.
+// From 768px (ADR 0013): dialogs instead of sheets. The start panel replaces the action bar later, at 1024px (CSS `lg`).
 export const DESKTOP = "(min-width: 768px)";

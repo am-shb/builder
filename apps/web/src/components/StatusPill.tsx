@@ -12,8 +12,13 @@ export const STATUS_LABELS: Record<string, string> = {
   start_unknown: "Check the meeting",
 };
 
+// Own keys only, so a status such as "constructor" reads as "Unknown" instead of finding the object's own methods.
+export function isKnownStatus(status: string): boolean {
+  return Object.hasOwn(STATUS_LABELS, status);
+}
+
 export function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? "Unknown";
+  return isKnownStatus(status) ? STATUS_LABELS[status]! : "Unknown";
 }
 
 // Statuses still on their way: drawn dashed, the product's own rule.
@@ -39,7 +44,7 @@ function Dot({ status }: { status: string }) {
     return <span className="size-[11px] shrink-0 rounded-full border-2 border-dashed border-current animate-turn" />;
   }
   if (status === "failed") return <span className="size-2 shrink-0 rotate-45 rounded-[2px] bg-current" />;
-  if (!(status in STATUS_LABELS)) {
+  if (!isKnownStatus(status)) {
     return <span className="grid size-3.5 shrink-0 place-items-center rounded-full border-[1.5px] border-current text-[10px] leading-none font-bold">?</span>;
   }
   return <span className="size-2 shrink-0 rounded-full bg-current" />;
@@ -52,7 +57,7 @@ export function StatusPill({ status, size = "md", className }: { status: string;
       className={cn(
         "inline-flex shrink-0 items-center rounded-full font-semibold whitespace-nowrap leading-none",
         size === "md" ? "h-[30px] gap-2 pr-3 pl-2.5 text-sm" : "h-7 gap-[7px] pr-[11px] pl-[9px] text-[13px]",
-        TONE[status] ?? "bg-s-end-bg text-s-end-ink",
+        (Object.hasOwn(TONE, status) ? TONE[status] : "bg-s-end-bg text-s-end-ink"),
         className,
       )}
     >

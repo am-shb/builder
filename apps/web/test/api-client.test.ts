@@ -41,6 +41,13 @@ describe("every request", () => {
     expect(api.requests).toHaveLength(0);
   });
 
+  it("when Clerk can't give a token, sends nothing and says so with its own code", async () => {
+    const api = fakeApi();
+    const c = createApiClient({ baseUrl: API, getToken: () => Promise.reject(new Error("offline")), fetch: api.fetch });
+    expect((await failure(c.createSession("https://meet.google.com/abc-defg-hij"))).code).toBe("token_error");
+    expect(api.requests).toHaveLength(0);
+  });
+
   it("escapes the session id in the path", async () => {
     const api = fakeApi();
     await failure(client(api).getSession("a/../b"));
@@ -72,6 +79,24 @@ describe("replies", () => {
     const api = fakeApi({ "POST /v1/sessions": { status: 502, body: errorBody("engine_rejected", { session: saved }) } });
     const err = await failure(client(api).createSession("https://meet.google.com/x"));
     expect([err.status, err.code, err.session?.errorCode]).toEqual([502, "engine_rejected", "recall_rejected"]);
+  });
+
+  it("keeps the code of a failed start when its saved session can't be read", async () => {
+    const api = fakeApi({ "POST /v1/sessions": { status: 502, body: errorBody("engine_rejected", { session: { id: "s1", renamed: true } }) } });
+    const err = await failure(client(api).createSession("https://meet.google.com/x"));
+    expect([err.status, err.code, err.session]).toEqual([502, "engine_rejected", undefined]);
+  });
+
+  it("the list drops each session's stage control link; one session keeps it", async () => {
+    const withStage = session({ stageUrl: "https://stage.example.test/s/abc?token=secret" });
+    const api = fakeApi({
+      "GET /v1/sessions": { status: 200, body: { sessions: [withStage] } },
+      [`GET /v1/sessions/${withStage.id}`]: { status: 200, body: { session: withStage } },
+    });
+    const [listed] = await client(api).listSessions();
+    expect(listed).not.toHaveProperty("stageUrl");
+    expect(JSON.stringify(listed)).not.toContain("secret");
+    expect((await client(api).getSession(withStage.id)).stageUrl).toBe(withStage.stageUrl);
   });
 
   it("a fetch that throws is network_error; an unreadable or wrong reply is bad_response", async () => {

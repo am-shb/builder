@@ -32,13 +32,19 @@ type Shot = {
   click?: string;
   // The api's answers, served in the browser from fixtures (no real api, no network): see apiFixture below.
   api?: ApiFixture;
+  // Types this link into the start form (the panel on desktop; on phones, the sheet that New session opens) and
+  // presses Start. "" opens the phone sheet and stops there.
+  start?: string;
   // Form edits made before the capture and never submitted (Clerk pre-fills the org form from the email's domain).
   prepare?: { fill?: Record<string, string>; clickText?: string[] };
 };
 const ORG_FORM = { fill: { Name: "Northwind Studio" }, clickText: ["Remove"] };
 
 // The session list's states, for the signed-in screenshots. Times are relative to now, so "12 min ago" stays true.
-type ApiFixture = "list" | "long" | "empty" | "error" | "loading" | "refresh-error";
+type ApiFixture = "list" | "long" | "empty" | "error" | "loading" | "refresh-error"
+  // Starting a session (W5): what POST /v1/sessions answers.
+  | "start-success" | "start-reused" | "start-rejected" | "start-in-use" | "start-unavailable" | "start-unknown"
+  | "start-network" | "start-busy" | "start-confirm";
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 function sessionFixture(id: string, meetingUrl: string, status: string, minutesAgo: number) {
   return { id, meetingUrl, status, limits: { maxUsd: 5, maxMinutes: 60 }, createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo) };
@@ -50,11 +56,17 @@ const LIST = [
   sessionFixture("4", "https://meet.google.com/xtr-mbha-qpo", "ended", 60 * 22),
   sessionFixture("5", "https://meet.google.com/ahn-vexr-kid", "start_failed", 60 * 24 * 3),
 ];
+const NEW_LINK = "https://meet.google.com/bqe-xkpa-ysn";
+const UNCONFIRMED = sessionFixture("u", "https://meet.google.com/pzm-rtqa-wlk", "start_unknown", 6);
 const LONG = [...LIST, ...Array.from({ length: 9 }, (_, i) =>
   sessionFixture(`l${i}`, `https://meet.google.com/${["bqe", "tnw", "hxa", "mze", "pof", "ruk", "cwi", "gdy", "vla"][i]}-${["xkpa", "lfmd", "qzro", "wtce", "bnyv", "kasj", "oupd", "eirh", "mgqt"][i]}-${["ysn", "kdo", "fua", "pmr", "jzt", "wbe", "hli", "cxo", "qrv"][i]}`,
     i % 4 === 0 ? "failed" : "ended", 60 * 24 * (4 + i * 3)))];
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
+// Where the layout changes: a tablet in portrait (one column, a dialog to start) and the first two-column width.
+const TABLET = { width: 768, height: 1024 };
+const LAPTOP = { width: 1024, height: 768 };
+const LANDSCAPE_PHONE = { width: 844, height: 390 };
 const shots: Shot[] = [];
 for (const dark of [false, true]) {
   const mode = dark ? "dark" : "light";
@@ -71,6 +83,47 @@ for (const dark of [false, true]) {
   );
 }
 shots.push({ name: "shell-phone-360-light", path: "/_design?view=shell", width: 360, height: 780, dark: false, fullPage: false });
+// Starting a session (W5): every outcome at phone and desktop width in light, the main ones in dark too.
+const START: [string, ApiFixture, string, boolean][] = [
+  ["start-sheet", "list", "", true],
+  ["start-invalid", "list", "meet.google.com/abc", true],
+  ["start-busy", "start-busy", NEW_LINK, true],
+  ["start-success", "start-success", NEW_LINK, true],
+  ["start-reused", "start-reused", "https://meet.google.com/kfp-qzwd-nre", false],
+  ["start-rejected", "start-rejected", NEW_LINK, false],
+  ["start-in-use", "start-in-use", NEW_LINK, false],
+  ["start-unavailable", "start-unavailable", NEW_LINK, false],
+  ["start-unknown", "start-unknown", NEW_LINK, true],
+  ["start-network", "start-network", NEW_LINK, false],
+  ["start-confirm", "start-confirm", "https://meet.google.com/pzm-rtqa-wlk", true],
+];
+for (const [name, api, link, alsoDark] of START) {
+  for (const dark of alsoDark ? [false, true] : [false]) {
+    const mode = dark ? "dark" : "light";
+    const base = { path: "/", dark, clerk: true, state: "signed-in" as const, api, start: link };
+    shots.push({ name: `${name}-phone-${mode}`, ...PHONE, fullPage: false, ...base });
+    if (name !== "start-sheet") shots.push({ name: `${name}-desktop-${mode}`, ...DESKTOP, fullPage: false, ...base });
+  }
+}
+shots.push(
+  { name: "start-unknown-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in", api: "start-unknown", start: NEW_LINK },
+  { name: "start-sheet-phone-360-dark", path: "/", width: 360, height: 780, dark: true, fullPage: false, clerk: true, state: "signed-in", api: "list", start: "" },
+);
+// The layout's edges: 768 (iPad portrait), 1024 (the first two-column width) and a phone held sideways.
+for (const dark of [false, true]) {
+  const mode = dark ? "dark" : "light";
+  const base = { path: "/", dark, fullPage: false, clerk: true, state: "signed-in" as const };
+  for (const [size, viewport] of [["768", TABLET], ["1024", LAPTOP]] as const) {
+    shots.push(
+      { name: `app-home-${size}-${mode}`, ...viewport, ...base, api: "list" },
+      { name: `start-success-${size}-${mode}`, ...viewport, ...base, api: "start-success", start: NEW_LINK },
+      { name: `start-unknown-${size}-${mode}`, ...viewport, ...base, api: "start-unknown", start: NEW_LINK },
+      { name: `list-empty-${size}-${mode}`, ...viewport, ...base, api: "empty" },
+    );
+  }
+  shots.push({ name: `start-sheet-768-${mode}`, ...TABLET, ...base, api: "list", start: "" });
+  shots.push({ name: `app-home-landscape-${mode}`, ...LANDSCAPE_PHONE, ...base, api: "list" });
+}
 for (const dark of [false, true]) {
   const mode = dark ? "dark" : "light";
   const clerk = true;
@@ -153,13 +206,15 @@ try {
     const base = shot.unconfigured ? unconfigured.base : configured.base;
     const context = await browser.newContext({
       viewport: { width: shot.width, height: shot.height }, deviceScaleFactor: 2, colorScheme: shot.dark ? "dark" : "light",
-      reducedMotion: "reduce", hasTouch: shot.width < 768, isMobile: shot.width < 768,
+      // Start shots keep motion on, so the sheet's exit animation is real for the announcement check below.
+      reducedMotion: shot.start ? "no-preference" : "reduce", hasTouch: shot.width < 1024, isMobile: shot.width < 1024,
       ...(statePath ? { storageState: statePath } : {}),
     });
     const page = await context.newPage();
     // Only the local dev server is reachable, plus the Clerk development instance for shots that need it. Requests to
     // the api are answered here, from fixtures, and never leave the browser.
     let sessionReads = 0;
+    let started = false;
     await page.route("**/*", async (route) => {
       const request = route.request();
       const url = request.url();
@@ -169,8 +224,36 @@ try {
         if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
         const path = new URL(url).pathname;
         if (path === "/v1/me") return route.fulfill({ status: 200, headers: cors, json: { userId: "user_1", orgId: "org_1", role: "org:admin" } });
+        if (path === "/v1/sessions" && request.method() === "POST") {
+          const fresh = { ...sessionFixture("new", NEW_LINK, "joining", 0) };
+          const failed = (status: number, code: string, session?: object) =>
+            route.fulfill({ status, headers: cors, json: { error: { code, message: "x" }, ...(session ? { session } : {}) } });
+          started = true;
+          switch (shot.api) {
+            case "start-success": return route.fulfill({ status: 201, headers: cors, json: { session: fresh, reused: false } });
+            case "start-reused": return route.fulfill({ status: 200, headers: cors, json: { session: { ...LIST[0], status: "in_meeting" }, reused: true } });
+            case "start-rejected": return failed(502, "engine_rejected", { ...fresh, status: "start_failed", errorCode: "recall_rejected" });
+            case "start-in-use": return failed(502, "engine_rejected", { ...fresh, status: "start_failed", errorCode: "meeting_in_use" });
+            case "start-unavailable": return failed(503, "limits_unavailable");
+            case "start-unknown": return failed(504, "engine_outcome_unknown", { ...fresh, status: "start_unknown" });
+            case "start-network": return route.abort();
+            case "start-busy": return; // never answered: the form stays busy
+            default: return route.fulfill({ status: 201, headers: cors, json: { session: fresh, reused: false } });
+          }
+        }
         if (path === "/v1/sessions") {
           sessionReads += 1;
+          if (shot.api?.startsWith("start-")) {
+            const base = shot.api === "start-confirm" ? [UNCONFIRMED, ...LIST] : LIST;
+            // What the api saved for the start, as the reloaded list shows it.
+            const savedAs: Partial<Record<ApiFixture, string>> = {
+              "start-success": "joining", "start-unknown": "start_unknown", "start-network": "start_unknown",
+              "start-rejected": "start_failed", "start-in-use": "start_failed",
+            };
+            const saved = shot.api ? savedAs[shot.api] : undefined;
+            const added = started && saved ? [sessionFixture("new", NEW_LINK, saved, 0)] : [];
+            return route.fulfill({ status: 200, headers: cors, json: { sessions: [...added, ...base] } });
+          }
           if (shot.api === "loading") return; // never answered: the loading state stays
           if (shot.api === "error" || (shot.api === "refresh-error" && sessionReads > 1)) {
             return route.fulfill({ status: 503, headers: cors, json: { error: { code: "db_unavailable", message: "x" } } });
@@ -201,6 +284,35 @@ try {
     if (shot.click === "org") await page.locator(".cl-organizationSwitcherTrigger").click();
     if (shot.click === "user") await page.locator(".cl-userButtonTrigger").click();
     if (shot.click === "refresh") await page.getByRole("button", { name: "Refresh" }).click();
+    if (shot.start !== undefined) {
+      let form = page.locator("main");
+      // Below 1024px the start panel is hidden: New session opens a sheet (phones) or a dialog (tablets).
+      if (shot.width < 1024) {
+        await page.getByRole("button", { name: "New session" }).first().click();
+        form = page.getByRole("dialog", { name: "New session" });
+        await form.waitFor();
+      }
+      if (shot.start) {
+        // Screen readers can't hear the page while the sheet or dialog is open, so an outcome must not be announced
+        // until it has gone (jsdom can't check this: it has no exit animation).
+        await page.evaluate(() => {
+          const w = window as unknown as { earlyAnnouncements: number };
+          w.earlyAnnouncements = 0;
+          for (const region of document.querySelectorAll(".sr-only[role=status], .sr-only[role=alert]")) {
+            new MutationObserver(() => {
+              if (region.textContent && document.querySelector("[role=dialog]")) w.earlyAnnouncements += 1;
+            }).observe(region, { childList: true, subtree: true, characterData: true });
+          }
+        });
+        await form.getByLabel("Meeting link").first().fill(shot.start);
+        await form.getByRole("button", { name: "Start session" }).first().click();
+      }
+      await page.waitForTimeout(900);
+      if (shot.start) {
+        const early = await page.evaluate(() => (window as unknown as { earlyAnnouncements?: number }).earlyAnnouncements ?? 0);
+        if (early) errors.push(`announced the outcome ${early} time(s) while a dialog was still open`);
+      }
+    }
     if (shot.click) await page.waitForTimeout(800);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (overflow > 0) errors.push(`scrolls sideways by ${overflow}px`);

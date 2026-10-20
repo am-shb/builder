@@ -2,9 +2,11 @@ import { Button } from "../components/Button.tsx";
 import { AppShell } from "../components/AppShell.tsx";
 import { DraftToAgreed } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 
 // Clerk's script didn't load (offline, blocked): nothing can be signed into, so say so and offer a retry.
 export function ClerkUnavailablePage() {
+  usePageTitle("Sign-in isn't available");
   return (
     <AppShell>
       <PageState icon={<DraftToAgreed />} title="Sign-in isn't available right now"

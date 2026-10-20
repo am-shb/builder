@@ -33,7 +33,7 @@ const somethingWrong = (code: string) => `Something went wrong (${code}).`;
 function unknownOutcome(title = `We couldn't confirm whether ${BOT_NAME} joined.`): ExplainedError {
   return {
     title,
-    detail: `Check the meeting for a ${BOT_NAME} bot before trying again.`,
+    detail: `Check the meeting for a ${BOT_NAME} bot before trying again. Nothing is retried on its own.`,
     tone: "warning",
     action: "view_session",
     botMayExist: true,
@@ -41,7 +41,8 @@ function unknownOutcome(title = `We couldn't confirm whether ${BOT_NAME} joined.
 }
 
 export function explainError(err: unknown, context: ErrorContext): ExplainedError {
-  const e = err instanceof ApiError ? err : new ApiError(0, "network_error");
+  // Anything else is a bug in our own code, not a lost connection. A start can't tell how far it got, so it warns.
+  const e = err instanceof ApiError ? err : new ApiError(0, "unexpected");
   const start = context === "start";
   const plain = (title: string, action: ErrorAction = "none", detail?: string): ExplainedError =>
     ({ title, ...(detail ? { detail } : {}), tone: "error", action, botMayExist: false });
@@ -50,13 +51,21 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
   if (e.code === "signed_out") return plain("Your sign-in has expired.", "sign_in");
   if (e.code === "network_error") {
     return start
-      ? { ...unknownOutcome("We lost the connection while starting."), detail: "Check the session list and the meeting before trying again." }
+      ? { ...unknownOutcome("We lost the connection while starting."), detail: "Check the session list and the meeting before trying again. Nothing is retried on its own." }
       : plain(`Can't reach ${PRODUCT_NAME}. Check your connection.`, "refresh");
   }
-  if (e.code === "bad_response") return start ? unknownOutcome() : plain(somethingWrong("bad_response"), "refresh");
+  if (e.code === "bad_response" || e.code === "unexpected") return start ? unknownOutcome() : plain(somethingWrong(e.code), "refresh");
+  // Clerk didn't give a token, so nothing was sent.
+  if (e.code === "token_error") {
+    return start
+      ? plain("Couldn't start: sign-in didn't respond.", "none", "Nothing was sent. Try again in a moment.")
+      : plain("Sign-in didn't respond.", "refresh", "Try again in a moment.");
+  }
 
-  // A start that may have reached the engine: unless the reply proves no bot was sent, warn.
-  if (start && !NO_NEW_BOT.has(e.status)) return unknownOutcome();
+  // A start that may have reached the engine: unless the reply proves no bot was sent, warn. Only the api's own error
+  // body proves it: a 502 or 503 with any other body (a proxy's page, when the api restarted mid-request) may come after
+  // a bot was sent.
+  if (start && (!NO_NEW_BOT.has(e.status) || e.code.startsWith("http_"))) return unknownOutcome();
 
   switch (e.code) {
     case "invalid_request":
@@ -86,7 +95,7 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
         return plain(`${BOT_NAME} couldn't join this meeting.`, "fix_link", "Check the link and that the meeting is open, then try again.");
       }
       if (engineCode === "meeting_in_use") {
-        return { ...plain(`${BOT_NAME} already has a session in this meeting.`, "back_to_list", "Check the meeting."), tone: "warning" };
+        return { ...plain(`${BOT_NAME} already has a session in this meeting.`, "back_to_list", "Check the meeting. No second bot was sent."), tone: "warning" };
       }
       return plain(`Starting meetings isn't working right now (${engineCode ?? "engine_rejected"}).`);
     }

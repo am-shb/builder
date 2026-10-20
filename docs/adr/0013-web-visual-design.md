@@ -61,7 +61,7 @@ Semantic tokens in `apps/web/src/styles/globals.css`, with a light and a dark va
 | ink | `#1a2220` graphite | `#eef3f1` | text |
 | ink-2 | `#56605d` | `#a3aeaa` | secondary text |
 | ink-3 | `#616b68` | `#8f9b97` | ended and failed codes, chevrons, placeholders |
-| input | `#7d8784` | `#66726e` | form field borders |
+| input | `#7d8784` | `#6f7b77` | form field borders (3:1 or more on surface and sunk, read-only included) |
 | primary | `#0d5c4c` evergreen | `#4fcfa6` | primary actions, the mark, focus |
 | on-primary | `#ffffff` | `#05261c` | text on primary |
 | live | `#19a67a` | `#4fcfa6` | the "in the meeting" dot only |
@@ -115,16 +115,19 @@ into inputs). Labels and pills 14px semibold; small text 13–14px. Sentence cas
   list is at most 720px wide. The "Recent" heading shares a baseline with the page title.
 
 ### Layout and navigation
-- Breakpoints: phone-first from 360px; `md` 768 switches to the desktop layout. No sideways scrolling at any width;
-  long values truncate or wrap.
+- Breakpoints: phone-first from 360px. `md` 768 switches sheets to centered dialogs and the session rows to their wide
+  form; `lg` 1024 switches to the two-column layout with the start panel (below it, a 340px panel would squeeze the
+  meeting codes to a few characters). No sideways scrolling at any width; long values truncate or wrap.
 - **This slice has one top-level page,** Sessions; a session's detail is a child of it, and organizations and the
   account live in Clerk's switcher and user menu. A bottom tab bar with one or two tabs would look empty, so there is
   none for now:
   - **Phone:** a top bar (the mark, the org switcher, the account button); the title and a one-line subtitle; the
     list; a full-width "New session" pill in a sticky bottom bar above the safe area, which opens a bottom sheet with
     the start form. On phones under 400px the wordmark hides and the mark carries the brand.
-  - **Desktop:** two columns: the title, subtitle and the start panel on the left (sticky), the list on the right.
-    Dialogs are centered instead of sheets.
+  - **Tablet (768-1023px):** one column like the phone, with the sticky "New session" bar; it opens a centered
+    dialog.
+  - **Desktop (1024px and up):** two columns: the title, subtitle and the start panel on the left (sticky when the
+    window is at least 640px tall), the list on the right. Dialogs are centered instead of sheets.
   - **Later:** with three to five top-level pages (library, billing, settings), phones get a bottom tab bar and
     desktop a sidebar.
 - One `ResponsiveModal`: a bottom sheet below 768px, a centered dialog from 768px.

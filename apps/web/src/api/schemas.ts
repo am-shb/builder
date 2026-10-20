@@ -21,13 +21,13 @@ export type SessionView = z.infer<typeof SessionView>;
 export const MeResponse = z.object({ userId: z.string(), orgId: z.string(), role: z.string() });
 export type MeResponse = z.infer<typeof MeResponse>;
 
-export const SessionList = z.object({ sessions: z.array(SessionView) });
+// The list leaves out each session's stage control link: the list never shows it, and a link that controls a live
+// stage shouldn't sit in the page's memory for every session (plan: "Stage link"). Zod drops the field as it parses.
+export const SessionList = z.object({ sessions: z.array(SessionView.omit({ stageUrl: true })) });
 export const SessionResponse = z.object({ session: SessionView });
 export const CreateSessionResponse = z.object({ session: SessionView, reused: z.boolean() });
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponse>;
 
-// Every error the api sends: `{ error: { code, message } }`, and for a failed start, the session as saved.
-export const ErrorBody = z.object({
-  error: z.object({ code: z.string(), message: z.string().optional() }),
-  session: SessionView.optional(),
-});
+// Every error the api sends: `{ error: { code, message } }`. A failed start also carries the session as saved, which
+// the client reads on its own (client.ts), so this checks only the error itself.
+export const ErrorBody = z.object({ error: z.object({ code: z.string(), message: z.string().optional() }) });

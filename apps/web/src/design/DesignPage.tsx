@@ -180,7 +180,7 @@ function Shell() {
           {empty ? (
             <>
               <h2 className="sr-only">Your sessions</h2>
-              <EmptyState className="md:mt-[var(--section-baseline,14px)]" title="Start your first session" description={`Bring ${BOT_NAME} into a meeting. It listens while you decide, and builds the prototype on the shared screen.`}
+              <EmptyState className="lg:mt-3.5" title="Start your first session" description={`Bring ${BOT_NAME} into a meeting. It listens while you decide, and builds the prototype on the shared screen.`}
                 steps={EMPTY_STEPS} action={newSession} />
             </>
           ) : (

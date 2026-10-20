@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { clerk, setClerk } from "./helpers/clerk.tsx";
-import { ApiProvider } from "../src/api/ApiProvider.tsx";
+import { ApiProvider, useOrgQuery } from "../src/api/ApiProvider.tsx";
 import { SessionsList } from "../src/sessions/SessionsList.tsx";
 import { meetingDisplay } from "../src/sessions/meeting.ts";
 import { startedWhen } from "../src/sessions/time.ts";
@@ -20,6 +20,11 @@ const SESSIONS = [
   session({ id: "e", meetingUrl: "https://meet.google.com/ahn-vexr-kid", status: "paused_for_a_new_reason", createdAt: iso("2026-10-14T10:03:00") }),
 ];
 
+function ListUnderTest() {
+  const list = useOrgQuery((api, signal) => api.listSessions(signal));
+  return <SessionsList list={list} now={NOW} />;
+}
+
 function Where() {
   const l = useLocation();
   return <output data-testid="where">{l.pathname}</output>;
@@ -29,7 +34,7 @@ function show(api: ReturnType<typeof fakeApi>) {
   return render(
     <ApiProvider baseUrl={API} fetch={api.fetch}>
       <MemoryRouter initialEntries={["/"]}>
-        <Routes><Route path="/" element={<SessionsList now={NOW} />} /><Route path="*" element={null} /></Routes>
+        <Routes><Route path="/" element={<ListUnderTest />} /><Route path="*" element={null} /></Routes>
         <Where />
       </MemoryRouter>
     </ApiProvider>,
@@ -178,7 +183,7 @@ describe("the session list", () => {
     setClerk({ session: "active", orgId: "org_b" });
     view.rerender(
       <ApiProvider baseUrl={API} fetch={api.fetch}>
-        <MemoryRouter initialEntries={["/"]}><Routes><Route path="/" element={<SessionsList now={NOW} />} /></Routes><Where /></MemoryRouter>
+        <MemoryRouter initialEntries={["/"]}><Routes><Route path="/" element={<ListUnderTest />} /></Routes><Where /></MemoryRouter>
       </ApiProvider>,
     );
     await act(async () => {});

@@ -3,49 +3,21 @@
 // this plugin writes it into index.html at build time, as the first tag in <head>, from the two VITE_* variables.
 // Render sends the rest as headers (frame-ancestors, which a <meta> policy can't carry, and the others).
 import { loadEnv, type Plugin } from "vite";
+import { apiOrigin, clerkFrontendApiHost } from "../src/lib/settings.ts";
 
 export type CspInput = {
   apiUrl?: string | undefined;
   publishableKey?: string | undefined;
+  // A production build: plain http to the api is refused (src/lib/settings.ts).
+  production?: boolean;
 };
 
-// A hostname: labels of letters, digits and hyphens, separated by dots.
-const HOSTNAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
-
-// The api's origin from VITE_API_URL: an http or https URL with no path, query or credentials. Anything else is null,
-// so a bad value leaves the api out of the policy instead of widening it.
-export function apiOrigin(apiUrl: string | undefined): string | null {
-  const raw = apiUrl?.trim().replace(/\/+$/, "");
-  if (!raw) return null;
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-  if (u.origin !== raw) return null;
-  return u.origin;
-}
-
-// The Clerk Frontend API host. A publishable key is pk_test_ or pk_live_ followed by the base64 of "<host>$".
-export function clerkFrontendApiHost(publishableKey: string | undefined): string | null {
-  const m = /^pk_(test|live)_([A-Za-z0-9+/=_-]+)$/.exec(publishableKey?.trim() ?? "");
-  if (!m) return null;
-  let decoded: string;
-  try {
-    decoded = Buffer.from(m[2]!, "base64").toString("utf8");
-  } catch {
-    return null;
-  }
-  if (!decoded.endsWith("$")) return null;
-  const host = decoded.slice(0, -1);
-  return HOSTNAME.test(host) ? host.toLowerCase() : null;
-}
+// The rules for both values live in src/lib/settings.ts, shared with the app's own config check.
+export { apiOrigin, clerkFrontendApiHost };
 
 // The policy. With either value missing or invalid, its origin is left out and the rest stays as strict.
 export function buildCsp(input: CspInput): string {
-  const api = apiOrigin(input.apiUrl);
+  const api = apiOrigin(input.apiUrl, { production: input.production ?? false });
   const fapi = clerkFrontendApiHost(input.publishableKey);
   const clerk = fapi ? [`https://${fapi}`] : [];
   const directives: [string, string[]][] = [
@@ -72,7 +44,7 @@ export function cspPlugin(): Plugin {
     apply: "build",
     configResolved(config) {
       const env = loadEnv(config.mode, config.envDir || config.root, "VITE_");
-      input = { apiUrl: env.VITE_API_URL, publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY };
+      input = { apiUrl: env.VITE_API_URL, publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY, production: config.isProduction };
     },
     transformIndexHtml: {
       order: "post",
