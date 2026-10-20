@@ -1,4 +1,4 @@
-// The color mode the person chose in the header: System (follow the OS, the default), Light or Dark (ADR 0013).
+// The color mode the person chose in the header: System (follow the OS, the default), Light or Dark (ADR 0015).
 //
 // The one exception to "no browser storage" (ADR 0012): this file, and public/color-mode.js which applies the same
 // setting before the page is drawn, keep the choice in localStorage under one key. Only "light" or "dark" is ever

@@ -1,4 +1,4 @@
-// How a meeting shows in the list: its code, set large, and the platform (ADR 0013). The meeting link itself is only
+// How a meeting shows in the list: its code, set large, and the platform (ADR 0015). The meeting link itself is only
 // ever text, never a link of ours (plan: "Safe rendering").
 export type MeetingDisplay = { code: string; platform: "meet" | "zoom" | "teams" | "other"; platformLabel: string };
 

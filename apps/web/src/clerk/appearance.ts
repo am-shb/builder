@@ -3,7 +3,7 @@ import type { ClerkProvider } from "@clerk/react";
 
 type Appearance = NonNullable<ComponentProps<typeof ClerkProvider>["appearance"]>;
 
-// Clerk's sign-in, sign-up, org switcher and user menu follow our tokens (ADR 0013), so they match in light and dark
+// Clerk's sign-in, sign-up, org switcher and user menu follow our tokens (ADR 0015), so they match in light and dark
 // without a Clerk theme package. Their styles go in the `clerk` CSS layer, which globals.css orders before Tailwind's
 // utilities. Used by ClerkProvider from W2 on.
 export const clerkAppearance = {

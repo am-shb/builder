@@ -11,7 +11,7 @@ const CHOICES: Record<ColorMode, { label: string; icon: LucideIcon }> = {
   dark: { label: "Dark", icon: Moon },
 };
 
-// The header's color mode button (ADR 0013): a 44px icon button that opens a small menu of System, Light and Dark,
+// The header's color mode button (ADR 0015): a 44px icon button that opens a small menu of System, Light and Dark,
 // the current one checked. A menu rather than a button that cycles: three choices are each one step away, the person
 // sees all of them and which is on before choosing, and a cycle would pass through a mode they didn't want (Dark on
 // the way from Light to System). The icon shows the choice: sun-and-moon for System, a sun, a moon. Radix gives the

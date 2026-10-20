@@ -1,4 +1,4 @@
-// Screenshots of the design system and the app shell, with accessibility and layout checks (ADR 0013).
+// Screenshots of the design system and the app shell, with accessibility and layout checks (ADR 0015).
 //   npm run screenshots -w @builder/web            every shot below
 //   npm run screenshots -w @builder/web -- shell   only shots whose name contains "shell"
 // It starts its own Vite dev server on a free port, drives the installed Chrome through playwright-core (no browser

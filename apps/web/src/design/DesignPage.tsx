@@ -1,4 +1,4 @@
-// The design system on one page (ADR 0013), for development only: main.tsx loads it at /_design in the dev server, and
+// The design system on one page (ADR 0015), for development only: main.tsx loads it at /_design in the dev server, and
 // the production build leaves it out. Query: ?theme=light|dark forces a mode; ?view=shell shows the sessions screen
 // built from the components (&empty=1 for the empty state, &open=sheet|confirm with an overlay open, &toast=1).
 import { Link, Plus, RotateCw } from "lucide-react";

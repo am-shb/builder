@@ -1,4 +1,4 @@
-// The color mode setting (ADR 0013): System, Light or Dark, kept in localStorage (the one exception to ADR 0012's
+// The color mode setting (ADR 0015): System, Light or Dark, kept in localStorage (the one exception to ADR 0012's
 // rule), applied before first paint by public/color-mode.js, and chosen from a menu in the header.
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
