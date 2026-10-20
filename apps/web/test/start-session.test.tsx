@@ -8,7 +8,7 @@ import { AppRoutes } from "../src/App.tsx";
 import { HomePage } from "../src/pages/HomePage.tsx";
 import { BOT_NAME } from "../src/brand.ts";
 import { StartForm } from "../src/sessions/StartForm.tsx";
-import { StartSessionProvider } from "../src/sessions/StartSessionProvider.tsx";
+import { StartSessionProvider, useStartSession } from "../src/sessions/StartSessionProvider.tsx";
 import { axeViolations } from "./helpers/axe.ts";
 import { API, errorBody, fakeApi, session, type Reply } from "./helpers/fake-api.ts";
 import { DESKTOP_MOUSE, useScreen } from "./setup.ts";
@@ -327,6 +327,83 @@ describe("starting a session", () => {
     expect(posts(api)).toHaveLength(1);
   });
 
+  it("another copy of the link for a meeting with an active session asks first, saying a second bot would join", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const active = session({ id: "a", meetingUrl: LINK, status: "joining", createdAt: new Date(NOW.getTime() - 10 * 60_000).toISOString() });
+    const api = apiWith({ status: 201, body: { session: started, reused: false } }, [active]);
+    page(api);
+    await screen.findByText("kfp-qzwd-nre");
+    await startWith(`${LINK}?authuser=0`);
+    const dialog = await screen.findByRole("alertdialog", { name: "Start another session for this link?" });
+    expect(dialog.textContent).toContain(`This meeting already has a ${BOT_NAME} session (Joining), started from another copy of the link. Starting again sends a second ${BOT_NAME} bot.`);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(posts(api)).toHaveLength(0);
+    // The words stay while it closes; the next question is asked fresh.
+    await userEvent.click(startButton());
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Start anyway" }));
+    expect(posts(api)).toHaveLength(1);
+  });
+
+  it("the exact link of an active session doesn't ask: the api reuses that session and sends no bot", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const active = session({ id: "a", meetingUrl: LINK, status: "joining", createdAt: new Date(NOW.getTime() - 10 * 60_000).toISOString() });
+    const api = apiWith({ status: 200, body: { session: active, reused: true } }, [active]);
+    page(api);
+    await screen.findByText("kfp-qzwd-nre");
+    await startWith();
+    await shown();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(posts(api)).toHaveLength(1);
+  });
+
+  it("the list reloading after a start says nothing like \"Updated.\" (that's for a Refresh the person asked for)", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let reads = 0;
+    let finishReload: (() => void) | undefined;
+    const body = JSON.stringify({ sessions: [session({ id: "old", meetingUrl: "https://meet.google.com/xtr-mbha-qpo", status: "ended" })] });
+    const api = fakeApi({
+      "GET /v1/sessions": () => (++reads === 1
+        ? Promise.resolve(new Response(body, { status: 200 }))
+        : new Promise<Response>((r) => { finishReload = () => r(new Response(body, { status: 200 })); })),
+      "POST /v1/sessions": { status: 201, body: { session: started, reused: false } },
+    });
+    page(api);
+    await screen.findByText("xtr-mbha-qpo");
+    await startWith();
+    await shown();
+    // The reload runs (Refresh is busy), then finishes.
+    await waitFor(() => expect(finishReload).toBeTypeOf("function"));
+    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeTruthy();
+    await act(async () => finishReload!());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).toBeNull());
+    expect(screen.queryByText("Updated.")).toBeNull();
+  });
+
+  it("after Refreshes that failed (the second while the first's error showed), the reload after a start says nothing", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let reads = 0;
+    const body = JSON.stringify({ sessions: [session({ id: "old", meetingUrl: "https://meet.google.com/xtr-mbha-qpo", status: "ended" })] });
+    // The first read works, the person's two Refreshes fail, the reload after the start works.
+    const api = fakeApi({
+      "GET /v1/sessions": async () => (++reads === 2 || reads === 3
+        ? new Response(JSON.stringify(errorBody("db_unavailable")), { status: 503 })
+        : new Response(body, { status: 200 })),
+      "POST /v1/sessions": { status: 201, body: { session: started, reused: false } },
+    });
+    page(api);
+    await screen.findByText("xtr-mbha-qpo");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText(/^Couldn't refresh\./);
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(reads).toBe(3));
+    await screen.findByText(/^Couldn't refresh\./);
+    await startWith();
+    await shown();
+    await waitFor(() => expect(reads).toBe(4));
+    await waitFor(() => expect(screen.queryByText(/^Couldn't refresh\./)).toBeNull());
+    expect(screen.queryByText("Updated.")).toBeNull();
+  });
+
   it("a start isn't aborted by switching org; its result names the org it was for, with no link into it", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     const slow = pending();
@@ -482,7 +559,7 @@ describe("the start in the real app (through RequireOrg)", () => {
     await userEvent.click(screen.getByRole("link", { name: /xtr-mbha-qpo/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "xtr-mbha-qpo" })).toBeTruthy();
     await act(async () => slow.finish(new Response("<html>Gateway timeout</html>", { status: 504 })));
-    await userEvent.click(screen.getByRole("link", { name: "Sessions" }));
+    await userEvent.click(screen.getByRole("link", { name: "Back to sessions" }));
     expect((await shown()).textContent).toMatch(/couldn't confirm/);
     expect(await announced("alert")).toMatch(/couldn't confirm/);
     await startWith();
@@ -525,6 +602,34 @@ describe("announcements", () => {
     await act(async () => frames.splice(0).forEach((cb) => cb(0)));
     raf.mockRestore();
     expect(liveRegion("status").textContent).toBe("");
+  });
+});
+
+describe("one start at a time", () => {
+  it("a second start while one runs sends nothing and answers null; the first one's outcome stands", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const { reply, finish } = pending();
+    const api = fakeApi({ "POST /v1/sessions": reply });
+    let starter: ReturnType<typeof useStartSession> | undefined;
+    function Grab() {
+      starter = useStartSession();
+      return null;
+    }
+    render(<ApiProvider baseUrl={API} fetch={api.fetch}><StartSessionProvider><Grab /></StartSessionProvider></ApiProvider>);
+    let first: Promise<unknown> | undefined;
+    let second: unknown = "not called";
+    // Both in the same tick, before React re-renders with "sending".
+    await act(async () => {
+      first = starter!.start(LINK);
+      second = await starter!.start(LINK);
+    });
+    expect(second).toBeNull();
+    expect(posts(api)).toHaveLength(1);
+    await act(async () => finish());
+    expect(await first).toMatchObject({ kind: "started" });
+    // Once it's done, the next start goes out.
+    await act(async () => { void starter!.start("https://meet.google.com/abc-defg-hij"); });
+    expect(posts(api)).toHaveLength(2);
   });
 });
 

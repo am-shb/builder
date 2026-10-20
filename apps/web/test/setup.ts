@@ -27,6 +27,11 @@ if (typeof navigator !== "undefined") {
   Object.defineProperty(navigator, "sendBeacon", { value: blocked("navigator.sendBeacon"), configurable: true });
 }
 
+// The tests expect US English dates and money ("4:12 PM", "$5.00"). vite.config.ts sets it; if a runner doesn't pass
+// it on, fail here with the reason instead of in three unrelated tests.
+const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+if (locale !== "en-US") throw new Error(`tests need the en-US locale, got ${locale}: run them through vitest with vite.config.ts`);
+
 // jsdom has no matchMedia or ResizeObserver; Radix and the layout hooks use them. The fake answers each query from a
 // pretend screen: a width and a pointer. Tests see a phone (390px, touch) unless they call `useScreen`.
 export const media = { width: 390, coarse: true };

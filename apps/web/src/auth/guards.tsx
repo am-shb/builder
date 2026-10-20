@@ -1,6 +1,6 @@
 import { useAuth, useSession } from "@clerk/react";
-import { useEffect, useRef, type ReactNode } from "react";
-import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
+import { useRef } from "react";
+import { Navigate, Outlet, useLocation } from "react-router";
 import { LoadingPage } from "../pages/LoadingPage.tsx";
 import { StartSessionProvider } from "../sessions/StartSessionProvider.tsx";
 
@@ -20,7 +20,8 @@ export function safeReturnPath(raw: string | null): string {
 
 // Pages for members of an organization. Clerk reports a pending session (signed in, no organization chosen yet) as
 // signed out, so the session's task decides: a "choose-organization" task goes to /choose-organization, no session
-// goes to sign-in. The org always comes from the session token; the app never sends an org id.
+// goes to sign-in. The org always comes from the session token; the app never sends an org id. Switching org on a
+// session's page is that page's to handle (SessionPage).
 export function RequireOrg() {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const { session } = useSession();
@@ -35,26 +36,10 @@ export function RequireOrg() {
   }
   if (!orgId) return <Navigate to="/choose-organization" replace />;
   return (
-    <OrgSwitchWatcher orgId={orgId}>
-      <StartSessionProvider>
-        <Outlet />
-      </StartSessionProvider>
-    </OrgSwitchWatcher>
+    <StartSessionProvider>
+      <Outlet />
+    </StartSessionProvider>
   );
-}
-
-// A session belongs to the org it was started in, so switching org on a session's page goes back to the list.
-function OrgSwitchWatcher({ orgId, children }: { orgId: string; children: ReactNode }) {
-  const previous = useRef(orgId);
-  const navigate = useNavigate();
-  const location = useLocation();
-  useEffect(() => {
-    if (previous.current !== orgId) {
-      previous.current = orgId;
-      if (location.pathname.startsWith("/sessions/")) navigate("/", { replace: true });
-    }
-  }, [orgId, location.pathname, navigate]);
-  return children;
 }
 
 // Sign-in and sign-up: someone already signed in goes to the page they were sent here from, or to the app.

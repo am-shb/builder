@@ -1,6 +1,7 @@
 import { ArrowLeft, RotateCw } from "lucide-react";
-import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { useAuth } from "@clerk/react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { useOrgQuery, type OrgQuery } from "../api/ApiProvider.tsx";
 import { ApiError } from "../api/client.ts";
 import type { SessionView } from "../api/schemas.ts";
@@ -11,6 +12,7 @@ import { PageState } from "../components/PageState.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { isInProgress, StatusPill } from "../components/StatusPill.tsx";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
+import { useRefreshNews } from "../hooks/useRefreshNews.tsx";
 import { cn } from "../lib/cn.ts";
 import { exactTime, limitsText, statusExplanation } from "../sessions/detail.ts";
 import { ErrorNotice } from "../sessions/ErrorNotice.tsx";
@@ -20,29 +22,30 @@ import { StageLink } from "../sessions/StageLink.tsx";
 import { startedWhen } from "../sessions/time.ts";
 
 // A session's page (plan: "Session detail"): its status and what it means, the meeting, its times and limits, an error
-// code for support, and the stage link behind "Show". From GET /v1/sessions/:id, for the active org only; switching org
-// goes back to the list (RequireOrg). Refresh reloads it; nothing polls yet (WD6).
+// code for support, and the stage link behind "Show". From GET /v1/sessions/:id, for the active org only. Refresh
+// reloads it; nothing polls yet (WD6).
 export function SessionPage({ now }: { now?: Date }) {
   const { id = "" } = useParams();
   const query = useOrgQuery((api, signal) => api.getSession(id, signal), id);
   const session = query.data;
   usePageTitle(session ? meetingDisplay(session.meetingUrl).code : "Session");
+  const notFound = query.status === "error" && query.error instanceof ApiError && query.error.code === "not_found";
+  useLeaveOnOrgSwitch(session ? "session" : notFound ? "not_found" : undefined);
 
   const back = (
     <Link to="/" className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 font-semibold text-ink-2 no-underline transition-colors hover:text-ink">
-      <ArrowLeft aria-hidden="true" className="size-[18px]" strokeWidth={1.75} />Sessions
+      <ArrowLeft aria-hidden="true" className="size-[18px]" strokeWidth={1.75} />{BACK_LABEL}
     </Link>
   );
 
-  const notFound = query.status === "error" && query.error instanceof ApiError && query.error.code === "not_found";
   if (notFound || (query.status === "error" && !session)) {
     // No such session (or another org's, or gone since it loaded): a whole-page state with the way back. Nothing of the
     // session stays on screen, its stage link included.
     if (notFound) {
       return (
         <SignedInShell>
-          <PageState icon={<DraftToAgreed />} title="No such session in this organization."
-            action={<Button asChild variant="secondary"><Link to="/"><ArrowLeft aria-hidden="true" />Back to sessions</Link></Button>}>
+          <PageState icon={<DraftToAgreed />} title="No such session in this organization"
+            action={<Button asChild variant="secondary"><Link to="/"><ArrowLeft aria-hidden="true" />{BACK_LABEL}</Link></Button>}>
             <p className="m-0">It may be in another organization. Switch organization to look there.</p>
           </PageState>
         </SignedInShell>
@@ -65,12 +68,38 @@ export function SessionPage({ now }: { now?: Date }) {
   );
 }
 
+// The way back to the list, worded the same everywhere on this page.
+const BACK_LABEL = "Back to sessions";
+
+// A session belongs to the org it was started in. Switching org while one is on screen goes back to the list, so it
+// doesn't sit under the other org's name. On "No such session", the page stays and looks again in the new org, as its
+// message suggests. While loading, it stays too: nothing of the old org was shown.
+function useLeaveOnOrgSwitch(showing: "session" | "not_found" | undefined) {
+  const { orgId } = useAuth();
+  const navigate = useNavigate();
+  const previousOrg = useRef(orgId);
+  // What the page last showed for the previous org. Kept through the render where the org changes, when the query
+  // has already gone back to loading.
+  const shown = useRef(showing);
+  useEffect(() => {
+    if (previousOrg.current !== orgId) {
+      previousOrg.current = orgId;
+      if (shown.current === "session") navigate("/", { replace: true });
+      shown.current = undefined;
+      return;
+    }
+    shown.current = showing;
+  }, [orgId, showing, navigate]);
+}
+
 function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery<SessionView>; now: Date | undefined }) {
   const meeting = meetingDisplay(session.meetingUrl);
-  const explanation = statusExplanation(session.status);
+  const explanation = statusExplanation(session.status, session.errorCode);
   const limits = limitsText(session.limits);
+  const { refresh, news } = useRefreshNews(query);
   return (
     <>
+      {news}
       <header className="mt-3 flex items-start justify-between gap-x-4 sm:gap-x-6">
         <div className="min-w-0">
           <h1 className={cn(
@@ -82,7 +111,7 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
           <p className="mt-2 mb-0 text-ink-2">{meeting.platformLabel}, started {startedWhen(session.createdAt, now)}</p>
         </div>
         {/* Beside the title at every width; on narrow phones only its icon shows, with "Refresh" as its name. */}
-        <Button variant="quiet" size="sm" onClick={query.refresh} busy={query.refreshing}
+        <Button variant="quiet" size="sm" onClick={refresh} busy={query.refreshing}
           className="group shrink-0 max-[480px]:w-11 max-[480px]:px-0">
           <RotateCw aria-hidden="true" className="group-aria-busy:hidden" />
           <span className="max-[480px]:sr-only">{query.refreshing ? "Refreshing…" : "Refresh"}</span>
@@ -109,7 +138,7 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
             <Detail term="Time limit">{limits.time}</Detail>
             {session.errorCode && (
               <Detail term="Error code" hint="for support">
-                <code className="rounded-md bg-sunk px-2 py-0.5 font-mono text-sm">{session.errorCode}</code>
+                <code className="rounded-md bg-sunk px-2 py-0.5 font-mono text-sm break-all box-decoration-clone">{session.errorCode}</code>
               </Detail>
             )}
           </dl>
@@ -138,6 +167,7 @@ function Loading() {
     <>
     <h1 className="sr-only">Session</h1>
     <div role="status" aria-label="Loading session" className="motion-safe:animate-in motion-safe:fade-in motion-safe:delay-150 motion-safe:fill-mode-both">
+      <span className="sr-only">Loading the session…</span>
       <div aria-hidden="true">
         <Skeleton className="mt-4 h-9 w-[min(22rem,70%)] lg:h-12" />
         <Skeleton className="mt-3 h-4 w-48" />

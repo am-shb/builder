@@ -208,8 +208,9 @@ pages or reloading the page. W0 also checks whether `@clerk/react-router` fits d
   listed under [Changes outside apps/web](#changes-outside-appsweb) (D-ID).
 - **Switching org.** `<OrganizationSwitcher>` changes the active org, so the next token carries the new org. The web
   app never sends an org id. Every query is keyed by `orgId` from `useAuth()`: on a change, in-flight requests are
-  aborted, cached lists are dropped, and the list reloads. On `/sessions/:id`, a switch goes back to `/`, because the
-  session belongs to the old org (and would 404 under the new one).
+  aborted, cached lists are dropped, and the list reloads. On `/sessions/:id`, a switch while a session is on screen
+  goes back to `/`, because the session belongs to the old org. On "No such session" (or while it's still loading) the
+  page stays and reads the session again for the new org, as the 404's message suggests.
 - **A `POST /v1/sessions` is never aborted,** by an org switch or anything else: aborting it would turn a known
   outcome into an unknown one. Its result is still shown after a switch, naming the org it was started in. The form
   is disabled while a start is in flight, and the switcher is the only way to change org, so a start can't silently
@@ -231,12 +232,22 @@ list.** States: loading, empty (points at the form), error (by code, below). A R
 - **Guard after an unknown outcome (WD8):** if the list has a `start_unknown` session for the same normalized link
   from the last 30 minutes, Start shows a confirmation first: "An earlier start for this link didn't confirm.
   Check the meeting for a {BOT} bot before starting another." with "Start anyway" and "Cancel".
+- **Guard for another copy of the link:** the api and engine match exact links, so `…/abc-defg-hij?authuser=0` would
+  send a second bot to a meeting that already has one. If the list has a `starting`, `joining` or `in_meeting` session
+  for the same normalized meeting under a different link, still within its time limit plus 10 minutes, Start asks
+  first: "This meeting already has a {BOT} session ({status}), started from another copy of the link. Starting again
+  sends a second {BOT} bot." The exact same link doesn't ask: the api reuses that session. The api-side fix is ADR 0014.
 - Outcomes are in [Errors](#errors-every-api-code).
 
 **Session detail (`/sessions/:id`):** from `GET /v1/sessions/:id`. Shows the status label and a one-line
 explanation, the meeting link as text, created and updated times, the limits (`maxUsd`, `maxMinutes`), the
 `errorCode` if there is one (as a code, for support), the stage link (below), and a Refresh button. 404 shows "No
-such session in this organization." with a link back.
+such session in this organization" with "Back to sessions" (the same words as the back link above the title).
+A Refresh that works says "Updated." to screen readers; one that fails says "Couldn't refresh".
+
+**Moving between pages** starts the new page at its top, with focus on its `h1` (and on the loaded page's `h1` once
+it has loaded), as a full page load would. The first load is left to the browser. A page that throws while rendering
+shows "Something went wrong" with Reload instead of a blank page.
 
 **Status labels:**
 
@@ -247,7 +258,7 @@ such session in this organization." with a link back.
 | `in_meeting` | In the meeting | {BOT} is in the meeting. |
 | `ended` | Ended | |
 | `failed` | Failed | {BOT} left the meeting because of an error. |
-| `start_failed` | Didn't start | The meeting service refused. Check the link and try again. |
+| `start_failed` | Didn't start | From `errorCode`, worded as the start's reply: `recall_rejected` "{BOT} couldn't join this meeting. Check the link and that the meeting is open, then try again."; `meeting_in_use` "{BOT} already has a session in this meeting. Check the meeting. No second bot was sent."; any other "Starting meetings isn't working right now ({code})."; no code: "The meeting service refused. Check the link and try again." |
 | `start_unknown` | Check the meeting | We couldn't confirm whether {BOT} joined. Check the meeting before starting again. |
 | anything else | Unknown | Shown without crashing, so a new status from the api doesn't break the page. |
 

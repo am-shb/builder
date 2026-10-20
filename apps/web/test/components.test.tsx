@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { act } from "react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -163,6 +163,48 @@ describe("ResponsiveModal", () => {
   });
 });
 
+describe("ResponsiveModal: drag to close (phones)", () => {
+  // The grabber and title row: the strip the sheet is dragged by.
+  const strip = () => screen.getByRole("heading", { name: "New session" }).parentElement!.parentElement!;
+  const drag = (el: HTMLElement, distance: number) => {
+    fireEvent.pointerDown(el, { clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(el, { clientY: 100 + distance, pointerId: 1 });
+    fireEvent.pointerUp(el, { clientY: 100 + distance, pointerId: 1 });
+  };
+  function Harness({ closeDisabled = false }: { closeDisabled?: boolean }) {
+    const [open, setOpen] = useState(true);
+    return (
+      <ResponsiveModal open={open} onOpenChange={setOpen} title="New session" closeDisabled={closeDisabled}>
+        <TextField label="Meeting link" />
+      </ResponsiveModal>
+    );
+  }
+
+  it("dragging the top down far enough closes the sheet; a short drag doesn't", () => {
+    render(<Harness />);
+    drag(strip(), 40);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    drag(strip(), 200);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("while closing is disabled (a start running), a drag doesn't close it, even one begun before", () => {
+    const view = render(<Harness />);
+    // Begun while closing was allowed, released after it was disabled.
+    fireEvent.pointerDown(strip(), { clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientY: 300, pointerId: 1 });
+    view.rerender(<Harness closeDisabled />);
+    fireEvent.pointerUp(strip(), { clientY: 300, pointerId: 1 });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    // And one begun while disabled: the sheet doesn't even move.
+    fireEvent.pointerDown(strip(), { clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientY: 300, pointerId: 1 });
+    expect(screen.getByRole("dialog").style.transform).toBe("");
+    fireEvent.pointerUp(strip(), { clientY: 300, pointerId: 1 });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+});
+
 describe("ConfirmModal", () => {
   it("on Cancel, focus goes back to where it was", async () => {
     function Harness() {
@@ -179,6 +221,18 @@ describe("ConfirmModal", () => {
     await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Start session" }));
+  });
+
+  it("Tab follows the order the buttons are seen in, and Cancel has focus: risky on top on phones, Cancel first on desktop", () => {
+    for (const [screenSize, order] of [[PHONE, ["Start anyway", "Cancel"]], [DESKTOP_MOUSE, ["Cancel", "Start anyway"]]] as const) {
+      useScreen(screenSize);
+      const { unmount } = render(<ConfirmModal open onOpenChange={() => {}} title="Start again?" description="Check first." confirmLabel="Start anyway" onConfirm={() => {}} />);
+      const dialog = screen.getByRole("alertdialog");
+      expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(order);
+      expect(within(dialog).getAllByRole("button").at(-1)!.parentElement!.className).not.toContain("reverse");
+      expect(document.activeElement?.textContent).toBe("Cancel");
+      unmount();
+    }
   });
 
   it("asks first: an alert dialog whose confirm button runs the action", async () => {

@@ -71,13 +71,33 @@ describe("the session page", () => {
     expect([...document.querySelectorAll("a")].some((a) => a.href.includes("meet.google.com"))).toBe(false);
   });
 
+  it("a long error code wraps instead of pushing the page sideways", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    page(ok({ status: "start_failed", errorCode: "engine_internal_session_conflict_while_creating_bot" }));
+    const code = await screen.findByText("engine_internal_session_conflict_while_creating_bot");
+    expect(code.className).toContain("break-all");
+  });
+
+  it.each([
+    ["recall_rejected", `${BOT_NAME} couldn't join this meeting. Check the link and that the meeting is open, then try again.`],
+    ["meeting_in_use", `${BOT_NAME} already has a session in this meeting. Check the meeting. No second bot was sent.`],
+    ["session_conflict", "Starting meetings isn't working right now (session_conflict)."],
+  ])("a session that didn't start with %s says why, as the start's reply did", async (errorCode, text) => {
+    setClerk({ session: "active", orgId: "org_a" });
+    page(ok({ status: "start_failed", errorCode }));
+    const region = await screen.findByRole("region", { name: "Status" });
+    expect(region.textContent).toBe(`Didn't start${text}`);
+    expect(statusExplanation("start_failed", errorCode)).toBe(text);
+  });
+
   it("shows an error code for support", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     page(ok({ status: "start_failed", errorCode: "recall_rejected" }));
     await screen.findByRole("heading", { level: 1 });
     const details = within(screen.getByRole("region", { name: "Details" }));
     expect(details.getByText("recall_rejected").tagName).toBe("CODE");
-    expect(screen.getByText("The meeting service refused. Check the link and try again.")).toBeTruthy();
+    // Why it didn't start, from the code, worded as the start's reply worded it.
+    expect(screen.getByText(`${BOT_NAME} couldn't join this meeting. Check the link and that the meeting is open, then try again.`)).toBeTruthy();
   });
 
   it.each([
@@ -116,8 +136,24 @@ describe("the session page", () => {
     let n = 0;
     page(async () => new Response(JSON.stringify(ok({ status: ++n === 1 ? "joining" : "in_meeting" }).body), { status: 200 }));
     await screen.findByText("Joining");
+    // Nothing said before the person asks.
+    expect(screen.queryByText("Updated.")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
     expect(await screen.findByText("In the meeting")).toBeTruthy();
+    // A screen reader hears that it worked, in a polite live region.
+    expect((await screen.findByText("Updated.")).closest("[role=status]")).not.toBeNull();
+  });
+
+  it("a failed Refresh says \"Couldn't refresh\", never \"Updated.\"", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let n = 0;
+    page(async () => (++n === 1
+      ? new Response(JSON.stringify(ok().body), { status: 200 })
+      : new Response(JSON.stringify(errorBody("db_unavailable")), { status: 503 })));
+    await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" });
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+    await screen.findByRole("alert");
+    expect(screen.queryByText("Updated.")).toBeNull();
   });
 
   it("while loading: a labelled loading state, then the page", async () => {
@@ -125,9 +161,10 @@ describe("the session page", () => {
     let finish: (() => void) | undefined;
     page(() => new Promise<Response>((r) => { finish = () => r(new Response(JSON.stringify(ok().body), { status: 200 })); }));
     await waitFor(() => expect(finish).toBeTypeOf("function"));
-    expect(screen.getByRole("status", { name: "Loading session" })).toBeTruthy();
+    // Not just a label: words a screen reader reads out.
+    expect(screen.getByRole("status", { name: "Loading session" }).textContent).toBe("Loading the session…");
     expect(screen.getByRole("heading", { level: 1, name: "Session" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Sessions" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: "Back to sessions" }).getAttribute("href")).toBe("/");
     await act(async () => finish!());
     expect(await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" })).toBeTruthy();
     expect(screen.queryByRole("status", { name: "Loading session" })).toBeNull();
@@ -136,7 +173,7 @@ describe("the session page", () => {
   it("404: no such session in this organization, with the way back", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     page({ status: 404, body: errorBody("not_found") });
-    expect(await screen.findByRole("heading", { level: 1, name: "No such session in this organization." })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "No such session in this organization" })).toBeTruthy();
     await userEvent.click(screen.getByRole("link", { name: "Back to sessions" }));
     expect(screen.getByTestId("where").textContent).toBe("/");
   });
@@ -153,7 +190,7 @@ describe("the session page", () => {
     expect(alert.textContent).toContain(title);
     expect(alert.textContent).not.toContain("api says");
     expect(Boolean(within(alert).queryByRole("button", { name: "Try again" }))).toBe(tryAgain);
-    expect(screen.getByRole("link", { name: "Sessions" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to sessions" })).toBeTruthy();
   });
 
   it("Try again after an error reads again", async () => {
@@ -226,7 +263,7 @@ describe("the session page", () => {
       : new Response(JSON.stringify(errorBody("not_found")), { status: 404 })));
     await userEvent.click(await screen.findByRole("button", { name: "Show stage link" }));
     await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
-    expect(await screen.findByRole("heading", { level: 1, name: "No such session in this organization." })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "No such session in this organization" })).toBeTruthy();
     expect(document.body.innerHTML).not.toContain("stage-secret-token");
     expect(screen.queryByText("kfp-qzwd-nre")).toBeNull();
   });
@@ -240,7 +277,7 @@ describe("the session page", () => {
     expect(await axeViolations(document.body)).toEqual([]);
     first.view.unmount();
     page({ status: 404, body: errorBody("not_found") });
-    await screen.findByRole("heading", { name: "No such session in this organization." });
+    await screen.findByRole("heading", { name: "No such session in this organization" });
     expect(await axeViolations(document.body)).toEqual([]);
   });
 });
@@ -349,6 +386,13 @@ describe("the page's words", () => {
     expect(limitsText({ maxUsd: 5, maxMinutes: 60 }, "en-US")).toEqual({ spend: "$5.00", time: "60 minutes" });
     expect(limitsText({ maxUsd: 0.5, maxMinutes: 1 }, "en-US")).toEqual({ spend: "$0.50", time: "1 minute" });
     expect(limitsText({ maxUsd: 12.345, maxMinutes: 90.5 }, "en-US")).toEqual({ spend: "$12.35", time: "90.5 minutes" });
+  });
+
+  it("exact times carry their time zone", () => {
+    expect(exactTime("2026-10-20T14:48:00.000Z", "en-US")).toMatch(/^Oct 20, 2026, \d{1,2}:48 [AP]M (?:[A-Z]{2,5}|GMT[+-]\d{1,2}(?::\d{2})?)$/);
+    expect(exactTime("2026-10-20T14:48:00.000Z", "en-US")).toBe(new Date("2026-10-20T14:48:00.000Z").toLocaleString("en-US", {
+      month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    }));
   });
 
   it("a broken time reads as Unknown", () => {

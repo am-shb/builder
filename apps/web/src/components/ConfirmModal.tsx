@@ -22,6 +22,7 @@ export function ConfirmModal({ open, onOpenChange, title, description, confirmLa
 }) {
   const desktop = useMediaQuery(DESKTOP);
   const returnFocus = useReturnFocus(open, returnFocusTo);
+  const cancel = <AlertDialog.Cancel className={buttonVariants({ variant: "primary", block: !desktop })}>{cancelLabel}</AlertDialog.Cancel>;
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
@@ -33,11 +34,14 @@ export function ConfirmModal({ open, onOpenChange, title, description, confirmLa
           </span>
           <AlertDialog.Title className={titleClass}>{title}</AlertDialog.Title>
           <AlertDialog.Description className="mt-2 mb-6 text-ink-2">{description}</AlertDialog.Description>
-          <div className={cn("flex gap-3", desktop ? "justify-end" : "flex-col-reverse")}>
-            <AlertDialog.Cancel className={buttonVariants({ variant: "primary", block: !desktop })}>{cancelLabel}</AlertDialog.Cancel>
+          {/* In the order they're seen, so Tab follows the eye: Cancel then the risky one side by side on desktop; on
+              phones the risky one on top and Cancel at the bottom, in thumb reach. Cancel has focus either way. */}
+          <div className={cn("flex gap-3", desktop ? "justify-end" : "flex-col")}>
+            {desktop && cancel}
             <AlertDialog.Action className={buttonVariants({ variant: "secondary", block: !desktop })} onClick={onConfirm}>
               {confirmLabel}
             </AlertDialog.Action>
+            {!desktop && cancel}
           </div>
         </AlertDialog.Content>
       </AlertDialog.Portal>

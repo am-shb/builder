@@ -43,9 +43,10 @@ export const clerkAppearance = {
     // The phone field is a box holding a country picker and an input: the box gets the border, the input none.
     phoneInputBox: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus-within:border-primary focus-within:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)] [&_input]:border-0 [&_input]:shadow-none",
     formFieldInput: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus:border-primary focus:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
-    organizationSwitcherTrigger: "h-11 rounded-full py-0 pr-2.5 pl-1.5 hover:bg-sunk focus-visible:outline-2 focus-visible:outline-primary",
+    // A long org name is cut short with an ellipsis, so the account button stays on screen on a 320px phone.
+    organizationSwitcherTrigger: "h-11 min-w-0 max-w-full rounded-full py-0 pr-2.5 pl-1.5 hover:bg-sunk focus-visible:outline-2 focus-visible:outline-primary",
     organizationPreviewAvatarBox: "size-[30px] rounded-full bg-accent-tint",
-    organizationPreviewMainIdentifier: "text-sm font-medium text-ink",
+    organizationPreviewMainIdentifier: "truncate max-w-[40vw] text-sm font-medium text-ink md:max-w-[260px]",
     organizationSwitcherPopoverCard: "ring-1 ring-hair",
     organizationSwitcherPopoverActionButton: "min-h-12 text-ink",
     userButtonPopoverCard: "ring-1 ring-hair",

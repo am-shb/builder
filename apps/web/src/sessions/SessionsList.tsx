@@ -11,6 +11,7 @@ import { EmptyState } from "../components/EmptyState.tsx";
 import { SessionList, SessionRow, SessionRowSkeleton } from "../components/SessionRow.tsx";
 import { ErrorNotice } from "./ErrorNotice.tsx";
 import { meetingDisplay } from "./meeting.ts";
+import { useRefreshNews } from "../hooks/useRefreshNews.tsx";
 import { cn } from "../lib/cn.ts";
 import { startedWhen } from "./time.ts";
 
@@ -19,7 +20,8 @@ export const EMPTY_STEPS = ["Paste the meeting link", `Admit ${BOT_NAME} when it
 // The api returns an org's newest 50.
 export const LIST_LIMIT = 50;
 
-// The org's sessions, newest first, as the api returns them. Reloaded with Refresh, which is always in the header,
+// The org's sessions, newest first, as the api returns them. Reloaded with Refresh, which is always in the header (and
+// "Try again" when the first load failed),
 // and when the org changes; statuses don't change on their own yet (plan WD6). No stage link here: it's a control link,
 // shown only on a session's own page.
 export function SessionsList({ list, now, emptyAction }: {
@@ -28,9 +30,10 @@ export function SessionsList({ list, now, emptyAction }: {
   // The empty state's own way to start (below 1024px; wider, the start panel is beside it).
   emptyAction?: ReactNode;
 }) {
+  const { refresh, news } = useRefreshNews(list);
   const header = (
     <SectionHeader id="recent" title="Recent" action={
-      <Button variant="quiet" size="sm" onClick={list.refresh} busy={list.refreshing} busyLabel="Refreshing…" disabled={list.status === "loading"}>
+      <Button variant="quiet" size="sm" onClick={refresh} busy={list.refreshing} busyLabel="Refreshing…" disabled={list.status === "loading"}>
         <RotateCw aria-hidden="true" />Refresh
       </Button>
     } />
@@ -53,7 +56,7 @@ export function SessionsList({ list, now, emptyAction }: {
     return (
       <section aria-labelledby="recent">
         {header}
-        <ErrorNotice error={list.error} context="read" className="mt-2 md:max-w-[520px]" />
+        <ErrorNotice error={list.error} context="read" onRefresh={list.refresh} className="mt-2 md:max-w-[520px]" />
       </section>
     );
   }
@@ -62,6 +65,7 @@ export function SessionsList({ list, now, emptyAction }: {
   return (
     <section aria-labelledby="recent">
       {header}
+      {news}
       {/* Hidden while a retry runs, so a second failure appears (and is announced) again. */}
       {list.status === "error" && !list.refreshing && <RefreshFailed error={list.error} loadedAt={list.loadedAt} />}
       {sessions.length === 0 ? (

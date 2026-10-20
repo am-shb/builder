@@ -10,7 +10,7 @@ import { buildCsp, clerkFrontendApiHost } from "../build/csp.ts";
 import { safeReturnPath } from "../src/auth/guards.tsx";
 import { axeViolations } from "./helpers/axe.ts";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
-import { API, fakeApi } from "./helpers/fake-api.ts";
+import { API, errorBody, fakeApi, session } from "./helpers/fake-api.ts";
 
 function Where() {
   const l = useLocation();
@@ -121,7 +121,7 @@ describe("routes and the guard", () => {
     setClerk({ loaded: false });
     at("/sessions/abc");
     expect(where()).toBe("/sessions/abc");
-    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Loading" }).textContent).toBe("Loading…");
   });
 
   it("switching org on the list stays on the list", async () => {
@@ -158,15 +158,51 @@ describe("routes and the guard", () => {
     expect(await screen.findByRole("button", { name: "Org A, switch organization" })).toBeTruthy();
   });
 
-  it("switching org on a session's page goes back to the list", async () => {
-    setClerk({ session: "active", orgId: "org_a" });
-    const view = at("/sessions/abc");
-    expect(where()).toBe("/sessions/abc");
-    setClerk({ session: "active", orgId: "org_b" });
-    await act(async () => view.rerender(
-      <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
-    ));
-    expect(where()).toBe("/");
+  describe("switching org on a session's page", () => {
+    const ID = "11111111-1111-4111-8111-111111111111";
+    // The session is in org_a only; any other org gets 404, as from the api.
+    const inOrgA = () => fakeApi({
+      [`GET /v1/sessions/${ID}`]: async (req) => (req.headers.Authorization === "Bearer token-org_a"
+        ? new Response(JSON.stringify({ session: session({ id: ID }) }), { status: 200 })
+        : new Response(JSON.stringify(errorBody("not_found")), { status: 404 })),
+    });
+    const switchTo = async (view: ReturnType<typeof at>, orgId: string) => {
+      setClerk({ session: "active", orgId });
+      await act(async () => view.rerender(
+        <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={[`/sessions/${ID}`]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
+      ));
+    };
+
+    it("goes back to the list when it was showing a session", async () => {
+      api = inOrgA();
+      setClerk({ session: "active", orgId: "org_a" });
+      const view = at(`/sessions/${ID}`);
+      await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" });
+      await switchTo(view, "org_b");
+      expect(where()).toBe("/");
+    });
+
+    it("stays while it was still loading: nothing of the old org was shown", async () => {
+      api = fakeApi({ [`GET /v1/sessions/${ID}`]: () => new Promise<Response>(() => {}) });
+      setClerk({ session: "active", orgId: "org_a" });
+      const view = at(`/sessions/${ID}`);
+      expect(screen.getByRole("heading", { level: 1, name: "Session" })).toBeTruthy();
+      await switchTo(view, "org_b");
+      expect(where()).toBe(`/sessions/${ID}`);
+    });
+
+    it("stays and looks again in the new org when it was showing \"No such session\", as its message says", async () => {
+      api = inOrgA();
+      setClerk({ session: "active", orgId: "org_b" });
+      const view = at(`/sessions/${ID}`);
+      await screen.findByRole("heading", { level: 1, name: "No such session in this organization" });
+      expect(screen.getByText("It may be in another organization. Switch organization to look there.")).toBeTruthy();
+      await switchTo(view, "org_a");
+      expect(await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" })).toBeTruthy();
+      expect(where()).toBe(`/sessions/${ID}`);
+      expect(api.requests.filter((r) => r.path === `/v1/sessions/${ID}`).map((r) => r.headers.Authorization))
+        .toEqual(["Bearer token-org_b", "Bearer token-org_a"]);
+    });
   });
 
   it("the header's mark goes home through the router, without reloading the page", async () => {
@@ -218,6 +254,11 @@ describe("the Clerk wiring", () => {
     expect(typeof clerk.providerProps?.routerReplace).toBe("function");
     expect(clerk.providerProps?.localization).toBeTruthy();
     expect((clerk.providerProps?.appearance as { cssLayerName?: string }).cssLayerName).toBe("clerk");
+    // A long org name is cut short in the header, so the account button stays on a narrow phone.
+    const elements = (clerk.providerProps?.appearance as { elements: Record<string, string> }).elements;
+    expect(elements.organizationPreviewMainIdentifier).toMatch(/\btruncate\b/);
+    expect(elements.organizationPreviewMainIdentifier).toMatch(/\bmax-w-/);
+    expect(elements.organizationSwitcherTrigger).toMatch(/\bmin-w-0\b/);
   });
 
   it("when Clerk's script fails to load, says so and offers a retry", () => {
