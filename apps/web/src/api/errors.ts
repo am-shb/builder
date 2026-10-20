@@ -90,18 +90,24 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
     case "limits_unavailable":
       return plain("Starting meetings isn't set up on this server yet.", "none", "Nothing was started.");
     case "engine_rejected": {
-      const engineCode = e.session?.errorCode;
-      if (engineCode === "recall_rejected") {
-        return plain(`${BOT_NAME} couldn't join this meeting.`, "fix_link", "Check the link and that the meeting is open, then try again.");
-      }
-      if (engineCode === "meeting_in_use") {
-        return { ...plain(`${BOT_NAME} already has a session in this meeting.`, "back_to_list", "Check the meeting. No second bot was sent."), tone: "warning" };
-      }
-      return plain(`Starting meetings isn't working right now (${engineCode ?? "engine_rejected"}).`);
+      const r = engineRefusal(e.session?.errorCode);
+      return { ...plain(r.title, r.action, r.detail), tone: r.tone };
     }
     default:
       return context === "read" || context === "detail" ? plain(somethingWrong(e.code), "refresh") : plain(somethingWrong(e.code));
   }
+}
+
+// Why the engine refused a start, from its error code: the start's reply and the session page (a "Didn't start"
+// session) say the same thing.
+export function engineRefusal(engineCode: string | undefined): { title: string; detail?: string; tone: "error" | "warning"; action: ErrorAction } {
+  if (engineCode === "recall_rejected") {
+    return { title: `${BOT_NAME} couldn't join this meeting.`, detail: "Check the link and that the meeting is open, then try again.", tone: "error", action: "fix_link" };
+  }
+  if (engineCode === "meeting_in_use") {
+    return { title: `${BOT_NAME} already has a session in this meeting.`, detail: "Check the meeting. No second bot was sent.", tone: "warning", action: "back_to_list" };
+  }
+  return { title: `Starting meetings isn't working right now (${engineCode ?? "engine_rejected"}).`, tone: "error", action: "none" };
 }
 
 // Org roles as people read them; any other role shows as its key.

@@ -246,6 +246,10 @@
     outline: 2px solid var(--primary);
     outline-offset: 3px;
   }
+  /* A heading or the page's main area, focused by the app on moving to a page (RouteFocus): not a control, so no ring. */
+  h1[tabindex="-1"]:focus, main[tabindex="-1"]:focus {
+    outline: none;
+  }
   /* The meeting codes and other figures line up. */
   .tabular {
     font-variant-numeric: tabular-nums;

@@ -28,6 +28,8 @@ export function ResponsiveModal({ open, onOpenChange, onClosed, returnFocusTo, t
   const content = useRef<HTMLDivElement>(null);
   const drag = useRef<{ start: number; distance: number } | null>(null);
   const returnFocus = useReturnFocus(open, returnFocusTo);
+  // Every way of closing goes through here, so none of them works while closing is disabled.
+  const requestOpenChange = (next: boolean) => (closeDisabled && !next ? undefined : onOpenChange(next));
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (desktop || closeDisabled || (e.target as HTMLElement).closest("button")) return;
@@ -46,11 +48,11 @@ export function ResponsiveModal({ open, onOpenChange, onClosed, returnFocusTo, t
     if (!done || !content.current) return;
     content.current.style.transition = "transform 200ms ease-out";
     content.current.style.transform = "";
-    if (done.distance > CLOSE_DISTANCE) onOpenChange(false);
+    if (done.distance > CLOSE_DISTANCE) requestOpenChange(false);
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => (closeDisabled && !next ? undefined : onOpenChange(next))}>
+    <Dialog.Root open={open} onOpenChange={requestOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content

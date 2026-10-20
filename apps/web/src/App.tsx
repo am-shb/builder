@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { ApiProvider } from "./api/ApiProvider.tsx";
 import { ClerkWithRouter } from "./auth/ClerkWithRouter.tsx";
 import { RedirectIfSignedIn, RequireOrg } from "./auth/guards.tsx";
+import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
+import { RouteFocus } from "./components/RouteFocus.tsx";
 import { readConfig, type WebConfig } from "./config.ts";
 import { ChooseOrganizationPage } from "./pages/ChooseOrganizationPage.tsx";
 import { ClerkUnavailablePage } from "./pages/ClerkUnavailablePage.tsx";
@@ -14,32 +16,39 @@ import { SignInPage } from "./pages/SignInPage.tsx";
 import { SignUpPage } from "./pages/SignUpPage.tsx";
 
 // The routes (plan WD2). Sign-in and sign-up are Clerk's, on our own URLs; everything else needs an organization.
+// Moving between them starts each page at its top with focus on its heading (RouteFocus).
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route element={<RedirectIfSignedIn />}>
-        <Route path="/sign-in/*" element={<SignInPage />} />
-        <Route path="/sign-up/*" element={<SignUpPage />} />
-      </Route>
-      <Route path="/choose-organization" element={<ChooseOrganizationPage />} />
-      <Route element={<RequireOrg />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/sessions/:id" element={<SessionPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <RouteFocus />
+      <Routes>
+        <Route element={<RedirectIfSignedIn />}>
+          <Route path="/sign-in/*" element={<SignInPage />} />
+          <Route path="/sign-up/*" element={<SignUpPage />} />
+        </Route>
+        <Route path="/choose-organization" element={<ChooseOrganizationPage />} />
+        <Route element={<RequireOrg />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/sessions/:id" element={<SessionPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
+// A page that throws shows "Something went wrong" with Reload, never a blank page (ErrorBoundary).
 export function App({ config = readConfig() }: { config?: WebConfig }) {
   if (!config.clerkPublishableKey || !config.apiUrl) return <NotConfiguredPage />;
   return (
-    <BrowserRouter>
-      <ClerkWithRouter publishableKey={config.clerkPublishableKey}>
-        <ClerkLoading><LoadingPage /></ClerkLoading>
-        <ClerkFailed><ClerkUnavailablePage /></ClerkFailed>
-        <ClerkLoaded><ApiProvider baseUrl={config.apiUrl}><AppRoutes /></ApiProvider></ClerkLoaded>
-      </ClerkWithRouter>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <ClerkWithRouter publishableKey={config.clerkPublishableKey}>
+          <ClerkLoading><LoadingPage /></ClerkLoading>
+          <ClerkFailed><ClerkUnavailablePage /></ClerkFailed>
+          <ClerkLoaded><ApiProvider baseUrl={config.apiUrl}><AppRoutes /></ApiProvider></ClerkLoaded>
+        </ClerkWithRouter>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

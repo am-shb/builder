@@ -37,6 +37,8 @@ type Shot = {
   start?: string;
   // Form edits made before the capture and never submitted (Clerk pre-fills the org form from the email's domain).
   prepare?: { fill?: Record<string, string>; clickText?: string[] };
+  // What GET /v1/sessions/:id answers on a session's page (W6): a session, or one of the error states.
+  detail?: Record<string, unknown> | "loading" | "404" | "error" | "refresh-error";
 };
 const ORG_FORM = { fill: { Name: "Northwind Studio" }, clickText: ["Remove"] };
 
@@ -61,6 +63,11 @@ const UNCONFIRMED = sessionFixture("u", "https://meet.google.com/pzm-rtqa-wlk", 
 const LONG = [...LIST, ...Array.from({ length: 9 }, (_, i) =>
   sessionFixture(`l${i}`, `https://meet.google.com/${["bqe", "tnw", "hxa", "mze", "pof", "ruk", "cwi", "gdy", "vla"][i]}-${["xkpa", "lfmd", "qzro", "wtce", "bnyv", "kasj", "oupd", "eirh", "mgqt"][i]}-${["ysn", "kdo", "fua", "pmr", "jzt", "wbe", "hli", "cxo", "qrv"][i]}`,
     i % 4 === 0 ? "failed" : "ended", 60 * 24 * (4 + i * 3)))];
+// A session's page (W6). The stage link is a made-up one on a reserved test domain; it holds no real token.
+const DETAIL_ID = "0b5f6c1e-6d2a-4c55-9e0e-2a8f3b1c7d40";
+const STAGE_URL = `https://engine.example.test/stage/${DETAIL_ID}?token=demo-not-a-real-token-7f3a9c2e51b04d6a`;
+const detailFixture = (status: string, extra: Record<string, unknown> = {}) =>
+  ({ ...sessionFixture(DETAIL_ID, "https://meet.google.com/kfp-qzwd-nre", status, 12), updatedAt: ago(3), ...extra });
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
 // Where the layout changes: a tablet in portrait (one column, a dialog to start) and the first two-column width.
@@ -109,6 +116,32 @@ shots.push(
   { name: "start-unknown-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in", api: "start-unknown", start: NEW_LINK },
   { name: "start-sheet-phone-360-dark", path: "/", width: 360, height: 780, dark: true, fullPage: false, clerk: true, state: "signed-in", api: "list", start: "" },
 );
+// A session's page (W6): the main state at every width, the others at phone and desktop width.
+{
+  const SIZES = { "360": { width: 360, height: 780 }, "390": PHONE, "768": TABLET, "1024": LAPTOP, "1280": DESKTOP } as const;
+  const detailPath = `/sessions/${DETAIL_ID}`;
+  const states: [string, Shot["detail"], string | undefined, (keyof typeof SIZES)[]][] = [
+    ["detail-stage-shown", detailFixture("joining", { stageUrl: STAGE_URL }), "show-stage", ["360", "390", "768", "1024", "1280"]],
+    ["detail-in-meeting", detailFixture("in_meeting", { stageUrl: STAGE_URL }), undefined, ["360", "390", "768", "1024", "1280"]],
+    ["detail-start-failed", detailFixture("start_failed", { errorCode: "recall_rejected" }), undefined, ["390", "1280"]],
+    ["detail-unknown", detailFixture("start_unknown", { stageUrl: STAGE_URL }), undefined, ["390", "1280"]],
+    ["detail-ended", detailFixture("ended", { stageUrl: STAGE_URL }), undefined, ["390", "1280"]],
+    ["detail-new-status", detailFixture("paused"), undefined, ["390"]],
+    ["detail-loading", "loading", undefined, ["390", "1280"]],
+    ["detail-404", "404", undefined, ["390", "1280"]],
+    ["detail-error", "error", undefined, ["390", "1280"]],
+    ["detail-refresh-error", "refresh-error", "refresh", ["390", "1280"]],
+  ];
+  for (const dark of [false, true]) {
+    const mode = dark ? "dark" : "light";
+    for (const [name, detail, click, sizes] of states) {
+      for (const size of sizes) {
+        shots.push({ name: `${name}-${size}-${mode}`, path: detailPath, ...SIZES[size], dark, fullPage: true, clerk: true, state: "signed-in",
+          api: "list", detail, ...(click ? { click } : {}) });
+      }
+    }
+  }
+}
 // The layout's edges: 768 (iPad portrait), 1024 (the first two-column width) and a phone held sideways.
 for (const dark of [false, true]) {
   const mode = dark ? "dark" : "light";
@@ -261,6 +294,16 @@ try {
           const sessions = shot.api === "empty" ? [] : shot.api === "long" ? LONG : LIST;
           return route.fulfill({ status: 200, headers: cors, json: { sessions } });
         }
+        if (path.startsWith("/v1/sessions/") && shot.detail) {
+          sessionReads += 1;
+          if (shot.detail === "loading") return; // never answered
+          if (shot.detail === "404") return route.fulfill({ status: 404, headers: cors, json: { error: { code: "not_found", message: "x" } } });
+          if (shot.detail === "error" || (shot.detail === "refresh-error" && sessionReads > 1)) {
+            return route.fulfill({ status: 503, headers: cors, json: { error: { code: "db_unavailable", message: "x" } } });
+          }
+          const session = shot.detail === "refresh-error" ? detailFixture("joining", { stageUrl: STAGE_URL }) : shot.detail;
+          return route.fulfill({ status: 200, headers: cors, json: { session } });
+        }
         return route.fulfill({ status: 404, headers: cors, json: { error: { code: "not_found", message: "x" } } });
       }
       return url.startsWith(base) || (shot.clerk && CLERK_HOSTS.includes(host)) ? route.continue() : route.abort();
@@ -268,7 +311,7 @@ try {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
     // A loading shot never gets its answer, so the network never goes idle.
-    await page.goto(base + shot.path, { waitUntil: shot.api === "loading" ? "load" : "networkidle" });
+    await page.goto(base + shot.path, { waitUntil: shot.api === "loading" || shot.detail === "loading" ? "load" : "networkidle" });
     await page.evaluate(() => document.fonts.ready);
     if (shot.clerk) await page.waitForSelector(".cl-rootBox, .cl-organizationSwitcher-root, .cl-userButton-root, main", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(shot.clerk ? 1200 : 400);
@@ -284,6 +327,7 @@ try {
     if (shot.click === "org") await page.locator(".cl-organizationSwitcherTrigger").click();
     if (shot.click === "user") await page.locator(".cl-userButtonTrigger").click();
     if (shot.click === "refresh") await page.getByRole("button", { name: "Refresh" }).click();
+    if (shot.click === "show-stage") await page.getByRole("button", { name: "Show stage link" }).click();
     if (shot.start !== undefined) {
       let form = page.locator("main");
       // Below 1024px the start panel is hidden: New session opens a sheet (phones) or a dialog (tablets).

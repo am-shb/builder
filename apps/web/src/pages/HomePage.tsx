@@ -11,7 +11,7 @@ import { ResponsiveModal } from "../components/ResponsiveModal.tsx";
 import { statusLabel } from "../components/StatusPill.tsx";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
 import { SessionsList } from "../sessions/SessionsList.tsx";
-import { isLinkProblem, linkProblemText, outcomeAnnouncement, shouldConfirmStart } from "../sessions/start.ts";
+import { isLinkProblem, linkProblemText, outcomeAnnouncement, startConfirmation, type StartConfirmation } from "../sessions/start.ts";
 import { StartForm } from "../sessions/StartForm.tsx";
 import { StartOutcome } from "../sessions/StartOutcome.tsx";
 import { useStartSession } from "../sessions/StartSessionProvider.tsx";
@@ -30,8 +30,10 @@ export function HomePage({ now }: { now?: Date }) {
   const [sheetMounted, setSheetMounted] = useState(false);
   const sheetOpenRef = useRef(false);
   sheetOpenRef.current = sheetOpen;
-  // WD8: a link waiting for "Start anyway".
-  const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
+  // A link waiting for "Start anyway", and why it was asked about (WD8, or a session for the same meeting).
+  // Kept after closing, so the dialog's words don't change while it animates away.
+  const [confirm, setConfirm] = useState<{ url: string; why: NonNullable<StartConfirmation> } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const newSessionRef = useRef<HTMLButtonElement>(null);
   const linkError = linkProblemText(starter.result);
@@ -74,8 +76,11 @@ export function HomePage({ now }: { now?: Date }) {
   }
 
   function requestStart(url: string) {
-    if (shouldConfirmStart(starter.result, list.data ?? [], url, now)) setConfirmUrl(url);
-    else void send(url);
+    const why = startConfirmation(starter.result, list.data ?? [], url, now);
+    if (why) {
+      setConfirm({ url, why });
+      setConfirmOpen(true);
+    } else void send(url);
   }
 
   const formProps = {
@@ -128,15 +133,17 @@ export function HomePage({ now }: { now?: Date }) {
         <StartForm {...formProps} />
       </ResponsiveModal>
       <ConfirmModal
-        open={confirmUrl !== null}
-        onOpenChange={(open) => !open && setConfirmUrl(null)}
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
         title="Start another session for this link?"
-        description={`An earlier start for this link didn't confirm. Check the meeting for a ${BOT_NAME} bot before starting another.`}
+        description={confirm?.why.kind === "active"
+          ? `This meeting already has a ${BOT_NAME} session (${statusLabel(confirm.why.session.status)}), started from another copy of the link. Starting again sends a second ${BOT_NAME} bot.`
+          : `An earlier start for this link didn't confirm. Check the meeting for a ${BOT_NAME} bot before starting another.`}
         confirmLabel="Start anyway"
         returnFocusTo={visibleStart}
         onConfirm={() => {
-          const url = confirmUrl;
-          setConfirmUrl(null);
+          const url = confirm?.url;
+          setConfirmOpen(false);
           if (url) void send(url);
         }}
       />

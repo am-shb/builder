@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api/client.ts";
 import { explainError } from "../src/api/errors.ts";
 import {
-  checkMeetingLink, findUnconfirmedStart, isLinkProblem, linkProblemText, meetingKey, sameMeetingLink, shouldConfirmStart,
-  UNCONFIRMED_WINDOW_MS, type StartResult,
+  ACTIVE_MARGIN_MS, checkMeetingLink, findActiveCopy, findUnconfirmedStart, isLinkProblem, linkProblemText, meetingKey,
+  sameMeetingLink, shouldConfirmStart, startConfirmation, UNCONFIRMED_WINDOW_MS, type StartResult,
 } from "../src/sessions/start.ts";
 import { session } from "./helpers/fake-api.ts";
 
@@ -79,6 +79,51 @@ describe("shouldConfirmStart", () => {
   it("asks when the list shows a recent unconfirmed start", () => {
     const unconfirmed = session({ meetingUrl: LINK, status: "start_unknown", createdAt: ago(60_000) });
     expect(shouldConfirmStart(null, [unconfirmed], LINK, NOW)).toBe(true);
+  });
+});
+
+describe("findActiveCopy: another copy of the link for a meeting that may still have its bot", () => {
+  // 60-minute limit: active up to 60 minutes plus the margin.
+  const at = (msAgo: number, over = {}) => session({ id: "a", meetingUrl: LINK, status: "joining", createdAt: ago(msAgo), limits: { maxUsd: 5, maxMinutes: 60 }, ...over });
+  const LIMIT = 60 * 60_000;
+
+  it("finds a starting, joining or in-meeting session for the same meeting under another copy of the link", () => {
+    for (const status of ["starting", "joining", "in_meeting"]) {
+      expect(findActiveCopy([at(60_000, { status })], `${LINK}?authuser=0`, NOW)?.id, status).toBe("a");
+      expect(findActiveCopy([at(60_000, { status })], "https://meet.google.com/KFP-QZWD-NRE", NOW)?.id, status).toBe("a");
+    }
+  });
+
+  it("not the exact same link: the api answers that one with the existing session and sends no bot", () => {
+    expect(findActiveCopy([at(60_000)], LINK, NOW)).toBeUndefined();
+  });
+
+  it("not once the session's time limit and the margin have passed", () => {
+    expect(findActiveCopy([at(LIMIT + ACTIVE_MARGIN_MS)], `${LINK}?authuser=0`, NOW)?.id).toBe("a");
+    expect(findActiveCopy([at(LIMIT + ACTIVE_MARGIN_MS + 1)], `${LINK}?authuser=0`, NOW)).toBeUndefined();
+  });
+
+  it("not for finished sessions, or another meeting", () => {
+    for (const status of ["ended", "failed", "start_failed", "start_unknown"]) {
+      expect(findActiveCopy([at(60_000, { status })], `${LINK}?authuser=0`, NOW), status).toBeUndefined();
+    }
+    expect(findActiveCopy([at(60_000)], "https://meet.google.com/abc-defg-hij", NOW)).toBeUndefined();
+  });
+
+  it("startConfirmation says which question to ask; an unconfirmed start comes first", () => {
+    const active = at(60_000);
+    expect(startConfirmation(null, [active], `${LINK}?authuser=0`, NOW)).toEqual({ kind: "active", session: active });
+    expect(startConfirmation(null, [active], LINK, NOW)).toBeNull();
+    const unconfirmed = at(60_000, { id: "u", status: "start_unknown" });
+    expect(startConfirmation(null, [active, unconfirmed], `${LINK}?authuser=0`, NOW)).toEqual({ kind: "unconfirmed" });
+    expect(shouldConfirmStart(null, [active], `${LINK}?authuser=0`, NOW)).toBe(true);
+  });
+
+  it("doesn't ask for the exact link of an active session, even when another copy is active too: the api reuses it", () => {
+    const copy = at(60_000, { id: "c", meetingUrl: `${LINK}?authuser=0` });
+    const exact = at(60_000, { id: "e" });
+    expect(startConfirmation(null, [copy, exact], LINK, NOW)).toBeNull();
+    expect(startConfirmation(null, [copy, exact], `${LINK}?authuser=1`, NOW)).toEqual({ kind: "active", session: copy });
   });
 });
 

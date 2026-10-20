@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
@@ -129,17 +129,57 @@ describe("the session list", () => {
     expect(calls).toBe(2);
   });
 
-  it("a failed read says why, in our words; Refresh tries again, and nothing retries by itself", async () => {
+  it("a failed read says why, in our words; Try again and Refresh read again, and nothing retries by itself", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     const api = fakeApi({ "GET /v1/sessions": { status: 503, body: errorBody("db_unavailable") } });
     show(api);
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText("Sessions aren't available right now.")).toBeTruthy();
     expect(alert.textContent).not.toContain("api says");
-    expect(within(alert).queryByRole("button")).toBeNull();
     expect(api.requests).toHaveLength(1);
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    // Both the header's Refresh and the notice's own "Try again" read again.
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(api.requests).toHaveLength(2);
+    await userEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    expect(api.requests).toHaveLength(3);
+  });
+
+  it("a Refresh that works says \"Updated.\" to a screen reader", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    show(fakeApi({ "GET /v1/sessions": { status: 200, body: { sessions: SESSIONS.slice(0, 1) } } }));
+    await screen.findByText("kfp-qzwd-nre");
+    expect(screen.queryByText("Updated.")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect((await screen.findByText("Updated.")).closest("[role=status]")).not.toBeNull();
+  });
+
+  it("a second Refresh that works is announced again (a new node), and a Refresh pending when the org changes says nothing", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let hold: ((r: Response) => void) | undefined;
+    const body = () => new Response(JSON.stringify({ sessions: SESSIONS.slice(0, 1) }), { status: 200 });
+    const api = fakeApi({
+      "GET /v1/sessions": async (req) => (hold === undefined && req.headers.Authorization === "Bearer token-org_a" && api.requests.length === 4
+        ? new Promise<Response>((r) => { hold = r; })
+        : body()),
+    });
+    const view = show(api);
+    await screen.findByText("kfp-qzwd-nre");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    const first = await screen.findByText("Updated.");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("Updated.")).not.toBe(first));
+    // A third Refresh is still running when the org changes.
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(hold).toBeTypeOf("function"));
+    setClerk({ session: "active", orgId: "org_b" });
+    view.rerender(
+      <ApiProvider baseUrl={API} fetch={api.fetch}>
+        <MemoryRouter initialEntries={["/"]}><Routes><Route path="/" element={<ListUnderTest />} /></Routes><Where /></MemoryRouter>
+      </ApiProvider>,
+    );
+    await screen.findByText("kfp-qzwd-nre");
+    await act(async () => {});
+    expect(screen.queryByText("Updated.")).toBeNull();
   });
 
   it("a refresh that fails keeps the rows and shows why above them", async () => {

@@ -57,11 +57,38 @@ export function findUnconfirmedStart(sessions: readonly SessionView[], meetingUr
     && now.getTime() - new Date(s.createdAt).getTime() <= UNCONFIRMED_WINDOW_MS);
 }
 
-// Ask before starting this link when the last start for the same meeting may have sent a bot, or the list shows an
-// unconfirmed start for it.
-export function shouldConfirmStart(last: StartResult | null, sessions: readonly SessionView[], meetingUrl: string, now = new Date()): boolean {
+// A session for this meeting that may still have its bot there, under another copy of the link (?authuser=0, a
+// different case): the api and engine match exact links, so starting this copy would send a second bot. The exact
+// same link isn't one: the api answers with the existing session and sends nothing. Starting, joining and in the
+// meeting count until the session's time limit has passed, plus 10 minutes: this app's estimate of when the engine
+// has ended the bot, since statuses don't move yet. (The api's start guards use the same default margin.)
+export const ACTIVE_STATUSES: readonly string[] = ["starting", "joining", "in_meeting"];
+export const ACTIVE_MARGIN_MS = 10 * 60_000;
+
+export function findActiveCopy(sessions: readonly SessionView[], meetingUrl: string, now = new Date()): SessionView | undefined {
+  const target = meetingKey(meetingUrl);
+  return sessions.find((s) => ACTIVE_STATUSES.includes(s.status)
+    && s.meetingUrl !== meetingUrl
+    && meetingKey(s.meetingUrl) === target
+    && now.getTime() - new Date(s.createdAt).getTime() <= s.limits.maxMinutes * 60_000 + ACTIVE_MARGIN_MS);
+}
+
+// Why to ask before starting this link, or null to start it:
+// - "unconfirmed": the last start for the same meeting may have sent a bot, or the list shows an unconfirmed start (WD8);
+// - "active": the list shows a session for the same meeting, under another copy of the link, that may still be there.
+export type StartConfirmation = { kind: "unconfirmed" } | { kind: "active"; session: SessionView } | null;
+
+export function startConfirmation(last: StartResult | null, sessions: readonly SessionView[], meetingUrl: string, now = new Date()): StartConfirmation {
   const unknownBefore = last?.kind === "failed" && last.explained.botMayExist && sameMeetingLink(last.meetingUrl, meetingUrl);
-  return unknownBefore || findUnconfirmedStart(sessions, meetingUrl, now) !== undefined;
+  if (unknownBefore || findUnconfirmedStart(sessions, meetingUrl, now) !== undefined) return { kind: "unconfirmed" };
+  // An active session under this exact link means the api reuses it: nothing is sent, so nothing to ask.
+  if (sessions.some((s) => ACTIVE_STATUSES.includes(s.status) && s.meetingUrl === meetingUrl)) return null;
+  const active = findActiveCopy(sessions, meetingUrl, now);
+  return active ? { kind: "active", session: active } : null;
+}
+
+export function shouldConfirmStart(last: StartResult | null, sessions: readonly SessionView[], meetingUrl: string, now = new Date()): boolean {
+  return startConfirmation(last, sessions, meetingUrl, now) !== null;
 }
 
 // Replies about the link itself (the api's 400, or Recall refusing it): shown under the field, where it can be fixed.
