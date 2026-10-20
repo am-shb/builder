@@ -14,13 +14,111 @@ export const STYLE_OPTIONS = {
   span: ["1", "2", "3", "4"],
 };
 
+/** @typedef {{ layout: "stack"|"row"|"grid", note: string }} TemplateRegion */
+/** @typedef {{ regions: Record<string, TemplateRegion>, main: string, areas: string, columns: string, suggest: string }} Template */
+
+/** @type {Record<string, Template>} */
+export const TEMPLATES = {
+  dashboard: {
+    regions: {
+      header: { layout: "row", note: "page title and actions" },
+      stats: { layout: "grid", note: "up to 4 headline numbers" },
+      main: { layout: "stack", note: "charts and tables" },
+      side: { layout: "stack", note: "recent activity" },
+    },
+    main: "main",
+    areas: '"header header" "stats stats" "main side"',
+    columns: "2fr 1fr",
+    suggest: "PageHeader in header; StatCards in stats; ChartCard/Table in main; ActivityList in side",
+  },
+  "list-detail": {
+    regions: {
+      header: { layout: "row", note: "page title and actions" },
+      list: { layout: "stack", note: "the items to pick from" },
+      detail: { layout: "stack", note: "the picked item" },
+    },
+    main: "detail",
+    areas: '"header header" "list detail"',
+    columns: "1fr 1.6fr",
+    suggest: "List/Table in list; Card/MediaCard in detail",
+  },
+  form: {
+    regions: {
+      header: { layout: "row", note: "page title and actions" },
+      main: { layout: "stack", note: "the fields" },
+      aside: { layout: "stack", note: "help beside the form" },
+    },
+    main: "main",
+    areas: '"header header" "main aside"',
+    columns: "2fr 1fr",
+    suggest: "Inputs/Selects/Toggles in main; help Card or Banner in aside",
+  },
+  feed: {
+    regions: {
+      header: { layout: "row", note: "page title and actions" },
+      main: { layout: "stack", note: "the posts" },
+      side: { layout: "stack", note: "people and extras" },
+    },
+    main: "main",
+    areas: '"header header" "main side"',
+    columns: "2fr 1fr",
+    suggest: "MediaCards/Comments in main; AvatarGroup/Card in side",
+  },
+  landing: {
+    regions: {
+      hero: { layout: "stack", note: "the banner at the top" },
+      features: { layout: "stack", note: "what the product does" },
+      pricing: { layout: "grid", note: "up to 3 plans" },
+      footer: { layout: "row", note: "closing links" },
+    },
+    main: "features",
+    areas: '"hero" "features" "pricing" "footer"',
+    columns: "1fr",
+    suggest: "Hero in hero; FeatureGrid in features; PricingTiers in pricing",
+  },
+  chat: {
+    regions: {
+      list: { layout: "stack", note: "conversations" },
+      main: { layout: "stack", note: "the open conversation" },
+    },
+    main: "main",
+    areas: '"list main"',
+    columns: "1fr 2fr",
+    suggest: "ActivityList/List in list; ChatThread in main",
+  },
+  checkout: {
+    regions: {
+      header: { layout: "row", note: "progress through the steps" },
+      main: { layout: "stack", note: "the fields" },
+      summary: { layout: "stack", note: "order totals" },
+    },
+    main: "main",
+    areas: '"header header" "main summary"',
+    columns: "1.6fr 1fr",
+    suggest: "Steps in header; Inputs in main; Card with totals in summary",
+  },
+};
+
+const TEMPLATE_NAMES = Object.keys(TEMPLATES);
+
+/**
+ * Where a child of a templated Screen goes: its `region` if the template has it, else the template's main.
+ * Null when the Screen has no (known) template.
+ * @param {string|undefined} template @param {unknown} region @returns {string|null}
+ */
+export function templateRegion(template, region) {
+  const t = template !== undefined && Object.hasOwn(TEMPLATES, template) ? TEMPLATES[template] : undefined;
+  if (!t) return null;
+  return typeof region === "string" && Object.hasOwn(t.regions, region) ? region : t.main;
+}
+
 /** @type {(group: CatalogEntry["group"], props: Record<string, PropKind>, styles: string[], children: boolean, note: string) => CatalogEntry} */
 const e = (group, props, styles, children, note) => ({ group, props, styles, children, note });
 
 /** @type {Record<string, CatalogEntry>} */
 export const CATALOG = {
-  App: e("frames", { title: "s" }, [], true, "Root of the prototype; holds Screens"),
-  Screen: e("frames", { title: "s" }, [], true, "One page of the app; the stage shows one at a time"),
+  App: e("frames", { title: "s", nav: ["sidebar", "top", "none"], device: ["desktop", "phone"] }, [], true, "Root of the prototype; holds Screens; the app frame and its navigation are drawn from the Screens"),
+  Screen: e("frames", { title: "s", template: TEMPLATE_NAMES, icon: "s" }, [], true, "One page of the app; the stage shows one at a time; a template lays children out in regions"),
   PageHeader: e("frames", { title: "s", subtitle: "s" }, [], true, "Page title with subtitle; children are action buttons"),
   Section: e("frames", { title: "s", subtitle: "s" }, ["pad"], true, "Titled block that groups related content"),
   Card: e("frames", { title: "s", subtitle: "s" }, ["tone", "pad", "emphasis", "span"], true, "Bordered container for related content"),
@@ -142,6 +240,7 @@ export function normalizeProps(type, props) {
     let kind;
     if (entry) {
       if (Object.hasOwn(entry.props, key)) kind = entry.props[key];
+      else if (key === "region" && type !== "App" && type !== "Screen") kind = "s";
       else if (entry.styles.includes(key) && Object.hasOwn(STYLE_OPTIONS, key)) kind = STYLE_OPTIONS[/** @type {keyof typeof STYLE_OPTIONS} */ (key)];
     }
     const v = kind === undefined ? undefined : coerce(kind, props[key]);

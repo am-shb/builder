@@ -30,6 +30,7 @@ export function componentTable(): string {
   return [
     ...rows,
     "",
+    "Every type except App and Screen also takes `region: string`, the region of its Screen's template to sit in.",
     `Style options (optional; the first value is the default): ${styles}.`,
     `Only these hold child nodes: ${parents}. Every other type is a leaf.`,
   ].join("\n");

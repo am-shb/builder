@@ -36,6 +36,19 @@ Option 4.
   status, a `decisionId` and the last agreed value.
 - **Theme changes are patch ops.** `set_theme` and `drop_theme` are model-facing; `theme_status` is internal.
   Variants, streaming, validation and the handoff then carry theme with no new channel.
+- **Derived app frame (amendment).** The renderer draws the frame (sidebar, top bar or phone body) from the Screens
+  in `proto.root.children`: the app's name plus one nav item per Screen. The model never builds navigation; the App
+  takes only `nav` (sidebar, top, none) and `device` (desktop, phone), and a Screen takes `icon`.
+- **Templates are frames with regions (amendment).** A Screen's `template` (dashboard, list-detail, form, feed,
+  landing, chat, checkout) names a fixed set of regions. A child picks one with the `region` prop, accepted on every
+  type except App and Screen. An unknown or missing region falls back to the template's main region, and a region
+  with nothing in it is hidden, so no empty boxes are drawn. The catalog holds the templates as import-free data
+  (`TEMPLATES`, `templateRegion`).
+- **Per-child slot hook (amendment).** The renderer asks the parent's builder which slot each child belongs in, so a
+  templated Screen can place children into regions while others keep a single column. Changing a template re-places
+  every child and loses none.
+- **`device: phone` (amendment).** The app is drawn inside a 380x700 phone body with a title bar and a bottom tab bar
+  of the first five Screens; every template collapses to one column.
 - **Derived colors.** The renderer derives the soft tint, accent ink, chart series and status colors from the four
   slots. Status colors stay apart from the brand: a green brand moves "approved" to teal, so it never reads as the
   accent. Text and controls meet AA contrast at 720p. The slot values and derivation rules are in the plan's

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 // @ts-ignore plain JS module shared with the browser
-import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, normalizeProps, parseCells, pillTone } from "../public/renderer/catalog.js";
+import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, normalizeProps, parseCells, pillTone, TEMPLATES, templateRegion } from "../public/renderer/catalog.js";
 
 const GROUPS = ["frames", "data", "content", "input", "feedback", "conversation"];
 const KINDS = ["s", "n", "b", "ss", "ns"];
@@ -75,4 +75,51 @@ test("pillTone", () => {
   assert.equal(pillTone("OVERDUE"), "danger");
   assert.equal(pillTone("Paid"), "success");
   assert.equal(pillTone("Blue"), "default");
+});
+
+const TABLE: Record<string, { regions: Record<string, string>; main: string; areas: string; columns: string }> = {
+  dashboard: { regions: { header: "row", stats: "grid", main: "stack", side: "stack" }, main: "main", areas: '"header header" "stats stats" "main side"', columns: "2fr 1fr" },
+  "list-detail": { regions: { header: "row", list: "stack", detail: "stack" }, main: "detail", areas: '"header header" "list detail"', columns: "1fr 1.6fr" },
+  form: { regions: { header: "row", main: "stack", aside: "stack" }, main: "main", areas: '"header header" "main aside"', columns: "2fr 1fr" },
+  feed: { regions: { header: "row", main: "stack", side: "stack" }, main: "main", areas: '"header header" "main side"', columns: "2fr 1fr" },
+  landing: { regions: { hero: "stack", features: "stack", pricing: "grid", footer: "row" }, main: "features", areas: '"hero" "features" "pricing" "footer"', columns: "1fr" },
+  chat: { regions: { list: "stack", main: "stack" }, main: "main", areas: '"list main"', columns: "1fr 2fr" },
+  checkout: { regions: { header: "row", main: "stack", summary: "stack" }, main: "main", areas: '"header header" "main summary"', columns: "1.6fr 1fr" },
+};
+
+test("TEMPLATES holds the seven templates exactly", () => {
+  assert.deepEqual(Object.keys(TEMPLATES).sort(), Object.keys(TABLE).sort());
+  for (const [name, want] of Object.entries(TABLE)) {
+    const t = (TEMPLATES as any)[name];
+    assert.deepEqual(Object.fromEntries(Object.entries(t.regions).map(([k, v]: [string, any]) => [k, v.layout])), want.regions, name);
+    for (const r of Object.values(t.regions) as any[]) assert.ok(r.note.length > 0);
+    assert.equal(t.main, want.main);
+    assert.equal(t.areas, want.areas);
+    assert.equal(t.columns, want.columns);
+    assert.ok(t.suggest.length > 0);
+    const named = t.areas.match(/[a-z]+/g) as string[];
+    for (const n of named) assert.ok(n in t.regions, `${name} area ${n}`);
+  }
+  assert.deepEqual(CATALOG.Screen.props.template, Object.keys(TABLE));
+});
+
+test("region is accepted on every type except App and Screen", () => {
+  assert.deepEqual(normalizeProps("StatCard", { region: "stats" }).props, { region: "stats" });
+  assert.deepEqual(normalizeProps("Screen", { region: "x" }), { props: {}, dropped: ["region"] });
+  assert.deepEqual(normalizeProps("App", { region: "x" }), { props: {}, dropped: ["region"] });
+});
+
+test("App nav and device, Screen template and icon", () => {
+  assert.deepEqual(normalizeProps("App", { nav: "sidebar", device: "phone" }).props, { nav: "sidebar", device: "phone" });
+  assert.deepEqual(normalizeProps("App", { nav: "bottom" }), { props: {}, dropped: ["nav"] });
+  assert.deepEqual(normalizeProps("Screen", { template: "feed", icon: "home" }).props, { template: "feed", icon: "home" });
+});
+
+test("templateRegion", () => {
+  assert.equal(templateRegion("dashboard", "stats"), "stats");
+  assert.equal(templateRegion("dashboard", "nope"), "main");
+  assert.equal(templateRegion("dashboard", undefined), "main");
+  assert.equal(templateRegion("landing", "zzz"), "features");
+  assert.equal(templateRegion(undefined, "stats"), null);
+  assert.equal(templateRegion("bogus", "stats"), null);
 });
