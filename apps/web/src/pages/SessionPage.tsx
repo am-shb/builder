@@ -11,6 +11,7 @@ import { DraftToAgreed } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { isInProgress, StatusPill } from "../components/StatusPill.tsx";
+import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
 import { useRefreshNews } from "../hooks/useRefreshNews.tsx";
 import { cn } from "../lib/cn.ts";
@@ -19,15 +20,18 @@ import { ErrorNotice } from "../sessions/ErrorNotice.tsx";
 import { meetingDisplay } from "../sessions/meeting.ts";
 import { RefreshFailed } from "../sessions/SessionsList.tsx";
 import { StageLink } from "../sessions/StageLink.tsx";
+import { mayStillChange } from "../sessions/start.ts";
 import { startedWhen } from "../sessions/time.ts";
 
 // A session's page (plan: "Session detail"): its status and what it means, the meeting, its times and limits, an error
 // code for support, and the stage link behind "Show". From GET /v1/sessions/:id, for the active org only. Refresh
-// reloads it; nothing polls yet (WD6).
+// reloads it, and while the session may still change the page also refreshes itself every 10 seconds (WD6).
 export function SessionPage({ now }: { now?: Date }) {
   const { id = "" } = useParams();
   const query = useOrgQuery((api, signal) => api.getSession(id, signal), id);
   const session = query.data;
+  // While the session may still change, the page refreshes itself quietly (WD6).
+  useAutoRefresh(session !== undefined && mayStillChange(session, now), query.quietRefresh);
   usePageTitle(session ? meetingDisplay(session.meetingUrl).code : "Session");
   const notFound = query.status === "error" && query.error instanceof ApiError && query.error.code === "not_found";
   useLeaveOnOrgSwitch(session ? "session" : notFound ? "not_found" : undefined);
@@ -138,7 +142,8 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
             <Detail term="Spending limit">{limits.spend}</Detail>
             <Detail term="Time limit">{limits.time}</Detail>
             {session.errorCode && (
-              <Detail term="Error code" hint="for support">
+              // An ended session's code is why it ended (a time limit, the host), not an error.
+              <Detail term={session.status === "ended" ? "Reason code" : "Error code"} hint="for support">
                 <code className="rounded-md bg-sunk px-2 py-0.5 font-mono text-sm break-all box-decoration-clone">{session.errorCode}</code>
               </Detail>
             )}

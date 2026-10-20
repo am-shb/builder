@@ -9,6 +9,7 @@ import type { Log } from "./router.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { meRoutes } from "./routes/me.ts";
 import { sessionCreateRoutes, sessionReadRoutes } from "./routes/sessions.ts";
+import { engineEventRoutes } from "./routes/engine-events.ts";
 import { createClerkAuth } from "./auth/clerk.ts";
 import type { Authenticator } from "./auth/clerk.ts";
 import { createEngineClient } from "./engine/client.ts";
@@ -35,6 +36,8 @@ export function createServer(deps: Deps): Server {
     ...meRoutes(auth),
     ...sessionReadRoutes(auth, db),
     ...sessionCreateRoutes({ auth, db, engine, limits: deps.config.defaultLimits, guards: deps.config.startGuards, log, ...(deps.now ? { now: deps.now } : {}) }),
+    // The engine's status events (A2), with the same token the api sends the engine. Off without it.
+    ...engineEventRoutes({ db, token: deps.config.engine?.token ?? null, log }),
   ], log, { allowedOrigins: deps.config.clerk?.authorizedParties ?? [] });
   return createHttpServer((req, res) => void handle(req, res));
 }

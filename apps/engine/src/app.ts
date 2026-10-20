@@ -64,6 +64,7 @@ const LocalSpeech = z.object({
 });
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
+export type StatusChange = NonNullable<RecallBot["status_changes"]>[number];
 
 
 // Runs tasks with the same key one after another, in the order they were queued. Tasks with different keys
@@ -95,8 +96,8 @@ const isMeetingUrl = (s: string) => {
 
 const bearerToken = (req: http.IncomingMessage) => /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization ?? "")?.[1] ?? null;
 
-// The contract's status for a session, from Recall's last bot status.
-function contractStatus(s: Session): SessionStatus {
+// The contract's status for a session, from Recall's last bot status. Also what the api is told (src/api-events.ts).
+export function contractStatus(s: Session): SessionStatus {
   if (s.bot_status === "fatal") return "failed";
   if (isTerminal(s.bot_status)) return "ended";
   if (s.bot_status?.startsWith("in_call")) return "in_meeting";
@@ -117,7 +118,9 @@ export type AgentDeps = { port: ModelPort; speech?: Speech; clock?: () => number
 
 // Async because a restart reloads the calls still going from the database before any request is served.
 // `clock`, for the spend limits, defaults to the agent's clock and then to real time.
-export async function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: RuntimeLookup; agent?: AgentDeps; clock?: () => number }) {
+// `onStatusChange` hears each new bot status once it's saved, with the session as it now stands and Recall's status
+// history for the bot (the api's status events, A2). It must not throw or wait: it's called from the poll.
+export async function createApp(deps: { config: Config; recall: RecallClient; store: Store; log?: Log; indexHtml?: string; stageHtml?: string; localHtml?: string; runtime?: RuntimeLookup; agent?: AgentDeps; clock?: () => number; onStatusChange?: (s: Session, changes: StatusChange[]) => void }) {
   const { config, recall, store } = deps;
   const log: Log = deps.log ?? ((msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields })));
   const indexHtml = deps.indexHtml ?? readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -336,6 +339,11 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
         status = last.code;
         log("bot.status", { session_id: s.id, status: last.code, sub_code: last.sub_code });
         publish(s.id, "status", { status: last.code, sub_code: last.sub_code, message: last.message });
+        try {
+          deps.onStatusChange?.({ ...s, bot_status: last.code, bot_sub_code: last.sub_code }, bot.status_changes ?? []);
+        } catch (err) {
+          log("status.notify_failed", { session_id: s.id, error: errorCode(err) });
+        }
         if (last.code === "in_call_recording") conversation?.onBotRecording(s.id);
         if (isTerminal(last.code)) {
           lastLeave.delete(s.id);

@@ -230,6 +230,12 @@ export async function openStore(opts: DbTarget & { log?: Log } = {}) {
       const [rows] = await run<[SessionRow[]]>(`SELECT * FROM sessions WHERE state = "created"`);
       return rows.map(toSession).filter((s) => !isTerminal(s.bot_status));
     },
+    // Sessions the api started (they have an org) with a bot, changed after `since`: their statuses are sent to the
+    // api again after a restart (A2), since events still waiting to be sent were kept in memory only.
+    async listOrgSessionsUpdatedSince(since: Date): Promise<Session[]> {
+      const [rows] = await run<[SessionRow[]]>(`SELECT * FROM sessions WHERE org_id != NONE AND state = "created" AND updated_at > $since`, { since });
+      return rows.map(toSession);
+    },
     // Returns the stored row, or null when this Recall message was already processed. One statement: it looks for
     // the message id and stores the event only when it isn't there. Two deliveries racing each other both write
     // the unique index on recall_msg_id, so one of them hits a transaction conflict, and its retry finds the first

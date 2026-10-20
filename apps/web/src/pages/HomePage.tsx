@@ -9,9 +9,10 @@ import { Button } from "../components/Button.tsx";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { ResponsiveModal } from "../components/ResponsiveModal.tsx";
 import { statusLabel } from "../components/StatusPill.tsx";
+import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
 import { SessionsList } from "../sessions/SessionsList.tsx";
-import { isLinkProblem, linkProblemText, outcomeAnnouncement, startConfirmation, type StartConfirmation } from "../sessions/start.ts";
+import { isLinkProblem, linkProblemText, mayStillChange, outcomeAnnouncement, startConfirmation, type StartConfirmation } from "../sessions/start.ts";
 import { StartForm } from "../sessions/StartForm.tsx";
 import { StartOutcome } from "../sessions/StartOutcome.tsx";
 import { useStartSession } from "../sessions/StartSessionProvider.tsx";
@@ -24,6 +25,8 @@ export function HomePage({ now }: { now?: Date }) {
   usePageTitle("Sessions");
   const { orgId } = useAuth();
   const list = useOrgQuery((api, signal) => api.listSessions(signal));
+  // While a session in the list may still change, the list refreshes itself quietly (WD6).
+  useAutoRefresh((list.data ?? []).some((s) => mayStillChange(s, now)), list.quietRefresh);
   const starter = useStartSession();
   const [sheetOpen, setSheetOpen] = useState(false);
   // Until the sheet has finished closing, the rest of the page is hidden from screen readers.

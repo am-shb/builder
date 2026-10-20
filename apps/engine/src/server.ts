@@ -16,6 +16,7 @@ import { createOpenRouterTts, OPENROUTER_TTS_MODEL } from "./voice/openrouter-tt
 import { createSpeech } from "./voice/speech.ts";
 import { TTS_USD_PER_CHAR } from "./service-costs.ts";
 import { signForTest } from "./verify.ts";
+import { createStatusReporter, SWEEP_WINDOW_MS } from "./api-events.ts";
 
 const SHUTDOWN_GRACE_MS = 25_000;
 
@@ -81,10 +82,17 @@ async function main() {
   }) : undefined;
   voice = speech;
   const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }), ...(speech ? { speech } : {}) } : undefined;
-  const app = await createApp({ config, recall, store, runtime, log, agent });
+  // Session status events to the api (A2), only when API_INTERNAL_URL is set (it requires the token).
+  const reporter = config.apiInternalUrl && config.internalToken
+    ? createStatusReporter({ apiUrl: config.apiInternalUrl, token: config.internalToken, store, log })
+    : null;
+  const app = await createApp({ config, recall, store, runtime, log, agent, ...(reporter ? { onStatusChange: reporter.notify } : {}) });
   server.on("request", app.handler);
 
   const poll = setInterval(() => void app.pollOnce(), 4000).unref();
+  const report = reporter ? setInterval(() => void reporter.flush(), 2000).unref() : undefined;
+  if (reporter) void reporter.sweep(new Date(Date.now() - SWEEP_WINDOW_MS));
+  log("api_events.config", { enabled: reporter !== null });
   const tick = agent ? setInterval(() => app.tickAgent(), 1000).unref() : undefined;
   // On Ctrl-C or a platform stop (every deploy sends SIGTERM): take no new requests, finish the events already
   // answered and the saves they led to, then close the store once its queries in flight are done (known issue R3).
@@ -94,6 +102,7 @@ async function main() {
     setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
     clearInterval(poll);
     clearInterval(tick);
+    clearInterval(report);
     server.close();
     log("process.shutdown");
     app.drain()

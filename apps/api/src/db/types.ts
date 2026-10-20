@@ -69,6 +69,12 @@ export type StartResult =
 export const MAX_LIST = 50;
 
 /**
+ * What an engine status event did (A2): moved the session on, changed nothing, couldn't (another session of the org
+ * holds the meeting link), or found no such session.
+ */
+export type StatusEventResult = "applied" | "stale" | "conflict" | "not_found";
+
+/**
  * The only way into the database. Every function takes the org id first, from the verified token, and never
  * returns or changes another org's rows.
  */
@@ -85,5 +91,7 @@ export type Db = {
   getSession(orgId: string, id: string): Promise<SessionRecord | undefined>;
   /** Newest first, at most MAX_LIST. */
   listSessions(orgId: string, limit?: number): Promise<SessionRecord[]>;
+  /** The engine's status event (A2): moves the session on, never back. Only within `orgId`. */
+  applyStatusEvent(orgId: string, id: string, status: SessionStatus, errorCode: string | null): Promise<StatusEventResult>;
   close(): Promise<void>;
 };

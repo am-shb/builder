@@ -5,7 +5,8 @@ import type { DateTime, Surreal } from "surrealdb";
 import { orgRef } from "./orgs.ts";
 import { MAX_LIST } from "./types.ts";
 import { StartLimitError } from "./types.ts";
-import type { ApiSessionStatus, CreateResult, NewSession, SessionRecord, StartLimit, StartLimits, StartResult } from "./types.ts";
+import type { ApiSessionStatus, CreateResult, NewSession, SessionRecord, StartLimit, StartLimits, StartResult, StatusEventResult } from "./types.ts";
+import type { SessionStatus } from "../contracts.ts";
 import { DEFAULT_START_GUARDS } from "../start-guards.ts";
 
 type Row = {
@@ -124,16 +125,74 @@ function startFields(r: StartResult): { status: ApiSessionStatus; code?: string;
   }
 }
 
-/** Only a `starting` session changes, so a late or repeated answer can't overwrite a newer status. */
+/**
+ * Only a `starting` session takes the answer's status, so a late or repeated answer can't overwrite a newer status.
+ * One exception: the engine's status events (A2) can move a session on before its start answer is saved. A stage link
+ * in the answer is then still saved, once, and the status the event set stays.
+ */
 export async function setSessionStart(db: Surreal, orgId: string, id: string, result: StartResult): Promise<SessionRecord | undefined> {
   if (!id) return undefined;
   const f = startFields(result);
   // An absent value is NONE, which clears the field.
   const [rows] = await db.query<[Row[]]>(
-    `UPDATE $id SET status = $status, error_code = $code, stage_url = $stage WHERE org = $org AND status = "starting" RETURN ${FIELDS}`,
-    { id: sessionRef(id), org: orgRef(orgId), status: f.status, code: f.code, stage: f.stage },
+    `UPDATE $id SET
+        error_code = IF status = "starting" { $code } ELSE { error_code },
+        stage_url = IF status = "starting" { $stage } ELSE { stage_url ?? $stage },
+        status = IF status = "starting" { $status } ELSE { status }
+      WHERE org = $org AND (status = "starting" OR ($stage != NONE AND stage_url = NONE AND status IN $moved))
+      RETURN ${FIELDS}`,
+    { id: sessionRef(id), org: orgRef(orgId), status: f.status, code: f.code, stage: f.stage, moved: MOVED_BY_EVENTS },
   ).retry().collect();
   return rows[0] && toRecord(rows[0]);
+}
+
+// Statuses only the engine's events set, so a session in one of them already had its bot.
+const MOVED_BY_EVENTS: readonly ApiSessionStatus[] = ["joining", "in_meeting", "ended", "failed"];
+
+// How far along a session is. A status event applies only when it moves the session further (A2): a late or repeated
+// event changes nothing. start_failed (the engine sent no bot) isn't here, so no event changes it.
+const RANK: Partial<Record<ApiSessionStatus, number>> = {
+  starting: 0, start_unknown: 0, joining: 1, in_meeting: 2, ended: 3, failed: 3,
+};
+
+// Statuses that hold the session's meeting link (the active_meeting field and its unique index).
+const HOLDS_LINK: readonly ApiSessionStatus[] = ["starting", "joining", "in_meeting"];
+
+/**
+ * The engine's `session.status` event (A2). The session moves to `status` only if it belongs to `orgId` and is at an
+ * earlier stage; `error_code` becomes the event's (or clears). An ended or failed session stops holding its meeting
+ * link at once (active_meeting is computed from the status).
+ * - applied: the status changed
+ * - stale: the session is there but already at this stage or further (or start_failed)
+ * - conflict: an unconfirmed start (start_unknown, which doesn't hold its link) would become active while another
+ *   session of the org holds the same link; it stays as it is. The engine refuses a second bot for a meeting an org
+ *   is in, so this only happens briefly, and the unique index allows one active session per org and link anyway.
+ * - not_found: no such session in this org
+ */
+export async function applyStatusEvent(db: Surreal, orgId: string, id: string, status: SessionStatus, errorCode: string | null): Promise<StatusEventResult> {
+  if (!id) return "not_found";
+  const rank = RANK[status]!;
+  const earlier = (Object.keys(RANK) as ApiSessionStatus[]).filter((s) => RANK[s]! < rank);
+  let results: unknown[];
+  try {
+    results = await db.query<unknown[]>(`
+        LET $row = (SELECT status, meeting_url FROM $id WHERE org = $org)[0];
+        LET $taken = $status IN $holds AND $row.status IN $earlier AND $row.status NOT IN $holds
+          AND count(SELECT VALUE id FROM session WHERE org = $org AND active_meeting = $row.meeting_url AND id != $id) > 0;
+        UPDATE $id SET status = $status, error_code = $code WHERE org = $org AND status IN $earlier AND !$taken RETURN VALUE status;
+        RETURN { found: $row != NONE, taken: $taken };
+      `, { id: sessionRef(id), org: orgRef(orgId), status, code: errorCode ?? undefined, earlier, holds: HOLDS_LINK },
+    ).retry().collect();
+  } catch (err) {
+    // Another session took the link between the check and the update.
+    if (err instanceof Error && err.message.includes("session_org_active")) return "conflict";
+    throw err;
+  }
+  const updated = results.at(-2) as ApiSessionStatus[];
+  const out = results.at(-1) as { found: boolean; taken: boolean };
+  if (updated.length) return "applied";
+  if (!out.found) return "not_found";
+  return out.taken ? "conflict" : "stale";
 }
 
 export async function getSession(db: Surreal, orgId: string, id: string): Promise<SessionRecord | undefined> {

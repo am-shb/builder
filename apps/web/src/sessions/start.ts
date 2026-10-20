@@ -61,10 +61,19 @@ export function findUnconfirmedStart(sessions: readonly SessionView[], meetingUr
 // different case): the api and engine match exact links, so starting this copy would send a second bot. The exact
 // same link isn't one: the api answers with the existing session and sends nothing. Starting, joining and in the
 // meeting count until the session's time limit has passed, plus 30 minutes (the wait in the meeting's lobby, then
-// the leave): this app's estimate of when the engine has ended the bot, since statuses don't move yet. The api's
-// start guards use the same default margin (ACTIVE_MARGIN_MINUTES).
+// the leave): this app's estimate of when the engine has ended the bot. Statuses move with the engine's events (A2),
+// so this only matters when one is missed. The api's start guards use the same default margin (ACTIVE_MARGIN_MINUTES).
 export const ACTIVE_STATUSES: readonly string[] = ["starting", "joining", "in_meeting"];
 export const ACTIVE_MARGIN_MS = 30 * 60_000;
+
+// A session whose status may still change: starting, joining, in the meeting, or an unconfirmed start (which the
+// engine's events can still resolve), within its time limit plus the margin. Pages refresh on their own while they
+// show one (useAutoRefresh). Past that, nothing is waiting, so a session left at "Joining" by an older api doesn't
+// keep a page asking forever.
+export function mayStillChange(s: Pick<SessionView, "status" | "createdAt" | "limits">, now = new Date()): boolean {
+  return (ACTIVE_STATUSES.includes(s.status) || s.status === "start_unknown")
+    && now.getTime() - new Date(s.createdAt).getTime() <= s.limits.maxMinutes * 60_000 + ACTIVE_MARGIN_MS;
+}
 
 export function findActiveCopy(sessions: readonly SessionView[], meetingUrl: string, now = new Date()): SessionView | undefined {
   const target = meetingKey(meetingUrl);
