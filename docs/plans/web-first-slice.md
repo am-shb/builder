@@ -149,12 +149,12 @@ service to this choice). Step W0 records it as ADR 0012.
   and `zod` 4.6.7 (the api's version; the web app parses replies with it).
   `@clerk/react` accepts React `~19.3.0-0`. None has a TypeScript peer, so no `overrides` entry is needed (unlike
   `surrealdb`). Check again at install: if a peer conflict shows up, use a scoped override, as the root does.
-- **Design packages** ([ADR 0013](../adr/0013-web-visual-design.md); checked on npm on 2026-10-19 and 2026-10-20,
+- **Design packages** ([ADR 0015](../adr/0015-web-visual-design.md); checked on npm on 2026-10-19 and 2026-10-20,
   every peer range accepts React 19.3 and Vite 8), also installed in W1 so the lockfile changes once:
   `radix-ui` 1.8.1, `class-variance-authority` 0.7.1, `clsx` 2.1.1, `tailwind-merge` 3.7.0, `lucide-react` 1.56.0
   (not 1.59.0, which is two days old), `sonner` 2.0.8, `@fontsource-variable/schibsted-grotesk` 5.3.0; dev only:
   `tailwindcss` and `@tailwindcss/vite` 4.3.3, `tw-animate-css` 1.4.0, `axe-core` 4.14.0 and `playwright-core` 1.64.1.
-  Not added: the `shadcn` CLI package, `vaul`, an animation library and `@clerk/themes` (reasons in ADR 0013).
+  Not added: the `shadcn` CLI package, `vaul`, an animation library and `@clerk/themes` (reasons in ADR 0015).
 - **TypeScript:** `apps/web/tsconfig.json` extends the root base and changes only what a browser bundle needs:
   `module: "esnext"`, `moduleResolution: "bundler"`, `jsx: "react-jsx"`, `lib: ["esnext", "dom"]` (add
   `"dom.iterable"` only if TypeScript 7 still needs it), and `types: ["vite/client", "node"]`. Keeping `node` matters:
@@ -402,7 +402,7 @@ outcome (201 aside) shows the 504 warning**, because a bot may exist.
 - **Tenancy** is enforced by the api from the token. The web app never sends an org id, and the tests prove it.
 
 ## Visual design
-Settled in [ADR 0013](../adr/0013-web-visual-design.md): the **Boardroom** direction, chosen from three previewed
+Settled in [ADR 0015](../adr/0015-web-visual-design.md): the **Boardroom** direction, chosen from three previewed
 directions and refined after two separate reviews. UI and design are a judging criterion and the app will be shown to
 investors, so the look is part of "done" for every screen step, not polish for later. In short:
 
@@ -411,7 +411,7 @@ investors, so the look is part of "done" for every screen step, not polish for l
 - **Stack:** Tailwind CSS 4 for layout and tokens, Radix primitives for behavior and accessibility only, our own
   components in `src/components/`, `lucide-react` icons, `sonner` toasts, Schibsted Grotesk (one family, self-hosted).
 - **Tokens:** semantic CSS variables in `src/styles/globals.css`, light and dark, following the system setting. All
-  text is AA or better (measured; the full table, including the status pills, is in ADR 0013):
+  text is AA or better (measured; the full table, including the status pills, is in ADR 0015):
 
   | | Light | Dark |
   |---|---|---|
@@ -613,7 +613,7 @@ to 2 hours, M = about half a day, L = about a day.
 |---|---|---|---|---|
 | W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with the split CSP, names and origins from configuration. Settles WD1, WD2, WD5–WD11 for the web app | S | docs only |
 | W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk and the design packages included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
-| W1b | `web/design-foundation` | ADR 0013 (Boardroom) in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, the dot texture, Clerk's layer), Schibsted Grotesk, `src/lib/cn.ts`, the components in `src/components/` (button, input and field, status pill, session row, skeleton, callout, dialog, bottom sheet, responsive modal, toaster, empty state, page state, the mark), the app shell (top bar, sticky action bar, content container) with the mark and wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
+| W1b | `web/design-foundation` | ADR 0015 (Boardroom) in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, the dot texture, Clerk's layer), Schibsted Grotesk, `src/lib/cn.ts`, the components in `src/components/` (button, input and field, status pill, session row, skeleton, callout, dialog, bottom sheet, responsive modal, toaster, empty state, page state, the mark), the app shell (top bar, sticky action bar, content container) with the mark and wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
 | I1 | `infra/render-web` | `builder-web` static site in `render.yaml`, the runbook's production section; then, in the dashboard, its two variables and `{WEB_ORIGIN}` in the api's `CLERK_AUTHORIZED_PARTIES`. Placeholder checked live: loads, routes rewrite, headers present, no CSP errors | S | the site calls nothing yet; the Blueprint change adds a service and touches no other |
 | W2 | `web/clerk-auth` | `ClerkProvider` with the wiring above, the routes and guard, sign-in/up, `/choose-organization` with its fallback, header with `<OrganizationSwitcher hidePersonal />` and `<UserButton />`, "not configured" screen, `test/helpers/clerk.tsx`. Org flow checked by hand on the dev instance | M–L | no api calls yet |
 | W3 | `web/api-client` | `src/api/client.ts`, `src/api/schemas.ts` (tolerant), `ApiError`, the error mapping, `test/helpers/fake-api.ts`; `GET /v1/me` shows the role in the header | M | `/v1/me` exists; reads only. Needs A1 to work in a real browser |
@@ -696,7 +696,7 @@ Each needs review from that area. None of them changes how another area behaves 
 - **R1 (optional).** A root `npm run dev` that starts the engine in local mode, the api and the web app together.
 
 ## Decisions
-Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 records WD12; D-INFRA and D-ID need their areas' agreement.
+Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0015 records WD12; D-INFRA and D-ID need their areas' agreement.
 
 - **WD1. Framework.** *Recommended:* Vite + React static site. Alternative: Next.js on a $7 web service.
 - **WD2. Routing.** *Recommended:* React Router with five routes, Clerk on `routing="path"`. Alternative: one page
@@ -724,7 +724,7 @@ Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 reco
   `VITE_*` variables, plus a URL-free header policy in `render.yaml` for `frame-ancestors`. Alternatives: the whole
   policy as a `render.yaml` header (writes the api and Clerk origins into the repo, and needs editing when the domain
   changes), or a looser `connect-src https:` (allows any host).
-- **WD12. Visual design.** *Decided:* the Boardroom direction ([ADR 0013](../adr/0013-web-visual-design.md)):
+- **WD12. Visual design.** *Decided:* the Boardroom direction ([ADR 0015](../adr/0015-web-visual-design.md)):
   Tailwind CSS for layout and tokens, Radix for behavior only, our own components, one token set for light and dark,
   mobile-first with a sticky action bar and bottom sheets on phones, and an approval gate before the screens. Chosen
   over "Blueprint" (bold ultramarine) and "Huddle" (warm tiles) from previews, and over plain CSS (accessible dialogs

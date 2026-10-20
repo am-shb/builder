@@ -45,7 +45,7 @@ describe("the app's code", () => {
   });
 });
 
-// No browser storage (ADR 0012), with one exception (ADR 0013): the color mode setting, kept by src/lib/color-mode.ts
+// No browser storage (ADR 0012), with one exception (ADR 0015): the color mode setting, kept by src/lib/color-mode.ts
 // and applied before first paint by public/color-mode.js. Nothing else in the app or the public folder may use it.
 describe("browser storage", () => {
   const STORAGE = /\b(local|session)Storage\b|\bindexedDB\b|\bdocument\.cookie\b/;
@@ -110,7 +110,7 @@ describe("no URLs of ours in the code", () => {
 });
 
 describe("colors come from the tokens", () => {
-  // Raw colors live in src/styles/globals.css only (ADR 0013); components use the tokens through Tailwind.
+  // Raw colors live in src/styles/globals.css only (ADR 0015); components use the tokens through Tailwind.
   const RAW_COLOR = /#[0-9a-f]{3}(?:[0-9a-f]{3})?(?:[0-9a-f]{2})?\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch)\(/i;
 
   it("no component or page names a raw color", () => {

@@ -74,7 +74,7 @@ Option 1, with these rules:
 
   No `'unsafe-eval'`. `style-src 'unsafe-inline'` stays, because Clerk's components need it.
 - **Safe rendering.** No `dangerouslySetInnerHTML`, `innerHTML`, `eval` or `new Function`. Meeting links show as text,
-  not links. Tests scan the source for these, for `localStorage` (one exception: the color mode setting, ADR 0013),
+  not links. Tests scan the source for these, for `localStorage` (one exception: the color mode setting, ADR 0015),
   for `console.`, for any `VITE_*` name other than the two, and for hard-coded origins.
 - **No logs, analytics or error reporting** in the browser for now. Session tokens, meeting links, stage links and
   request or response bodies are never logged anywhere. A tool added later must strip URLs and bodies first.

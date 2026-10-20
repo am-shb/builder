@@ -1,4 +1,4 @@
-// After `vite build`: the dev-only design page must not be in the production site (ADR 0013), and the page has no
+// After `vite build`: the dev-only design page must not be in the production site (ADR 0015), and the page has no
 // inline script.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ if (leaks.length) {
 }
 console.log("dist: no design page");
 
-// The color mode script must ship, as a file from our origin: the CSP allows no inline script (ADR 0012, ADR 0013).
+// The color mode script must ship, as a file from our origin: the CSP allows no inline script (ADR 0012, ADR 0015).
 const html = readFileSync(join(dist, "index.html"), "utf8");
 const inline = (html.match(/<script\b[^>]*>/g) ?? []).filter((tag) => !/\ssrc=/.test(tag));
 if (inline.length) {

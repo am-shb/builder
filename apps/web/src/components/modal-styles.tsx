@@ -1,6 +1,6 @@
 import { cn } from "../lib/cn.ts";
 
-// Shared look for dialogs and sheets: a sheet from the bottom on phones, a centered dialog from 768px (ADR 0013).
+// Shared look for dialogs and sheets: a sheet from the bottom on phones, a centered dialog from 768px (ADR 0015).
 export const overlayClass = cn(
   "fixed inset-0 z-40 bg-scrim",
   "motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0",

@@ -2,7 +2,7 @@
 
 **Status:** sign-in and organizations (W2 in [the plan](../../docs/plans/web-first-slice.md)): Clerk sign-in, sign-up,
 choosing an organization, and the signed-in shell with the org switcher. It doesn't call the api yet. Stack and rules: [ADR 0012](../../docs/adr/0012-web-stack.md); visual design:
-ADR 0013 ("Boardroom"). **Owner:** TBD. Claim it in
+ADR 0015 ("Boardroom"). **Owner:** TBD. Claim it in
 [docs/workstreams.md](../../docs/workstreams.md).
 
 ## Purpose
@@ -67,7 +67,7 @@ For the api and the engine next to it, with no bot and no spend, see "Local deve
 
 ## Open decisions (record each as an ADR in `docs/adr/`)
 - ~~Framework and hosting.~~ Settled in [ADR 0012](../../docs/adr/0012-web-stack.md): Vite + React, a Render static site.
-- ~~Design system.~~ Settled in ADR 0013 ("Boardroom"); it doesn't share tokens with the stage theme.
+- ~~Design system.~~ Settled in ADR 0015 ("Boardroom"); it doesn't share tokens with the stage theme.
 - How staff get access to the admin pages, and audit logging
 
 ## First tasks

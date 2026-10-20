@@ -1,4 +1,4 @@
-# 0013: The web app's visual design: "Boardroom", our own look on Tailwind CSS and Radix behavior
+# 0015: The web app's visual design: "Boardroom", our own look on Tailwind CSS and Radix behavior
 
 - **Status:** proposed
 - **Date:** 2026-10-19 (rewritten on 2026-10-20 for the approved direction)

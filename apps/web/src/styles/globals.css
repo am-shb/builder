@@ -1,4 +1,4 @@
-/* The design system's tokens and base styles (ADR 0013, "Boardroom"). The only file with raw colors: every component
+/* The design system's tokens and base styles (ADR 0015, "Boardroom"). The only file with raw colors: every component
    uses these tokens through Tailwind (bg-surface, text-ink-2, ...). Light and dark follow the system; `data-theme` on
    <html> forces one (the dev-only /_design page uses it). */
 
@@ -205,7 +205,7 @@
   --radius-panel: 24px;
   --radius-sheet: 28px;
 
-  /* The one elevation level (ADR 0013): the start panel, the empty state, page states, sheets and dialogs. */
+  /* The one elevation level (ADR 0015): the start panel, the empty state, page states, sheets and dialogs. */
   --shadow-elevated: inset 0 1px 0 var(--edge), var(--lift);
   --shadow-glow: inset 0 1px 0 var(--highlight), var(--glow);
   --shadow-outline: inset 0 0 0 1.5px var(--outline);

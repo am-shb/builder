@@ -69,7 +69,7 @@ HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElemen
 afterEach(() => {
   cleanup();
   useScreen(PHONE);
-  // The color mode setting is the one thing kept in storage (ADR 0013); each test starts at System.
+  // The color mode setting is the one thing kept in storage (ADR 0015); each test starts at System.
   localStorage.clear();
   initColorMode();
 });
