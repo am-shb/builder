@@ -11,6 +11,7 @@ import { EmptyState } from "../components/EmptyState.tsx";
 import { SessionList, SessionRow, SessionRowSkeleton } from "../components/SessionRow.tsx";
 import { ErrorNotice } from "./ErrorNotice.tsx";
 import { meetingDisplay } from "./meeting.ts";
+import { cn } from "../lib/cn.ts";
 import { startedWhen } from "./time.ts";
 
 export const EMPTY_STEPS = ["Paste the meeting link", `Admit ${BOT_NAME} when it asks to join`, "Watch the prototype take shape"];
@@ -83,14 +84,20 @@ export function SessionsList({ list, now, emptyAction }: {
 
 // A refresh failed while the list was on screen: one quiet line, since nothing on screen changed. Errors that need the
 // person to act (sign in again, choose an organization) still get the full notice with its button.
-function RefreshFailed({ error, loadedAt }: { error: unknown; loadedAt: Date | undefined }) {
-  const x = explainError(error, "read");
-  if (x.action === "sign_in" || x.action === "choose_org") return <ErrorNotice error={error} context="read" className="mt-2 mb-3" />;
+export function RefreshFailed({ error, loadedAt, what = "the list", context = "read", className = "mt-1 mb-2" }: {
+  error: unknown;
+  loadedAt: Date | undefined;
+  what?: string;
+  context?: "read" | "detail";
+  className?: string;
+}) {
+  const x = explainError(error, context);
+  if (x.action === "sign_in" || x.action === "choose_org") return <ErrorNotice error={error} context={context} className="mt-2 mb-3" />;
   const when = loadedAt?.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return (
-    <p role="alert" className="mt-1 mb-2 flex items-center gap-2 text-sm font-medium text-danger">
+    <p role="alert" className={cn("flex items-center gap-2 text-sm font-medium text-danger", className)}>
       <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
-      Couldn't refresh.{when ? ` Showing the list from ${when}.` : ""}
+      Couldn't refresh.{when ? ` Showing ${what} from ${when}.` : ""}
     </p>
   );
 }

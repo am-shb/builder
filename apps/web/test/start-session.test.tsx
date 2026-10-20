@@ -475,7 +475,7 @@ describe("the start in the real app (through RequireOrg)", () => {
     await screen.findByText("xtr-mbha-qpo");
     await startWith();
     await userEvent.click(screen.getByRole("link", { name: /xtr-mbha-qpo/ }));
-    expect(await screen.findByRole("heading", { name: "Session details come next" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "No such session in this organization." })).toBeTruthy();
     await act(async () => slow.finish(new Response("<html>Gateway timeout</html>", { status: 504 })));
     await userEvent.click(screen.getByRole("link", { name: "Back to sessions" }));
     expect((await shown()).textContent).toMatch(/couldn't confirm/);
