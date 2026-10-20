@@ -76,12 +76,13 @@ Everything runs in US East:
 |---|---|---|
 | `builder-engine` | Render web service, Docker, `starter`, region `virginia`, one instance | `render.yaml`, `apps/engine/Dockerfile` |
 | `builder-api` | Render web service, Docker, `starter`, region `virginia` | `render.yaml`, `apps/api/Dockerfile` |
+| `builder-web` | Render static site, on Render's CDN, free. Built from the repo root with `npm run build -w @builder/web` | `render.yaml` |
 | `builder-internal` | Render environment group with the generated `ENGINE_INTERNAL_TOKEN`, linked to both services | `render.yaml` |
 | SurrealDB | SurrealDB Cloud, Start plan (free), AWS `us-east-1`, SurrealDB 3.3.2. Namespace `builder`, databases `engine` and `api` | `infra/surrealdb/make-user.ts` (users), each app's `db/` (schema) |
 | Recall | A workspace in `us-east-1` | Recall dashboard |
 
 **Cost:** the Render Pro workspace ($25 a month) and two `starter` services ($7 each), about $39 a month plus
-bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) has its limits).
+bandwidth. The static site is free. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) has its limits).
 
 ### 1. SurrealDB Cloud
 
@@ -144,6 +145,36 @@ bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) 
    Set it only for a custom domain.
 4. Apply. Render builds both images and deploys them as below.
 
+### 4. The web app (`builder-web`)
+
+The Blueprint already exists, so syncing it adds the site, but Render doesn't ask for the site's `sync: false`
+values: it asks only when a Blueprint is first created.
+1. Sync the Blueprint (Blueprints > the Blueprint > Manual Sync, if it hasn't synced on its own since `render.yaml`
+   gained `builder-web`). Render creates `builder-web`. Its first build may finish before its settings exist; the
+   site then shows "not set up yet", which is fine.
+2. On `builder-web`'s Environment tab, set:
+
+   | Variable | Value |
+   |---|---|
+   | `VITE_CLERK_PUBLISHABLE_KEY` | the publishable key of the **same** Clerk instance as `builder-api`'s `CLERK_JWT_KEY` (otherwise every call gets 401) |
+   | `VITE_API_URL` | `builder-api`'s public origin, `https://...onrender.com`, from its page. No path, no trailing slash |
+
+   Both are read at build time: after changing either, deploy the site again (Manual Deploy > Deploy latest commit).
+3. On `builder-api`'s Environment tab, set `CLERK_AUTHORIZED_PARTIES` to the site's origin (`https://...onrender.com`,
+   from its page). It's also the api's CORS list. Leave `http://localhost:5173` out of the deployed api: any local Vite
+   page would be trusted. Saving redeploys only the api, which doesn't end meetings.
+4. Check the site:
+   - `curl -sI https://<site>/sessions/x` answers 200 with `content-security-policy: frame-ancestors 'none'; ...`,
+     `x-frame-options: DENY`, `referrer-policy: no-referrer`, `x-content-type-options: nosniff`, `permissions-policy`
+     and `cross-origin-opener-policy` (a deep link, so the rewrite to `index.html` carries the headers too).
+   - In a browser with the console open: sign-in, choosing an organization, the list and a session's page load with
+     no CSP errors and no 401s.
+   - Starting a session from the site sends a real, paid Recall bot. Ask first, use a meeting you control, and end the
+     bot afterwards.
+
+The headers and the rewrite live only in `render.yaml`: Render keeps rules made in the dashboard that aren't in the
+file, so don't add any there.
+
 ### How a deploy works (CD)
 
 1. A commit lands on `main`, and GitHub Actions runs CI on it.
@@ -151,7 +182,12 @@ bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) 
    A failed check, or none at all, means no deploy.
 3. Each service deploys only when a path in its `buildFilter` changed: its app, `contracts/`, the root
    `package.json` and `package-lock.json`, `.nvmrc` or `.dockerignore`.
-4. Build: Render builds the image from the app's Dockerfile, with the repo root as the context.
+   CI cancels a run on `main` when a newer commit lands before it finishes (`concurrency` in `ci.yml`). The cancelled
+   commit has failed checks, so Render skips it; if the newer commit doesn't touch the same service's paths, that
+   service isn't deployed at all. After quick pushes to `main`, check each service's latest deploy and deploy it by
+   hand if it's behind (Manual Deploy > Deploy latest commit).
+4. Build: Render builds the image from the app's Dockerfile, with the repo root as the context. The static site runs
+   its `buildCommand` instead and publishes `apps/web/dist`; it has no pre-deploy step or health check.
 5. Pre-deploy: `npm --prefix /app/apps/<app> run migrate`, on a separate instance from the same image. It applies the
    new `db/*.surql` files as the app's own database user and logs `db.migrated`. If it fails, the deploy stops, the
    old version keeps serving, and the log shows `db.migrate_failed` with an error code.

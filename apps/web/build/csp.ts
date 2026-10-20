@@ -1,7 +1,8 @@
 // The Content Security Policy that names our origins (ADR 0012). Render's header values are literal text, so a
 // policy naming the api and the Clerk instance can't live in render.yaml without writing URLs into the repo. Instead
 // this plugin writes it into index.html at build time, as the first tag in <head>, from the two VITE_* variables.
-// Render sends the rest as headers (frame-ancestors, which a <meta> policy can't carry, and the others).
+// Render sends the rest as headers, set on builder-web in render.yaml: frame-ancestors (which a <meta> policy can't
+// carry), X-Frame-Options, Referrer-Policy, nosniff, Permissions-Policy and Cross-Origin-Opener-Policy.
 import { loadEnv, type Plugin } from "vite";
 import { apiOrigin, clerkFrontendApiHost } from "../src/lib/settings.ts";
 
