@@ -61,7 +61,8 @@ describe("the session page", () => {
     expect(details.getByText("$5.00")).toBeTruthy();
     expect(details.getByText("60 minutes")).toBeTruthy();
     expect(details.queryByText("Error code")).toBeNull();
-    expect(document.title).toBe(`kfp-qzwd-nre · ${PRODUCT_NAME}`);
+    // Set by an effect after the data arrives, which can run just after the heading shows: wait for it.
+    await waitFor(() => expect(document.title).toBe(`kfp-qzwd-nre · ${PRODUCT_NAME}`));
   });
 
   it("shows the meeting link as text, never as a link", async () => {
