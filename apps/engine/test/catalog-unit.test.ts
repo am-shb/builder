@@ -63,6 +63,13 @@ test("parseCells", () => {
   assert.deepEqual(parseCells("a||b"), [{ kind: "text", text: "a" }, { kind: "text", text: "b" }]);
 });
 
+test("parseCells keeps empty cells when asked, so table columns stay in place", () => {
+  assert.deepEqual(parseCells("a| |#Paid", { keepEmpty: true }), [
+    { kind: "text", text: "a" }, { kind: "text", text: "" }, { kind: "pill", text: "Paid", tone: "success" },
+  ]);
+  assert.deepEqual(parseCells("a| |b", { keepEmpty: false }), [{ kind: "text", text: "a" }, { kind: "text", text: "b" }]);
+});
+
 test("pillTone", () => {
   assert.equal(pillTone("Pending"), "warning");
   assert.equal(pillTone("OVERDUE"), "danger");

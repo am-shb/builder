@@ -84,6 +84,21 @@ test("type ignores text nodes and finds the input", () => {
   assert.ok(r.ok && r.nodeId === "home.input");
 });
 
+test("type finds a Search box and a DatePicker", () => {
+  const p = twoScreens();
+  p.root.children[0].children.push(
+    { id: "home.find", type: "Search", props: { placeholder: "Search expenses" }, status: "draft", children: [] },
+    { id: "home.due", type: "DatePicker", props: { label: "Due date" }, status: "draft", children: [] },
+  );
+  const ui = initialUiState(p);
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "search expenses", value: "taxi" }), {
+    ok: true, nodeId: "home.find", interaction: { kind: "setValue", target: "home.find", value: "taxi" },
+  });
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "due date", value: "Friday" }), {
+    ok: true, nodeId: "home.due", interaction: { kind: "setValue", target: "home.due", value: "Friday" },
+  });
+});
+
 test('"add" does not match "Address"; two-letter targets only match exactly', () => {
   const p = twoScreens();
   p.root.children[0].children = [

@@ -217,6 +217,15 @@ test("gallery: interactions work on the new builders", async (t) => {
         segment: document.querySelector('[data-node-id="d.segmented"] .is-active').textContent,
       })`);
       assert.deepEqual(r, { amount: "42", search: "taxi", slider: "75", category: "Travel", segment: "Year" });
+
+      // A blank Table cell stays an empty cell, so the cells after it keep their columns.
+      const cellsOf = await page.eval<string[][]>(`(() => {
+        const find = (n) => n.id === "b.table" ? n : n.children.map(find).find(Boolean);
+        find(window.proto.root).props.rows = ["@Sara K. |  | $420 | #Paid"];
+        window.show("gallery-b");
+        return [...document.querySelectorAll('[data-node-id="b.table"] tbody tr')].map((tr) => [...tr.children].map((td) => td.textContent.trim()));
+      })()`);
+      assert.deepEqual(cellsOf, [["SKSara K.", "", "$420", "Paid"]]);
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     });
   }, { width: WIDTH, height: HEIGHT });

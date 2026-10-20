@@ -48,8 +48,14 @@ test("themeChange", () => {
   const a = proto(theme());
   assert.equal(themeChange(a, proto(theme({ accent: slot("gold", "draft") }))), "values");
   const draft = proto(theme({ accent: { value: "gold", status: "draft", decisionId: "d1", previous: "slate" } }));
-  const settled = proto(theme({ accent: { value: "gold", status: "agreed", previous: "gold" } }));
-  assert.equal(themeChange(draft, settled), "settled");
+  const droppedId = proto(theme({ accent: { value: "gold", status: "agreed", previous: "gold" } }));
+  assert.equal(themeChange(draft, droppedId), null, "losing the decision id is a revert, not an agree");
+  const agreed = proto(theme({ accent: { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" } }));
+  assert.equal(themeChange(draft, agreed), "settled", "an agree keeps the decision id");
+  const sameValueDraft = proto(theme({ accent: { value: "slate", status: "draft", decisionId: "d1", previous: "slate" } }));
+  assert.equal(themeChange(sameValueDraft, a), null, "a revert that changes no value is not an agree");
+  const reverted = proto(theme({ accent: { value: "slate", status: "agreed", previous: "slate" } }));
+  assert.equal(themeChange(draft, reverted), "values", "a revert that changes the value fades");
   assert.equal(themeChange(a, proto(theme())), null);
   assert.equal(themeChange(null, a), null);
 });

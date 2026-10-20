@@ -116,8 +116,8 @@ export function pill(text, tone = "default") {
 /** "$1,150", "38%", "-12", "4.5k": shown right-aligned and bold in tables and lists. */
 export const isAmount = (text) => /^[-+−]?[$€£¥]?\s?\d[\d.,]*\s?[%kKmM]?$/.test(str(text).trim());
 
-export function cells(row) {
-  return parseCells(row);
+export function cells(row, options) {
+  return parseCells(row, options);
 }
 
 /** One parsed compact cell as an element: a person (avatar + name), a pill, or text. */

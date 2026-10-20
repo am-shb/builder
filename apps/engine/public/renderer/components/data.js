@@ -61,14 +61,16 @@ function table() {
     },
     update(el, node) {
       const cols = arr(node.props.columns);
-      const rows = arr(node.props.rows).map(cells);
+      // Blank cells are kept, so the cells after one stay under their own columns.
+      const rows = arr(node.props.rows).map((r) => cells(r, { keepEmpty: true }));
       if (!changed(el, JSON.stringify([cols, rows]))) return;
       const width = cols.length || Math.max(1, ...rows.map((r) => r.length));
       // A row with more cells than columns keeps the extras in its last cell.
       const fit = (r) => (r.length > width ? [...r.slice(0, width - 1).map((c) => [c]), r.slice(width - 1)] : r.map((c) => [c]));
       const fitted = rows.map(fit);
+      const filled = (cs) => !!cs && cs.some((c) => c.text !== "");
       const numeric = Array.from({ length: width }, (_, i) =>
-        fitted.some((r) => r[i]) && fitted.every((r) => !r[i] || r[i].every((c) => c.kind === "text" && isAmount(c.text))));
+        fitted.some((r) => filled(r[i])) && fitted.every((r) => !filled(r[i]) || r[i].every((c) => c.kind === "text" && (c.text === "" || isAmount(c.text)))));
       const tr = h("tr");
       cols.forEach((c, i) => tr.append(h("th", numeric[i] ? "is-num" : "", c)));
       el.parts.head.replaceChildren(...(cols.length ? [tr] : []));
@@ -76,7 +78,7 @@ function table() {
         const row = h("tr");
         for (let i = 0; i < width; i++) {
           const td = h("td", numeric[i] ? "is-num" : "");
-          if (r[i]) td.append(...r[i].map(cellEl));
+          if (r[i]) td.append(...r[i].filter((c) => c.text !== "").map(cellEl));
           row.append(td);
         }
         return row;

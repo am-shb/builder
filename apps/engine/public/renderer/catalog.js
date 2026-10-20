@@ -167,16 +167,18 @@ export function pillTone(word) {
 }
 
 /**
- * Split a compact row on "|". "@x" is a person, "#x" a pill, empty cells are dropped.
+ * Split a compact row on "|". "@x" is a person, "#x" a pill. Empty cells are dropped, or kept as empty
+ * text with `keepEmpty` (a table row, whose cells must stay under their columns).
  * @param {string} row
+ * @param {{ keepEmpty?: boolean }} [options]
  * @returns {{ kind: "text"|"person"|"pill"; text: string; tone?: string }[]}
  */
-export function parseCells(row) {
+export function parseCells(row, { keepEmpty = false } = {}) {
   /** @type {{ kind: "text"|"person"|"pill"; text: string; tone?: string }[]} */
   const out = [];
   for (const raw of String(row ?? "").split("|")) {
     const c = raw.trim();
-    if (!c) continue;
+    if (!c && !keepEmpty) continue;
     if (c.startsWith("@") && c.length > 1) out.push({ kind: "person", text: c.slice(1).trim() });
     else if (c.startsWith("#") && c.length > 1) { const text = c.slice(1).trim(); out.push({ kind: "pill", text, tone: pillTone(text) }); }
     else out.push({ kind: "text", text: c });

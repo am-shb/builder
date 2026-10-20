@@ -74,6 +74,7 @@ const optionLabel = (target: string) => target.trim().toLowerCase().replace(/^op
 const toggles = (n: UiNode) => n.type === "Toggle" || n.type === "Checkbox";
 const CLICKABLE = new Set(["Button", "ListItem", "Tabs", "Segmented", "Card", "MediaCard", "ProductCard", "PricingTier"]);
 const clickable = (n: UiNode) => CLICKABLE.has(n.type) || toggles(n) || !!n.on?.click?.length;
+const TYPEABLE = new Set(["Input", "Select", "Search", "DatePicker"]);
 const plan = (nodeId: string, interactions: Interaction[]): Plan => ({ ok: true, nodeId, interactions });
 
 /** Everything a click on `n` does: its own flip for a switch, then its click handlers. */
@@ -95,7 +96,7 @@ function planCommand(proto: Prototype, ui: UiState, cmd: UiCommand, comparison: 
     case "type": {
       const value = cmd.value;
       if (value === undefined) return { ok: false, reason: "not_found" };
-      return pick(matchText(nodes.filter((n) => n.type === "Input" || n.type === "Select"), cmd.target), (n) =>
+      return pick(matchText(nodes.filter((n) => TYPEABLE.has(n.type)), cmd.target), (n) =>
         plan(n.id, [{ kind: "setValue", target: n.id, value }, ...(n.on?.change ?? [])]));
     }
     case "navigate": {

@@ -2,7 +2,7 @@
 // Import-free: Node loads this file server-side (schema validation) as well as the browser.
 
 /** @typedef {"accent"|"warmth"|"radius"|"density"} ThemeSlotName */
-/** @typedef {{ value: string, status: "draft"|"agreed", decisionId?: string, previous: string }} ThemeSlot */
+/** @typedef {{ value: string, status: "draft"|"agreed", decisionId?: string, previous: string, reverted?: { value: string, decisionId: string } }} ThemeSlot */
 /** @typedef {Record<ThemeSlotName, ThemeSlot>} Theme */
 /** @typedef {Record<ThemeSlotName, string>} ThemeValues */
 
@@ -146,7 +146,7 @@ export function themeVars(values) {
 
 /**
  * How the theme differs between two prototypes: "values" when any slot value differs, "settled" when values
- * match but some slot went draft -> agreed, otherwise null.
+ * match but some slot went draft -> agreed keeping its decisionId (an agree; a revert drops the id), otherwise null.
  * @returns {"values"|"settled"|null}
  */
 export function themeChange(prev, next) {
@@ -155,7 +155,9 @@ export function themeChange(prev, next) {
   const b = themeValues(next.theme);
   if (THEME_SLOTS.some((s) => a[s] !== b[s])) return "values";
   for (const s of THEME_SLOTS) {
-    if (prev.theme?.[s]?.status === "draft" && next.theme?.[s]?.status === "agreed") return "settled";
+    const was = prev.theme?.[s];
+    const now = next.theme?.[s];
+    if (was?.status === "draft" && now?.status === "agreed" && was.decisionId !== undefined && now.decisionId === was.decisionId) return "settled";
   }
   return null;
 }
