@@ -5,7 +5,7 @@
 // animate, all stepped by the shared 15 fps clock; everything else is painted once.
 import { animate, logMotion } from "@renderer/clock.js";
 import { renderTree, initialUiState } from "@renderer/render.js";
-import { layoutBox, tagAbove } from "@renderer/motion.js";
+import { layoutBox, tagAbove, scrollerOf, scrollWithin } from "@renderer/motion.js";
 
 export const SPLIT_MS = 450;
 export const EXPAND_MS = 500;
@@ -96,20 +96,28 @@ function fillPreview(o, variant, scale) {
 
   const els = variant.focusIds.map((id) => nodes.get(id)).filter((el) => el && el.getClientRects().length > 0);
   const top = els.filter((el) => !els.some((p) => p !== el && p.contains(el))).slice(0, MAX_RINGS);
+  // A change below the phone's fold: scroll the phone's screen area to it first (the boxes below are then
+  // measured where they show).
+  const scroller = top.length ? scrollerOf(top[0], o.frame) : null;
+  const first = scroller && layoutBox(top[0], o.frame);
+  if (first) scrollWithin(scroller, o.frame, { ...first, y: first.y - tagAbove(top[0]) });
   const boxes = top.map((el) => {
     const b = layoutBox(el, o.frame);
     const tag = tagAbove(el); // the ring clears a draft node's tag too
     return b && { id: el.dataset.nodeId, x: b.x, y: b.y - tag, w: b.w, h: b.h + tag };
   }).filter(Boolean);
 
-  // Scroll (in the preview's own units) just far enough to bring the first change into view.
+  // Scroll (in the preview's own units) just far enough to bring the first change into view. The frame
+  // scrolls (it clips its overflow), so the app frame's sticky sidebar or top bar stays in view.
   let offset = 0;
   if (boxes.length) {
     const first = boxes[0];
     const content = o.frame.firstElementChild ? o.frame.firstElementChild.offsetHeight : vh;
     offset = Math.max(0, Math.min(first.y + first.h + 16 - vh, first.y - 24, content - vh));
   }
-  o.frame.style.transform = `scale(${scale}) translateY(${-offset}px)`;
+  o.frame.style.transform = `scale(${scale})`;
+  o.frame.scrollTop = offset;
+  offset = o.frame.scrollTop;
 
   const rect = (b) => ({
     x: b.x * scale - RING_PAD, y: (b.y - offset) * scale - RING_PAD, w: b.w * scale + RING_PAD * 2, h: b.h * scale + RING_PAD * 2,

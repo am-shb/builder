@@ -1,7 +1,7 @@
 // Focus moments and responsiveness cues: the spotlight on what changed (one at a time, 1500 ms),
 // the shimmering placeholder where a streamed element is coming, and the voice-command pointer.
 import { animate, logMotion } from "@renderer/clock.js";
-import { rootOf, layoutBox, fadeOutInPlace, tagAbove } from "@renderer/motion.js";
+import { rootOf, layoutBox, fadeOutInPlace, tagAbove, scrollerOf, scrollWithin } from "@renderer/motion.js";
 import { slotOf } from "@renderer/components.js";
 
 export const SPOTLIGHT_MS = 1500;
@@ -78,18 +78,41 @@ export function focusTargets(changes, nodes) {
   return region ? [{ ...top[0].c, id: region.dataset.nodeId }] : [top[0].c];
 }
 
-// Brings an off-canvas box into view: jump the scroll, then glide the content from where it was.
-function reveal(root, box) {
+const glide = (els, delta) => {
+  for (const e of els) animate(e, [{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: 450, easing: EASE });
+};
+
+// The App's content (its slot), which a scroll moves; the app frame's chrome stays put (sticky).
+function contentOf(root) {
+  const app = root.firstElementChild;
+  return (app && app.dataset.type && slotOf(app, { type: app.dataset.type })) || app;
+}
+
+/**
+ * Brings `el` (at `box`, from layoutBox) into view: first inside the container that scrolls it (the phone's
+ * screen area), then on the canvas. Each scroll jumps, and the content glides from where it was; the app
+ * frame's chrome does not move. Returns the box where it now shows.
+ */
+function reveal(root, el, box) {
+  const scroller = scrollerOf(el, root);
+  if (scroller) {
+    const moved = scrollWithin(scroller, root, box);
+    if (Math.abs(moved) >= 1) {
+      glide([...scroller.children].filter(isShown), moved);
+      box = { ...box, y: box.y - moved };
+    }
+  }
   const view = root.clientHeight;
   const top = root.scrollTop;
-  if (box.y >= top + 8 && box.y + box.h <= top + view - 8) return;
+  if (box.y >= top + 8 && box.y + box.h <= top + view - 8) return box;
   const max = Math.max(0, root.scrollHeight - view);
   const target = Math.min(max, Math.max(0, box.y - 64));
   const delta = target - top;
-  if (Math.abs(delta) < 1) return;
+  if (Math.abs(delta) < 1) return box;
   root.scrollTop = target;
-  const content = root.firstElementChild;
-  if (content) animate(content, [{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: 450, easing: EASE });
+  const content = contentOf(root);
+  if (content) glide([content], delta);
+  return box;
 }
 
 /**
@@ -158,9 +181,9 @@ let spotlight = null;
  */
 export function playFocus(el, change) {
   const root = rootOf(el);
-  const box = root && layoutBox(el, root);
-  if (!box) return;
-  reveal(root, box);
+  const found = root && layoutBox(el, root);
+  if (!found) return;
+  const box = reveal(root, el, found);
   if (spotlight) spotlight.remove();
 
   const vw = root.clientWidth;
@@ -236,7 +259,16 @@ const at = (p, extra = "") => `translate(${p.x}px, ${p.y}px)${extra}`;
 /** Voice command cue: the pointer glides to the target (500 ms), then presses (150 ms). */
 export async function animatePointer(targetEl) {
   if (!isShown(targetEl)) return;
-  const r = targetEl.getBoundingClientRect();
+  // A target off the canvas (or below the phone's fold) is brought into view first; the pointer aims at
+  // where it lands (its layout box), not where its glide starts.
+  const root = rootOf(targetEl);
+  const found = root && layoutBox(targetEl, root);
+  let r = targetEl.getBoundingClientRect();
+  if (found) {
+    const box = reveal(root, targetEl, found);
+    const rr = root.getBoundingClientRect();
+    r = { left: rr.left + root.clientLeft + box.x - root.scrollLeft, top: rr.top + root.clientTop + box.y - root.scrollTop, width: box.w, height: box.h };
+  }
   const to = { x: Math.round(r.left + Math.min(r.width / 2, 48)), y: Math.round(r.top + r.height / 2) };
   if (!pointer) {
     pointer = div("m-pointer");

@@ -702,7 +702,7 @@
 .c-backers { margin-top: 4px; font: 600 19px/1.25 var(--b-font); color: #b4bccb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-backers b { color: #f4f6fa; font-weight: 700; }
 .c-preview { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: 10px; background: var(--b-bg); transform-origin: 0 0; }
-.c-frame { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.c-frame { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
 .c-marks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* The part that differs: the rest of the preview is softened a little, and each change is ringed. */
 .c-hole { position: absolute; border-radius: 12px; box-shadow: 0 0 0 3000px rgb(255 255 255 / 0.45); }

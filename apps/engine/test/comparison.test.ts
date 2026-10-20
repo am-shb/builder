@@ -1,4 +1,7 @@
 import { test } from "node:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { testStore } from "./helpers/store.ts";
 import { buildComparisonView, createRuntime, nextComparison } from "../src/session/runtime.ts";
@@ -472,3 +475,52 @@ test("themed previews render side by side", async (t) => {
     assert.deepEqual(accents, ["#c8961e", "#15803d"]);
   });
 });
+
+// A long screen whose options each add a line at the very end: the rings must still land inside each preview.
+const longBatch = (props: Record<string, unknown>): PatchBatch => ({
+  label: "Long screen",
+  ops: [
+    { op: "update", id: "app", props: { title: "Notes", ...props } },
+    { op: "update", id: "home", props: { title: "Home" } },
+    ...Array.from({ length: 24 }, (_, i) => ({ op: "add" as const, parentId: "home", node: node(`l${i}`, "Text", { text: `Line number ${i + 1}` }) })),
+  ],
+});
+const lastLine = (label: string, by: string): PatchBatch => ({ label, by, ops: [{ op: "add", parentId: "home", node: node(`last-${by.toLowerCase()}`, "Text", { text: `${label} at the end` }, [], "draft") }] });
+const ENDINGS = conflict([
+  { label: "A", summary: "End with a thanks", backers: ["Sara"], batch: lastLine("Thanks", "Sara") },
+  { label: "B", summary: "End with a link", backers: ["Amir"], batch: lastLine("Link", "Amir") },
+  { label: "C", summary: "End with a date", backers: ["Lee"], batch: lastLine("Date", "Lee") },
+]);
+const longProto = (props: Record<string, unknown>): Prototype => {
+  const r = applyBatch(emptyPrototype("Untitled app"), longBatch(props));
+  assert.ok(r.ok);
+  return r.proto;
+};
+
+for (const [what, props] of [["phone", { device: "phone" }], ["sidebar", { nav: "sidebar" }]] as const) {
+  test(`a change below the fold is ringed inside each preview (${what})`, async (t) => {
+    await withStage(t, async ({ page, script }) => {
+      const view = buildComparisonView(longProto(props), ENDINGS);
+      await script([{ batch: longBatch(props), doc: docWith(ENDINGS) }, { wait: 400, comparison: view }]);
+      await page.waitFor(`document.querySelectorAll("#comparison .c-option").length === 3`);
+      await sleep(700);
+      const r = await page.eval<ViewRead>(READ_VIEW);
+      for (const o of r.options) {
+        assert.equal(o.rings.length, 1, `option ${o.label} has its ring`);
+        assert.ok(inside(o.rings[0], o.preview), `option ${o.label} ring inside its preview: ${JSON.stringify({ ring: o.rings[0], preview: o.preview })}`);
+      }
+      // The frame stays in view: the phone's tabs, or the sidebar's name at the top of the preview.
+      const chrome = await page.eval<{ x: number; y: number; w: number; h: number }[]>(`[...document.querySelectorAll("#comparison .c-preview")].map((p) => {
+        const el = p.querySelector(${JSON.stringify(what === "phone" ? ".b-phone .b-app-chrome" : ".b-app-brand")}); const b = el.getBoundingClientRect();
+        return { x: b.left, y: b.top, w: b.width, h: b.height }; })`);
+      chrome.forEach((c, i) => assert.ok(inside(c, r.options[i].preview), `option ${r.options[i].label}: frame chrome in view ${JSON.stringify({ c, preview: r.options[i].preview })}`));
+      if (what === "phone") {
+        const phones = await page.eval<{ y: number; h: number }[]>(`[...document.querySelectorAll("#comparison .c-preview .b-phone")].map((e) => { const b = e.getBoundingClientRect(); return { y: b.top, h: b.height }; })`);
+        r.options.forEach((o, i) => assert.ok(o.rings[0].y + o.rings[0].h <= phones[i].y + phones[i].h + 0.5, `option ${o.label} ring inside the phone`));
+      }
+      const file = path.join(mkdtempSync(path.join(tmpdir(), "comparison-")), `comparison-${what}.png`);
+      await page.screenshot(file);
+      t.diagnostic(`screenshot: ${file}`);
+    });
+  });
+}

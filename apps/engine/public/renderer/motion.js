@@ -33,7 +33,11 @@ export function rootOf(el) {
   return root;
 }
 
-/** Layout box in the root's content coordinates, ignoring transforms (so mid-animation reads are stable). */
+/**
+ * Layout box in the root's content coordinates, ignoring transforms (so mid-animation reads are stable).
+ * Containers between `el` and the root that scroll their own content (the phone's screen area) are
+ * accounted for: the box is where `el` shows, not where it would be unscrolled.
+ */
 export function layoutBox(el, root) {
   if (!el.offsetParent) return null; // display:none somewhere up the tree
   let x = 0;
@@ -50,7 +54,47 @@ export function layoutBox(el, root) {
     e = p;
   }
   if (e !== root) return null;
+  for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    if ((a.scrollTop || a.scrollLeft) && scrolls(el, a)) {
+      x -= a.scrollLeft;
+      y -= a.scrollTop;
+    }
+  }
   return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+}
+
+// Whether scrolling `a` (an ancestor of el) moves el: not when something between them is positioned
+// out of flow against a box outside `a` (a Modal inside the phone's screen area covers the phone).
+function scrolls(el, a) {
+  for (let e = el; e && e !== a; e = e.parentElement) {
+    const pos = getComputedStyle(e).position;
+    if ((pos === "absolute" || pos === "fixed") && !(e.offsetParent && a.contains(e.offsetParent))) return false;
+  }
+  return true;
+}
+
+/** The nearest container between `el` and `root` that scrolls el's content vertically (the phone's screen area), or null. */
+export function scrollerOf(el, root) {
+  for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    if (a.scrollHeight > a.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(a).overflowY) && scrolls(el, a)) return a;
+  }
+  return null;
+}
+
+/**
+ * Scrolls `scroller` (from scrollerOf) so `box` (layoutBox in root coordinates) shows inside it, `margin`
+ * clear of its edges, at once. Returns how far its content moved up (0 when the box already showed).
+ */
+export function scrollWithin(scroller, root, box, margin = 24) {
+  const s = layoutBox(scroller, root);
+  if (!s) return 0;
+  const top = s.y + scroller.clientTop;
+  const view = scroller.clientHeight;
+  if (box.y >= top + 8 && box.y + box.h <= top + view - 8) return 0;
+  const max = Math.max(0, scroller.scrollHeight - view);
+  const before = scroller.scrollTop;
+  scroller.scrollTop = Math.min(max, Math.max(0, before + box.y - top - margin));
+  return scroller.scrollTop - before;
 }
 
 /** How far above `el` its draft tag reaches (theme.css), or 0 when it shows none. */

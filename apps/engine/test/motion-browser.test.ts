@@ -175,6 +175,67 @@ test("a voice navigate points at the nav item", async (t) => {
   });
 });
 
+// A rect inside another (half a pixel of slack).
+const within = (r: { x: number; y: number; w: number; h: number }, o: { x: number; y: number; w: number; h: number }) =>
+  r.x >= o.x - 0.5 && r.y >= o.y - 0.5 && r.x + r.w <= o.x + o.w + 0.5 && r.y + r.h <= o.y + o.h + 0.5;
+const RECT = (sel: string) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; })()`;
+const lines = (n: number) => Array.from({ length: n }, (_, i) => add("home", text(`l${i}`, `Line number ${i + 1}`)));
+
+test("on a phone a change below the fold is revealed and ringed inside the phone", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Phone", ops: [{ op: "update", id: "app", props: { title: "Notes", device: "phone" } }, ...lines(20)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l19"]')`);
+    await sleep(1700);
+    await page.eval(`window.__motionLog = []`);
+    await script([{ batch: { label: "Added: last line", by: "Ada", ops: [
+      add("home", { id: "last", type: "Toggle", props: { label: "Remind me" }, status: "agreed", children: [] }),
+    ] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus" && e.id === "last")`, 5000);
+    await sleep(500); // the reveal glide has landed
+    const phone = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".b-phone"));
+    const ring = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".m-ring"));
+    const label = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".m-label"));
+    assert.ok(within(ring, phone), `ring inside the phone: ${JSON.stringify({ ring, phone })}`);
+    assert.ok(label.y >= 0 && label.y + label.h <= 720, `label on the canvas: ${JSON.stringify(label)}`);
+    const node = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT('[data-node-id="last"]'));
+    assert.ok(within(node, ring), "the ring surrounds the node where it is shown");
+
+    // The voice pointer finds a control below the fold too.
+    await page.eval(`(() => { const b = document.querySelector(".b-phone .b-app-body"); b.scrollTop = 0; })()`);
+    await sleep(1700);
+    await page.eval(`window.stageEvent({ type: "command", nodeId: "last", interaction: { kind: "toggle", target: "last" } })`);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "animatePointer" && e.phase === "press")`, 3000);
+    const at = await page.eval<string>(`document.querySelector(".m-pointer").style.transform`);
+    const [x, y] = (at.match(/-?[\d.]+/g) ?? []).map(Number);
+    assert.ok(x >= phone.x && x <= phone.x + phone.w && y >= phone.y && y <= phone.y + phone.h, `pointer ${at} inside the phone ${JSON.stringify(phone)}`);
+    const target = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT('[data-node-id="last"]'));
+    assert.ok(y >= target.y && y <= target.y + target.h, `pointer ${at} on the control ${JSON.stringify(target)}`);
+  });
+});
+
+for (const nav of ["top", "sidebar"]) {
+  test(`a reveal glides the content, not the ${nav} frame`, async (t) => {
+    await withStage(t, async ({ page, script }) => {
+      await script([{ batch: { label: "Long", ops: [{ op: "update", id: "app", props: { title: "Notes", nav } }, ...lines(30)] } }]);
+      await page.waitFor(`document.querySelector('[data-node-id="l29"]')`);
+      await sleep(1700);
+      const sel = nav === "top" ? ".b-app-chrome" : ".b-app-rail";
+      const start = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(sel));
+      await page.eval(`(() => {
+        window.__chrome = []; const end = performance.now() + 2500;
+        const f = () => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); window.__chrome.push([b.left, b.top]); if (performance.now() < end) requestAnimationFrame(f); };
+        requestAnimationFrame(f);
+      })()`);
+      await script([{ batch: { label: "Added: last line", by: "Ada", ops: [add("home", text("last", "The last line"))] } }]);
+      await sleep(2600);
+      const scrolled = await page.eval<number>(`document.getElementById("proto").scrollTop`);
+      assert.ok(scrolled > 0, "the canvas scrolled to the change");
+      const moves = await page.eval<number[][]>(`window.__chrome.filter(([x, y]) => Math.abs(x - ${start.x}) > 0.5 || Math.abs(y - ${start.y}) > 0.5)`);
+      assert.deepEqual(moves, [], `the ${nav} frame stays put during the reveal`);
+    });
+  });
+}
+
 test("pending region shows a shimmer placeholder and clears it", async (t) => {
   await withStage(t, async ({ page }) => {
     await page.eval(`window.stageEvent({ type: "pending_region", parentId: "home" })`);
