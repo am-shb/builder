@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { BOT_NAME, PRODUCT_NAME } from "../brand.ts";
+import { ColorModeMenu } from "../components/ColorModeMenu.tsx";
 import { Mark } from "../components/Mark.tsx";
 
 const STEPS = ["Paste the meeting link", `Admit ${BOT_NAME} when it asks to join`, "Watch the prototype take shape"];
@@ -12,10 +13,11 @@ export function AuthLayout({ variant = "product", children }: { variant?: "produ
     <div className="relative isolate min-h-dvh pb-12">
       <div aria-hidden="true" className="dot-texture pointer-events-none absolute inset-x-0 top-0 -z-10 h-[340px] md:h-[520px]" />
       <header className="mx-auto flex max-w-[1040px] items-center px-5 py-3 md:px-10 md:py-5">
-        <Link to="/" className="flex min-h-11 items-center gap-2.5 rounded-xl text-ink no-underline">
+        <Link to="/" className="mr-auto flex min-h-11 items-center gap-2.5 rounded-xl text-ink no-underline">
           <Mark />
           <span className="text-[17px] font-[650] tracking-[-0.01em]">{PRODUCT_NAME}</span>
         </Link>
+        <ColorModeMenu />
       </header>
       <main id="main" className="mx-auto max-w-[1040px] px-5 pt-2 md:grid md:grid-cols-2 md:items-center md:gap-x-16 md:px-10 md:pt-10">
         <div className="hidden md:block">

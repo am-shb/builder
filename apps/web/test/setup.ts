@@ -2,6 +2,7 @@
 // test could open a connection fails the test instead. A test that needs a reply passes its own fake fetch.
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { initColorMode } from "../src/lib/color-mode.ts";
 
 export class NetworkBlockedError extends Error {
   constructor(what: string) {
@@ -68,4 +69,7 @@ HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElemen
 afterEach(() => {
   cleanup();
   useScreen(PHONE);
+  // The color mode setting is the one thing kept in storage (ADR 0013); each test starts at System.
+  localStorage.clear();
+  initColorMode();
 });

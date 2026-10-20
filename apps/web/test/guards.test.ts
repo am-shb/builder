@@ -33,10 +33,34 @@ describe("the app's code", () => {
     ["dangerouslySetInnerHTML", /dangerouslySetInnerHTML/],
     ["innerHTML or outerHTML", /\b(inner|outer)HTML\b/],
     ["eval or new Function", /\beval\s*\(|\bnew\s+Function\b/],
-    ["localStorage or sessionStorage", /\b(local|session)Storage\b/],
     ["console", /\bconsole\./],
   ])("never uses %s", (_name, pattern) => {
     expect(offenders(src, pattern)).toEqual([]);
+  });
+});
+
+// No browser storage (ADR 0012), with one exception (ADR 0013): the color mode setting, kept by src/lib/color-mode.ts
+// and applied before first paint by public/color-mode.js. Nothing else in the app or the public folder may use it.
+describe("browser storage", () => {
+  const STORAGE = /\b(local|session)Storage\b|\bindexedDB\b|\bdocument\.cookie\b/;
+  const EXCEPTIONS = new Set(["src/lib/color-mode.ts", "public/color-mode.js"]);
+  // The public folder's scripts and pages ship as they are.
+  const publicFiles = read(readdirSync(join(root, "public")).filter((n) => /\.(js|html)$/.test(n)).map((n) => join(root, "public", n)));
+
+  it("finds the public script", () => {
+    expect(publicFiles.map(({ file }) => file)).toContain("public/color-mode.js");
+  });
+
+  it("is used only by the color mode setting", () => {
+    expect(offenders([...src, ...publicFiles], STORAGE).filter((f) => !EXCEPTIONS.has(f))).toEqual([]);
+  });
+
+  it("the exceptions use localStorage only, for the one key", () => {
+    for (const { file, text } of [...src, ...publicFiles].filter(({ file }) => EXCEPTIONS.has(file))) {
+      expect(text, file).not.toMatch(/\bsessionStorage\b|\bindexedDB\b|\bdocument\.cookie\b/);
+      const keys = [...text.matchAll(/["'](builder\.[\w.-]+)["']/g)].map((m) => m[1]);
+      expect(new Set(keys), file).toEqual(new Set(["builder.color-mode"]));
+    }
   });
 });
 
