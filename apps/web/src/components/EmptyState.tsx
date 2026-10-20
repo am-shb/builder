@@ -3,18 +3,21 @@ import { cn } from "../lib/cn.ts";
 import { DraftToAgreed } from "./Mark.tsx";
 
 // An invitation, not a dead end: what this is, the real steps, and one way to start.
-export function EmptyState({ title, description, steps, action, className }: {
+export function EmptyState({ title, description, steps, action, headingLevel = 2, className }: {
   title: string;
   description: string;
   steps?: string[];
-  // Shown on phones only when the page already has the action on desktop (the start panel).
+  // Shown below 1024px only, where the page has no start panel beside it.
   action?: ReactNode;
+  // 3 inside a section that already has a heading (the list's "Recent").
+  headingLevel?: 2 | 3;
   className?: string;
 }) {
+  const Heading = headingLevel === 3 ? "h3" : "h2";
   return (
     <div className={cn("grid justify-items-start rounded-panel bg-surface p-6 shadow-elevated md:max-w-[560px] md:p-9", className)}>
       <DraftToAgreed />
-      <h2 className="mt-5 mb-0 text-heading-lg font-semibold tracking-[-0.02em] text-balance">{title}</h2>
+      <Heading className="mt-5 mb-0 text-heading-lg font-semibold tracking-[-0.02em] text-balance">{title}</Heading>
       <p className="mt-1.5 mb-0 max-w-[30em] text-ink-2 text-pretty">{description}</p>
       {steps && (
         <ol className="mt-5 mb-0 grid list-none gap-3 p-0">
@@ -26,7 +29,7 @@ export function EmptyState({ title, description, steps, action, className }: {
           ))}
         </ol>
       )}
-      {action && <div className="mt-6 w-full md:hidden">{action}</div>}
+      {action && <div className="mt-6 w-full lg:hidden">{action}</div>}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useAuth, useSession } from "@clerk/react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { LoadingPage } from "../pages/LoadingPage.tsx";
+import { StartSessionProvider } from "../sessions/StartSessionProvider.tsx";
 
 // Where a signed-out visitor goes: sign-in, then back to the page they asked for.
 function signInPath(location: { pathname: string; search: string }): string {
@@ -35,7 +36,9 @@ export function RequireOrg() {
   if (!orgId) return <Navigate to="/choose-organization" replace />;
   return (
     <OrgSwitchWatcher orgId={orgId}>
-      <Outlet />
+      <StartSessionProvider>
+        <Outlet />
+      </StartSessionProvider>
     </OrgSwitchWatcher>
   );
 }

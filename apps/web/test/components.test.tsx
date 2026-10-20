@@ -12,7 +12,7 @@ import { STATUS_LABELS, StatusPill } from "../src/components/StatusPill.tsx";
 import { TextField } from "../src/components/TextField.tsx";
 import { PRODUCT_NAME } from "../src/brand.ts";
 import { axeViolations } from "./helpers/axe.ts";
-import { media } from "./setup.ts";
+import { DESKTOP_MOUSE, mediaMatches, PHONE, useScreen } from "./setup.ts";
 
 describe("StatusPill", () => {
   it("shows every api status as its label, in words", () => {
@@ -84,14 +84,27 @@ describe("SessionRow", () => {
 function ModalHarness({ initial = true }: { initial?: boolean }) {
   const [open, setOpen] = useState(initial);
   return (
-    <ResponsiveModal open={open} onOpenChange={setOpen} title="New session">
-      <TextField label="Meeting link" />
-    </ResponsiveModal>
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open</button>
+      <ResponsiveModal open={open} onOpenChange={setOpen} title="New session">
+        <TextField label="Meeting link" />
+      </ResponsiveModal>
+    </>
   );
 }
 
+describe("the test screen", () => {
+  it("answers each query for its own width and pointer", () => {
+    useScreen(PHONE);
+    expect([mediaMatches("(min-width: 768px)"), mediaMatches("(pointer: coarse)"), mediaMatches("(max-width: 400px)")]).toEqual([false, true, true]);
+    useScreen(DESKTOP_MOUSE);
+    expect([mediaMatches("(min-width: 768px)"), mediaMatches("(pointer: coarse)"), mediaMatches("(min-width: 768px) and (pointer: fine)")]).toEqual([true, false, true]);
+  });
+});
+
 describe("ResponsiveModal", () => {
-  it("is a named dialog that focuses its field, and Escape closes it", async () => {
+  it("with a mouse, is a named dialog that focuses its field, and Escape closes it", async () => {
+    useScreen(DESKTOP_MOUSE);
     render(<ModalHarness />);
     const dialog = screen.getByRole("dialog", { name: "New session" });
     expect(document.activeElement).toBe(within(dialog).getByLabelText("Meeting link"));
@@ -99,9 +112,25 @@ describe("ResponsiveModal", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("on a touch screen, focuses the sheet itself, so the keyboard doesn't cover it before it's read", () => {
+    useScreen(PHONE);
+    render(<ModalHarness />);
+    expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "New session" }));
+  });
+
+  it("on close, focus goes back to the button that opened it", async () => {
+    useScreen(DESKTOP_MOUSE);
+    render(<ModalHarness initial={false} />);
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open" }));
+  });
+
   it("has a labelled close button on phones and on desktop", async () => {
     for (const desktop of [false, true]) {
-      media.matches = desktop;
+      useScreen(desktop ? DESKTOP_MOUSE : PHONE);
       const { unmount } = render(<ModalHarness />);
       expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
       expect(await axeViolations(document.body)).toEqual([]);
@@ -111,6 +140,23 @@ describe("ResponsiveModal", () => {
 });
 
 describe("ConfirmModal", () => {
+  it("on Cancel, focus goes back to where it was", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Start session</button>
+          <ConfirmModal open={open} onOpenChange={setOpen} title="Start again?" description="Check first." confirmLabel="Start anyway" onConfirm={() => {}} />
+        </>
+      );
+    }
+    render(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: "Start session" }));
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Start session" }));
+  });
+
   it("asks first: an alert dialog whose confirm button runs the action", async () => {
     const onConfirm = vi.fn();
     render(<ConfirmModal open onOpenChange={() => {}} title="Start another session for this link?" description="Check the meeting first."

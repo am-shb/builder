@@ -24,7 +24,7 @@ export const LIST_LIMIT = 50;
 export function SessionsList({ list, now, emptyAction }: {
   list: OrgQuery<SessionView[]>;
   now?: Date;
-  // The empty state's own way to start (phones; on desktop the start panel is beside it).
+  // The empty state's own way to start (below 1024px; wider, the start panel is beside it).
   emptyAction?: ReactNode;
 }) {
   const header = (
@@ -69,6 +69,7 @@ export function SessionsList({ list, now, emptyAction }: {
           description={`Bring ${BOT_NAME} into a meeting. It listens while you decide, and builds the prototype on the shared screen.`}
           steps={EMPTY_STEPS}
           action={emptyAction}
+          headingLevel={3}
         />
       ) : (
         <>

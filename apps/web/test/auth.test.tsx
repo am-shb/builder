@@ -1,4 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { PRODUCT_NAME } from "../src/brand.ts";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clerk, setClerk } from "./helpers/clerk.tsx";
@@ -165,6 +167,30 @@ describe("routes and the guard", () => {
       <ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/sessions/abc"]}><AppRoutes /><Routes><Route path="*" element={<Where />} /></Routes></MemoryRouter></ApiProvider>,
     ));
     expect(where()).toBe("/");
+  });
+
+  it("the header's mark goes home through the router, without reloading the page", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    at("/sessions/abc");
+    const home = screen.getByRole("link", { name: PRODUCT_NAME });
+    expect(home.getAttribute("href")).toBe("/");
+    await userEvent.click(home);
+    expect(where()).toBe("/");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Sessions");
+  });
+
+  it("each page names itself in the tab", () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const home = at("/");
+    expect(document.title).toBe(`Sessions · ${PRODUCT_NAME}`);
+    home.unmount();
+    setClerk({ session: "none" });
+    const signIn = at("/sign-in");
+    expect(document.title).toBe(`Sign in · ${PRODUCT_NAME}`);
+    signIn.unmount();
+    setClerk({ session: "pending" });
+    at("/");
+    expect(document.title).toBe(`Choose an organization · ${PRODUCT_NAME}`);
   });
 
   it("the member pages have no accessibility violations", async () => {

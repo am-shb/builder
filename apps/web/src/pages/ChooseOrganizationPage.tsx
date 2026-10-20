@@ -2,11 +2,13 @@ import { OrganizationList, TaskChooseOrganization, useAuth, useSession } from "@
 import { Navigate } from "react-router";
 import { AuthLayout } from "../auth/AuthLayout.tsx";
 import { LoadingPage } from "./LoadingPage.tsx";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 
 // Every session belongs to an organization (ADR 0006), so a new user creates or joins one before the app opens. With a
 // pending "choose-organization" task, Clerk's task component; signed in with no organization and no task (rare: after
 // leaving the last one elsewhere), the organization list. Personal accounts are hidden.
 export function ChooseOrganizationPage() {
+  usePageTitle("Choose an organization");
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const { session } = useSession();
   if (!isLoaded) return <LoadingPage />;

@@ -6,7 +6,7 @@ type TextFieldProps = Omit<ComponentProps<"input">, "id"> & {
   label: string;
   // Help under the label, linked to the input for screen readers.
   hint?: string;
-  // Shown under the field, linked to the input; also marks it invalid.
+  // Shown under the field and announced, linked to the input; also marks it invalid.
   error?: string;
   icon?: ReactNode;
 };
@@ -36,12 +36,16 @@ export function TextField({ label, hint, error, icon, className, ...props }: Tex
           {...props}
         />
       </span>
-      {error && (
-        <p id={errorId} className="flex items-center gap-1.5 text-sm font-medium text-danger">
-          <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
-          {error}
-        </p>
-      )}
+      {/* Always mounted, so an error that appears is announced wherever focus is (also one that arrives long after
+          the button was pressed). Empty, it takes no room. */}
+      <div role="alert" className="empty:-mt-2.5">
+        {error && (
+          <p id={errorId} className="m-0 flex items-center gap-1.5 text-sm font-medium text-danger">
+            <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { OrganizationSwitcher, UserButton } from "@clerk/react";
 import { useEffect, useRef, type ReactNode } from "react";
+import { Link } from "react-router";
 import { AppShell } from "../components/AppShell.tsx";
 import { RoleLabel } from "./RoleLabel.tsx";
 
@@ -11,6 +12,7 @@ export function SignedInShell({ actionBar, children }: { actionBar?: ReactNode; 
       org={<><LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" /></LabelInName><RoleLabel /></>}
       account={<UserButton />}
       actionBar={actionBar}
+      homeLink={({ className, children: mark }) => <Link to="/" className={className}>{mark}</Link>}
     >
       {children}
     </AppShell>

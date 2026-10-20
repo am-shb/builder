@@ -4,9 +4,11 @@ import { SignedInShell } from "../auth/SignedInShell.tsx";
 import { Button } from "../components/Button.tsx";
 import { DraftToAgreed } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 
 // A session's page. Its detail (W6) comes next.
 export function SessionPage() {
+  usePageTitle("Session");
   return (
     <SignedInShell>
       <PageState icon={<DraftToAgreed />} title="Session details come next"

@@ -8,57 +8,95 @@ import { PageIntro, SplitLayout } from "../components/AppShell.tsx";
 import { Button } from "../components/Button.tsx";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { ResponsiveModal } from "../components/ResponsiveModal.tsx";
+import { statusLabel } from "../components/StatusPill.tsx";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import { SessionsList } from "../sessions/SessionsList.tsx";
-import { findUnconfirmedStart, sameMeetingLink } from "../sessions/start.ts";
+import { isLinkProblem, linkProblemText, outcomeAnnouncement, shouldConfirmStart } from "../sessions/start.ts";
 import { StartForm } from "../sessions/StartForm.tsx";
-import { isLinkProblem, linkProblemText, StartOutcome } from "../sessions/StartOutcome.tsx";
-import { useStartSession, type StartResult } from "../sessions/useStartSession.ts";
+import { StartOutcome } from "../sessions/StartOutcome.tsx";
+import { useStartSession } from "../sessions/StartSessionProvider.tsx";
 
-// The sessions page: start a session (the panel on desktop; a sticky button and a bottom sheet on phones) and the
-// org's sessions. A start's outcome shows above the list until the next start or until put away.
+type Announcement = { text: string; urgent: boolean };
+
+// The sessions page: start a session (the panel on wide screens; a sticky button and a sheet or dialog below 1024px)
+// and the org's sessions. A start's outcome shows above the list until the next start or until put away.
 export function HomePage({ now }: { now?: Date }) {
+  usePageTitle("Sessions");
   const { orgId } = useAuth();
   const list = useOrgQuery((api, signal) => api.listSessions(signal));
-  const starter = useStartSession(list.refresh);
+  const starter = useStartSession();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetOpenRef = useRef(false);
+  sheetOpenRef.current = sheetOpen;
   // WD8: a link waiting for "Start anyway".
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
-  const [clearKey, setClearKey] = useState(0);
-  const outcomeRef = useRef<HTMLDivElement>(null);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const pendingAnnouncement = useRef<Announcement | null>(null);
+  const newSessionRef = useRef<HTMLButtonElement>(null);
   const linkError = linkProblemText(starter.result);
 
-  // Leaving the page while a start runs would turn a known outcome into an unknown one: ask the browser to warn.
+  // The list reloads after every start, so a new or saved session shows up.
+  const { refresh } = list;
+  const settledSeen = useRef(starter.settled);
   useEffect(() => {
-    if (!starter.sending) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    addEventListener("beforeunload", warn);
-    return () => removeEventListener("beforeunload", warn);
-  }, [starter.sending]);
+    if (starter.settled === settledSeen.current) return;
+    settledSeen.current = starter.settled;
+    refresh();
+  }, [starter.settled, refresh]);
+
+  // An outcome put away (or replaced by a new start) leaves nothing behind for a screen reader to find, including a
+  // message still waiting to be announced.
+  const announceSeq = useRef(0);
+  useEffect(() => {
+    if (starter.result) return;
+    announceSeq.current += 1;
+    pendingAnnouncement.current = null;
+    setAnnouncement(null);
+  }, [starter.result]);
+
+  // One way to tell a screen reader about an outcome: a short message in a live region (focus stays where it is). A
+  // region updated while the sheet is open is hidden from screen readers, so on phones it waits until the sheet has
+  // closed. Emptied first, so the same message twice is still announced.
+  function announce(message: Announcement) {
+    const seq = ++announceSeq.current;
+    setAnnouncement(null);
+    requestAnimationFrame(() => {
+      if (seq === announceSeq.current) setAnnouncement(message);
+    });
+  }
 
   async function send(url: string) {
     const outcome = await starter.start(url);
-    if (!outcome) return;
-    // A reply about the link keeps it in the field (and the sheet open) to fix; anything else empties the field, so a
-    // link whose start may have sent a bot isn't one click from a second one.
-    if (isLinkProblem(outcome)) return;
-    setClearKey((k) => k + 1);
-    setSheetOpen(false);
-    // Focus moves to the outcome, so keyboard and screen-reader users land on what happened.
-    requestAnimationFrame(() => outcomeRef.current?.focus());
+    // A link problem is announced by the field itself, and keeps the sheet open to fix it.
+    if (!outcome || isLinkProblem(outcome)) return;
+    const message = { text: outcomeAnnouncement(outcome, BOT_NAME, statusLabel), urgent: outcome.kind === "failed" };
+    if (sheetOpenRef.current) {
+      pendingAnnouncement.current = message;
+      setSheetOpen(false);
+    } else {
+      announce(message);
+    }
   }
 
   function requestStart(url: string) {
-    const last: StartResult | null = starter.result;
-    const unknownBefore = last?.kind === "failed" && last.explained.botMayExist && sameMeetingLink(last.meetingUrl, url);
-    if (unknownBefore || findUnconfirmedStart(list.data ?? [], url, now)) setConfirmUrl(url);
+    if (shouldConfirmStart(starter.result, list.data ?? [], url, now)) setConfirmUrl(url);
     else void send(url);
   }
 
-  const formProps = { onStart: requestStart, sending: starter.sending, error: linkError, onEdit: linkError ? starter.dismiss : undefined, clearKey };
-  const newSession = <Button block onClick={() => setSheetOpen(true)}><Plus aria-hidden="true" />New session</Button>;
+  const formProps = {
+    value: starter.draft,
+    onValueChange: (value: string) => {
+      starter.setDraft(value);
+      // Editing the link puts away the reply about it.
+      if (linkError) starter.dismiss();
+    },
+    onStart: requestStart,
+    sending: starter.sending,
+    error: linkError,
+  };
+  const newSession = <Button ref={newSessionRef} block onClick={() => setSheetOpen(true)}><Plus aria-hidden="true" />New session</Button>;
   const empty = list.status === "ready" && (list.data ?? []).length === 0;
   const result = starter.result && !isLinkProblem(starter.result) ? starter.result : null;
-  const alerting = result?.kind === "failed";
 
   return (
     <SignedInShell actionBar={empty ? undefined : newSession}>
@@ -66,24 +104,28 @@ export function HomePage({ now }: { now?: Date }) {
         intro={<PageIntro title="Sessions" subtitle={`Send ${BOT_NAME} into a meeting, then follow each session here.`} />}
         panel={<StartForm {...formProps} />}
       >
-        {/* Always mounted, so a new outcome is announced; one region for news, one for problems. */}
-        <div role="status">
-          {result && !alerting && (
-            <div ref={outcomeRef} tabIndex={-1} className="mb-5 outline-none md:mt-[var(--section-baseline,14px)] md:mb-6">
-              <StartOutcome result={result} currentOrgId={orgId} onDismiss={starter.dismiss} />
-            </div>
-          )}
-        </div>
-        <div role="alert">
-          {result && alerting && (
-            <div ref={outcomeRef} tabIndex={-1} className="mb-5 outline-none md:mt-[var(--section-baseline,14px)] md:mb-6">
-              <StartOutcome result={result} currentOrgId={orgId} onDismiss={starter.dismiss} />
-            </div>
-          )}
-        </div>
+        {/* Always mounted, so a new message is announced: one region for news, one for problems. */}
+        <div role="status" className="sr-only">{announcement && !announcement.urgent ? announcement.text : null}</div>
+        <div role="alert" className="sr-only">{announcement?.urgent ? announcement.text : null}</div>
+        {result && (
+          <div className="mb-5 lg:mt-3.5 lg:mb-6" data-testid="start-outcome">
+            <StartOutcome result={result} currentOrgId={orgId} onDismiss={starter.dismiss} />
+          </div>
+        )}
         <SessionsList list={list} now={now} emptyAction={newSession} />
       </SplitLayout>
-      <ResponsiveModal open={sheetOpen} onOpenChange={setSheetOpen} title="New session" closeDisabled={starter.sending}>
+      <ResponsiveModal
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        title="New session"
+        closeDisabled={starter.sending}
+        returnFocusTo={() => newSessionRef.current}
+        onClosed={() => {
+          const message = pendingAnnouncement.current;
+          pendingAnnouncement.current = null;
+          if (message) announce(message);
+        }}
+      >
         <StartForm {...formProps} />
       </ResponsiveModal>
       <ConfirmModal

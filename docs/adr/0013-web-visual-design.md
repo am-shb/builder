@@ -61,7 +61,7 @@ Semantic tokens in `apps/web/src/styles/globals.css`, with a light and a dark va
 | ink | `#1a2220` graphite | `#eef3f1` | text |
 | ink-2 | `#56605d` | `#a3aeaa` | secondary text |
 | ink-3 | `#616b68` | `#8f9b97` | ended and failed codes, chevrons, placeholders |
-| input | `#7d8784` | `#66726e` | form field borders |
+| input | `#7d8784` | `#6f7b77` | form field borders (3:1 or more on surface and sunk, read-only included) |
 | primary | `#0d5c4c` evergreen | `#4fcfa6` | primary actions, the mark, focus |
 | on-primary | `#ffffff` | `#05261c` | text on primary |
 | live | `#19a67a` | `#4fcfa6` | the "in the meeting" dot only |
