@@ -2,7 +2,7 @@
 // inner DOM is rebuilt only when the props it shows change.
 import {
   h, str, arr, nums, clampInt, setText, setHidden, setOptional, setVariant, withParts, syncTexts, changed,
-  cells, cellEl, avatar, syncAvatar, isAmount,
+  cells, cellEl, avatar, syncAvatar, isAmount, syncIcon,
 } from "@renderer/components/dom.js";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -31,11 +31,13 @@ function statCard() {
       const label = h("div", "b-stat-label");
       const value = h("div", "b-stat-value");
       const delta = h("span", "b-pill b-stat-delta");
-      el.append(label, value, delta);
-      return withParts(el, { label, value, delta });
+      const icon = h("span", "b-stat-icon");
+      el.append(icon, label, value, delta);
+      return withParts(el, { icon, label, value, delta });
     },
     update(el, node) {
       const p = node.props;
+      syncIcon(el.parts.icon, p.icon, 24);
       setText(el.parts.label, str(p.label));
       setText(el.parts.value, str(p.value));
       const trend = Object.hasOwn(TREND_ARROW, str(p.trend)) ? str(p.trend) : "";
@@ -359,20 +361,22 @@ export const DATA = {
       el.setAttribute("role", "listitem");
       const av = h("span", "b-av");
       av.setAttribute("aria-hidden", "true");
+      const icon = h("span", "b-listitem-icon");
       const main = h("span", "b-listitem-main");
       const text = h("span", "b-listitem-text");
       const subtitle = h("span", "b-listitem-sub");
       main.append(text, subtitle);
       const meta = h("span", "b-listitem-meta");
       const body = h("span", "b-listitem-body");
-      el.append(av, main, meta, body);
-      return withParts(el, { av, text, subtitle, meta, body });
+      el.append(av, icon, main, meta, body);
+      return withParts(el, { av, icon, text, subtitle, meta, body });
     },
     update(el, node) {
       const p = node.props;
       const name = str(p.avatar);
       setHidden(el.parts.av, !name);
       if (name) syncAvatar(el.parts.av, name);
+      syncIcon(el.parts.icon, p.icon);
       setText(el.parts.text, str(p.text));
       setOptional(el.parts.subtitle, str(p.subtitle));
       setOptional(el.parts.meta, str(p.meta));

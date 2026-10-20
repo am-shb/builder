@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { CATALOG, STYLE_OPTIONS, TEMPLATES } from "../../public/renderer/catalog.js";
 import { PHONE_TABS } from "../../public/renderer/interact.js";
+import { ICON_ALIASES, ICON_NAMES } from "../../public/renderer/icons.js";
 import { THEME_OPTIONS } from "../../public/renderer/theme.js";
 
 // The build prompt's component and theme reference, generated from the catalog so the prompt can
@@ -52,11 +53,18 @@ export function themeOptions(): string {
   return Object.entries(THEME_OPTIONS).map(([slot, values]) => `- ${slot}: ${values.join("|")}`).join("\n");
 }
 
+/** Every icon name the renderer draws, on one line, with a few aliases. */
+export function iconList(): string {
+  const aliases = ["chart", "money", "cart", "team", "dashboard", "delete", "edit"].filter((a) => a in ICON_ALIASES);
+  return `${(ICON_NAMES as string[]).join(", ")}. Also accepted: ${aliases.map((a) => `${a} (${ICON_ALIASES[a as keyof typeof ICON_ALIASES]})`).join(", ")}.`;
+}
+
 /** build.md with the generated reference filled in. */
 export function buildSystemPrompt(): string {
   return readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8")
     .replace("{{COMPONENTS}}", () => componentTable())
     .replace("{{PHONE_NOTE}}", () => `A phone shows only its first ${PHONE_TABS} Screens as bottom tabs, so keep a phone app to ${PHONE_TABS} Screens.`)
     .replace("{{TEMPLATES}}", () => templatesTable())
+    .replace("{{ICONS}}", () => iconList())
     .replace("{{THEME}}", () => themeOptions());
 }

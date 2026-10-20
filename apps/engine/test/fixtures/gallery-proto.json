@@ -157,7 +157,7 @@
       { "id": "gallery-d", "type": "Screen", "props": { "title": "Input", "icon": "edit-3" }, "status": "agreed", "children": [
         { "id": "d.steps", "type": "Steps", "props": { "steps": ["Details", "Receipt", "Approver", "Review"], "current": 1 }, "status": "agreed", "children": [] },
         { "id": "d.form", "type": "Grid", "props": { "columns": "2" }, "status": "agreed", "children": [
-          { "id": "d.amount", "type": "Input", "props": { "label": "Amount", "placeholder": "$0.00", "icon": "dollar" }, "status": "agreed", "children": [] },
+          { "id": "d.amount", "type": "Input", "props": { "label": "Amount", "placeholder": "$0.00", "icon": "dollar-sign" }, "status": "agreed", "children": [] },
           { "id": "d.merchant", "type": "Input", "props": { "label": "Merchant", "value": "Figma" }, "status": "agreed", "children": [] },
           { "id": "d.category", "type": "Select", "props": { "label": "Category", "options": ["Software", "Travel", "Food"], "value": "Software" }, "status": "agreed", "children": [] },
           { "id": "d.date", "type": "DatePicker", "props": { "label": "Date", "value": "Oct 14, 2026" }, "status": "agreed", "children": [] },

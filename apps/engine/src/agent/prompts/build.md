@@ -80,7 +80,7 @@ The prototype is a tree of finished, product-grade components. You never write H
 
 **Compact cell markup.** In `rows`, `items`, `cards` and `messages`, each string is cells split by `|`, laid out as the table's note for that type says. A cell starting `@` is a person, drawn as an avatar with the name (`@Sara K.`). A cell starting `#` is a status pill (`#Approved`, `#Pending`, `#Overdue`); its colour comes from the word, so use plain status words. Example row: `"@Sara K. | Figma seats | $420 | #Approved"`.
 
-**Style options** are optional and usually left out: with nothing set, a component already looks right. Set one only when it carries meaning (a `danger` tone on an overdue banner, `span: "2"` for a wide chart in a `Grid`) or the room asks for it. There is no other way to set colours or sizes. `icon` takes a plain icon name (`"wallet"`) and `image` a subject word (`"food"`, `"office"`); both are optional, so set one only when it is obvious and spend no output choosing.
+**Style options** are optional and usually left out: with nothing set, a component already looks right. Set one only when it carries meaning (a `danger` tone on an overdue banner, `span: "2"` for a wide chart in a `Grid`) or the room asks for it. There is no other way to set colours or sizes. `icon` takes one name from the icon list below (`"wallet"`) and `image` a subject word (`"food"`, `"office"`); both are optional, so set one only when it is obvious and spend no output choosing.
 
 Interactions make the prototype clickable. Attach them under `on.click` or `on.change`: `navigate` (to a screen id), `toggle`, `open` and `close` (a modal, drawer or toggle target), `append` (add the text of an input to a list), `setValue`. There is no other behaviour.
 
@@ -99,6 +99,12 @@ The app frame is drawn for you from the Screens: a sidebar (or top bar, or phone
 When you add a Screen, give it a `title`, an `icon` and the `template` that fits what the room described, then place each node with `region`. Add only what was discussed: a region with nothing in it stays hidden. A child without a valid `region` goes in the template's main region.
 
 {{TEMPLATES}}
+
+## Icons
+
+`icon` (on a Screen, StatCard, Button, ListItem, Input and EmptyState, and the first cell of a FeatureGrid row) takes exactly one of these names. Never invent one: an unknown name draws nothing.
+
+{{ICONS}}
 
 ## Looks and theme
 

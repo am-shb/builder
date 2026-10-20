@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { buildSystemPrompt, componentTable } from "../src/agent/prompt-catalog.ts";
 import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, TEMPLATES } from "../public/renderer/catalog.js";
 import { PHONE_TABS } from "../public/renderer/interact.js";
+import { ICON_NAMES } from "../public/renderer/icons.js";
 import { THEME_OPTIONS } from "../public/renderer/theme.js";
 
 test("the system prompt lists every component", () => {
@@ -23,6 +24,12 @@ test("each component's table row names its props and styles", () => {
 test("the prompt names every theme value", () => {
   const prompt = buildSystemPrompt();
   for (const [slot, values] of Object.entries(THEME_OPTIONS)) assert.ok(prompt.includes(`${slot}: ${values.join("|")}`), slot);
+});
+
+test("the prompt lists every icon name and warns against inventing one", () => {
+  const prompt = buildSystemPrompt();
+  for (const name of ICON_NAMES) assert.ok(prompt.includes(name), name);
+  assert.match(prompt, /Never invent one/);
 });
 
 test("the prompt has no leftover placeholder", () => {

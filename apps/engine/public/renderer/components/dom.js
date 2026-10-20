@@ -1,6 +1,7 @@
 // DOM helpers shared by the component builders. Every helper that writes to the DOM touches it only on change,
 // so a builder's update stays idempotent (re-rendering an unchanged prototype mutates nothing).
 import { parseCells } from "@renderer/catalog.js";
+import { iconData } from "@renderer/icons.js";
 
 export const str = (v, d = "") => (v === undefined || v === null ? d : String(v));
 export const arr = (v) => (Array.isArray(v) ? v.map(String) : []);
@@ -141,4 +142,39 @@ export function imageBlock(image, cls = "") {
   const el = h("div", `b-img-block${cls ? " " + cls : ""}`);
   el.append(h("span", "b-img-word", subject(image) || "Image"));
   return el;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * An inline Lucide `<svg>` for a curated icon name or alias, or null when the name is unknown. Built with
+ * createElementNS from the stored element list (never innerHTML). It strokes with currentColor, so it follows the
+ * text color of whatever holds it.
+ */
+export function icon(name, size = 20) {
+  const parts = iconData(name);
+  if (!parts) return null;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const px = String(Math.max(8, Math.round(num(size, 20))));
+  for (const [k, v] of [
+    ["viewBox", "0 0 24 24"], ["width", px], ["height", px], ["fill", "none"], ["stroke", "currentColor"],
+    ["stroke-width", "2"], ["stroke-linecap", "round"], ["stroke-linejoin", "round"], ["aria-hidden", "true"], ["focusable", "false"],
+  ]) svg.setAttribute(k, v);
+  for (const [tag, attrs] of parts) {
+    const child = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) child.setAttribute(k, v);
+    svg.append(child);
+  }
+  return svg;
+}
+
+/** Puts the icon in `host` (hiding it when the name is empty or unknown); rebuilds only when the name or size changes. */
+export function syncIcon(host, name, size = 20) {
+  const key = `${str(name).trim().toLowerCase()}|${size}`;
+  if (host.__iconKey === key) return;
+  host.__iconKey = key;
+  const svg = icon(name, size);
+  if (svg) host.replaceChildren(svg);
+  else host.replaceChildren();
+  setHidden(host, !svg);
 }

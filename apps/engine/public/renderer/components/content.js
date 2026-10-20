@@ -1,7 +1,7 @@
 // Content: headings, text, marketing blocks, cards with pictures, people and labels.
 import {
   h, str, arr, num, clampInt, setText, setHidden, setOptional, setVariant, withParts, changed,
-  cells, cellEl, avatar, syncAvatar, imageBlock, subject,
+  cells, cellEl, avatar, syncAvatar, imageBlock, subject, icon,
 } from "@renderer/components/dom.js";
 
 /** Picture part of Hero and MediaCard: a tinted block naming the subject, rebuilt on change. */
@@ -56,7 +56,7 @@ export const CONTENT = {
     slot: (el) => el.parts.actions,
   },
 
-  // "icon | title | text"; with two cells "title | text". Icons draw nothing until the icon set lands.
+  // "icon | title | text"; with two cells "title | text". An unknown or missing icon draws nothing.
   FeatureGrid: {
     create: () => h("div", "b-features"),
     update(el, node) {
@@ -66,6 +66,13 @@ export const CONTENT = {
         const cs = cells(row);
         const [title, text] = cs.length >= 3 ? cs.slice(1) : cs;
         const item = h("div", "b-feature b-panel");
+        const glyph = cs.length >= 3 ? icon(cs[0].text, 24) : null;
+        if (glyph) {
+          const chip = h("span", "b-feature-icon");
+          chip.append(glyph);
+          item.append(chip);
+          item.classList.add("has-icon");
+        }
         if (title) item.append(h("div", "b-feature-title", title.text));
         if (text) item.append(h("div", "b-feature-text", text.text));
         for (const extra of cs.slice(cs.length >= 3 ? 3 : 2)) item.append(cellEl(extra));

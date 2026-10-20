@@ -13,7 +13,7 @@ const rendererDir = new URL("../../public/renderer/", import.meta.url);
 export const RENDERER_MODULES = [
   "render.js", "components.js", "motion.js", "clock.js", "interact.js", "catalog.js", "theme.js",
   "components/dom.js", "components/frames.js", "components/data.js", "components/content.js", "components/input.js",
-  "components/feedback.js",
+  "components/feedback.js", "icons.js",
 ] as const;
 
 let cache: { template: string; theme: string; modules: Record<string, string> } | undefined;

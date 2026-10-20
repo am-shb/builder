@@ -1,5 +1,5 @@
 // Feedback (empty states, notices, loading) and conversation (chat, comments).
-import { h, str, arr, clampInt, setText, setHidden, setOptional, withParts, changed, cells, cellEl, avatar, syncAvatar } from "@renderer/components/dom.js";
+import { h, str, arr, clampInt, setText, setHidden, setClass, syncIcon, setOptional, withParts, changed, cells, cellEl, avatar, syncAvatar } from "@renderer/components/dom.js";
 
 const SKELETON_WIDTHS = ["100%", "92%", "78%", "96%", "70%", "86%"];
 
@@ -13,9 +13,14 @@ export const FEEDBACK = {
       const text = h("div", "b-empty-text");
       const actions = h("div", "b-empty-actions");
       el.append(art, title, text, actions);
-      return withParts(el, { title, text, actions });
+      return withParts(el, { art, title, text, actions });
     },
     update(el, node) {
+      // With an icon the picture is that icon in the soft tile; without one it stays the generic placeholder art.
+      const art = el.parts.art;
+      syncIcon(art, node.props.icon, 28);
+      setHidden(art, false);
+      setClass(art, "has-icon", !!art.firstChild);
       setText(el.parts.title, str(node.props.title, "Nothing here yet"));
       setOptional(el.parts.text, str(node.props.text));
     },

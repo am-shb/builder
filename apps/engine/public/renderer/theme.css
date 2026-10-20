@@ -83,8 +83,9 @@
   display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--b-ink-2); font-size: 17px; font-weight: 600;
   line-height: 1.25; text-decoration: none; cursor: pointer; user-select: none;
 }
-.b-app-navicon { flex: none; display: inline-flex; width: 22px; height: 22px; color: var(--b-ink-3); }
+.b-app-navicon { flex: none; display: inline-flex; width: 24px; height: 24px; color: var(--b-ink-3); }
 .b-app-navicon:empty { display: none; } /* until the item's Screen has an icon */
+.b-app-navicon > svg, .b-stat-icon > svg { display: block; }
 .b-app-navitem.is-active .b-app-navicon { color: var(--b-accent); }
 .b-app-navlabel { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .b-app-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -755,3 +756,14 @@
 .c-ring { position: absolute; box-sizing: border-box; border: 4px solid var(--b-focus); border-radius: 12px; }
 /* "Show option B": a ring around the whole option while the others dim (focusOption). */
 .c-focus { position: absolute; inset: 0; border: 5px solid #8fb0ff; border-radius: 16px; pointer-events: none; opacity: 0; }
+
+/* ---------- icons: inline Lucide svgs that follow the text color (dom.js icon) ---------- */
+.b-stat-icon, .b-listitem-icon, .b-button-icon, .b-field-icon, .b-feature-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.b-stat-icon[hidden], .b-listitem-icon[hidden], .b-button-icon[hidden], .b-field-icon[hidden] { display: none; }
+.b-stat-icon { color: var(--b-accent); margin-bottom: 6px; }
+.b-listitem-icon { color: var(--b-ink-2); }
+.b-field-icon { color: var(--b-ink-3); }
+.b-feature-icon { align-self: flex-start; width: 44px; height: 44px; margin-bottom: 10px; border-radius: calc(var(--b-radius-sm) + 2px); background: var(--b-accent-soft); color: var(--b-accent); }
+.b-feature.has-icon::before { display: none; }
+.b-empty-art.has-icon { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; color: var(--b-accent); }
+.b-empty-art.has-icon::after { display: none; }

@@ -1,6 +1,6 @@
 // Input: buttons and form controls. Typed and picked values live in ui.values (interact.js sets them from the
 // bubbling "input" event), so every control reads ui.values[node.id] before its own prop.
-import { h, str, arr, clampInt, setText, setOptional, setAttr, withParts, syncTexts, changed } from "@renderer/components/dom.js";
+import { h, str, arr, clampInt, setText, setOptional, setAttr, withParts, syncTexts, changed, syncIcon } from "@renderer/components/dom.js";
 
 /** Label above a field, shared by Input, Select, Slider and DatePicker. */
 function field(cls, tag = "label") {
@@ -23,10 +23,14 @@ export const INPUT = {
     create() {
       const el = h("button", "b-button");
       el.type = "button";
-      return el;
+      const icon = h("span", "b-button-icon");
+      const label = h("span", "b-button-label");
+      el.append(icon, label);
+      return withParts(el, { icon, label });
     },
     update(el, node) {
-      setText(el, str(node.props.label, "Button"));
+      syncIcon(el.parts.icon, node.props.icon);
+      setText(el.parts.label, str(node.props.label, "Button"));
       const variant = VARIANTS.includes(str(node.props.variant)) ? str(node.props.variant) : "primary";
       for (const v of VARIANTS) el.classList.toggle(`is-${v}`, v === variant);
     },
@@ -36,13 +40,15 @@ export const INPUT = {
     create() {
       const { el, label } = field("b-input");
       const box = h("span", "b-field-box");
+      const icon = h("span", "b-field-icon");
       const input = h("input", "b-field-input");
       input.type = "text";
-      box.append(input);
+      box.append(icon, input);
       el.append(box);
-      return withParts(el, { label, input });
+      return withParts(el, { label, icon, input });
     },
     update(el, node, ui) {
+      syncIcon(el.parts.icon, node.props.icon);
       setAttr(el.parts.input, "placeholder", str(node.props.placeholder));
       syncField(el, node, ui, el.parts.input);
     },

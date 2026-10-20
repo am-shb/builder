@@ -1,5 +1,5 @@
 // Frames: the containers a screen is laid out with.
-import { h, str, arr, clampInt, setText, setHidden, setOptional, setAttr, setClass, setVariant, withParts, syncTexts, changed } from "@renderer/components/dom.js";
+import { h, str, arr, clampInt, setText, setHidden, setOptional, setAttr, setClass, setVariant, withParts, syncTexts, changed, syncIcon } from "@renderer/components/dom.js";
 import { frameNav, screenTitle } from "@renderer/interact.js";
 import { TEMPLATES, templateRegion } from "@renderer/catalog.js";
 
@@ -148,7 +148,9 @@ export const FRAMES = {
         nav.replaceChildren(...items.map((it) => {
           const item = h("a", "b-app-navitem");
           item.dataset.navScreen = it.screen;
-          item.append(h("span", "b-app-navicon"), h("span", "b-app-navlabel", it.title));
+          const glyph = h("span", "b-app-navicon");
+          syncIcon(glyph, it.icon, 24);
+          item.append(glyph, h("span", "b-app-navlabel", it.title));
           return item;
         }));
       }

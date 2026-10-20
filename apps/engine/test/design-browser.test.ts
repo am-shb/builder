@@ -640,3 +640,92 @@ test("page templates", async (t) => {
     });
   }, { width: WIDTH, height: HEIGHT });
 });
+
+// ---------- icons: inline Lucide svgs from the curated set ----------
+
+test("icons", async (t) => {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), "design-")), "screens");
+  mkdirSync(dir, { recursive: true });
+  await withChrome(t, async (page) => {
+    await withGalleryServer(async (url) => {
+      await page.goto(url);
+      await page.waitFor("window.ready === true");
+      const count = (sel: string) => page.eval<number>(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
+      const svgIn = (id: string, part = "") => count(`[data-node-id="${id}"] ${part} svg`.replace("  ", " "));
+
+      await t.test("builders draw their icon as an inline svg", async () => {
+        await page.eval(`window.show("gallery-b")`);
+        assert.equal(await svgIn("b.stat1", ".b-stat-icon"), 1, "StatCard");
+        assert.equal(await svgIn("b.list.1", ".b-listitem-icon"), 0, "an unknown name draws none");
+        await page.eval(`window.show("gallery-d")`);
+        assert.equal(await svgIn("d.amount", ".b-field-icon"), 1, "Input");
+        assert.equal(await svgIn("d.btn.primary", ".b-button-icon"), 1, "Button");
+        await page.eval(`window.show("gallery-e")`);
+        assert.equal(await svgIn("e.empty", ".b-empty-art"), 1, "EmptyState");
+        await page.eval(`window.show("gallery-c")`);
+        assert.equal(await svgIn("c.features", ".b-feature-icon"), 2, "FeatureGrid draws icons for rows with three cells");
+        assert.equal(await count(".b-app-navicon svg"), SCREENS.length, "nav");
+      });
+
+      await t.test("svg shape and sizes", async () => {
+        await page.eval(`window.show("gallery-b")`);
+        const svg = await page.eval<Record<string, string | number>>(`(() => {
+          const s = document.querySelector('[data-node-id="b.stat1"] .b-stat-icon svg');
+          return { ns: s.namespaceURI, viewBox: s.getAttribute("viewBox"), stroke: s.getAttribute("stroke"), w: s.getAttribute("width"),
+            hidden: s.getAttribute("aria-hidden"), kids: s.children.length, color: getComputedStyle(s).color, box: s.getBoundingClientRect().width };
+        })()`);
+        assert.equal(svg.ns, "http://www.w3.org/2000/svg");
+        assert.equal(svg.viewBox, "0 0 24 24");
+        assert.equal(svg.stroke, "currentColor");
+        assert.equal(svg.w, "24");
+        assert.equal(svg.box, 24);
+        assert.equal(svg.hidden, "true");
+        assert.ok((svg.kids as number) > 0);
+        await page.eval(`window.show("gallery-d")`);
+        assert.equal(await page.eval<number>(`document.querySelector('[data-node-id="d.btn.primary"] svg').getBoundingClientRect().width`), 20);
+        assert.equal(await page.eval<number>(`document.querySelector(".b-app-navicon svg").getBoundingClientRect().width`), 24);
+      });
+
+      await t.test("unknown names render nothing and throw nothing; aliases and case resolve", async () => {
+        await page.eval(`(() => {
+          const find = (n, id) => n.id === id ? n : n.children.map((c) => find(c, id)).find(Boolean);
+          const f = (id) => find(window.proto.root, id);
+          f("d.btn.primary").props.icon = "Nope";
+          f("d.amount").props.icon = "MONEY";
+          window.show("gallery-d");
+        })()`);
+        assert.equal(await svgIn("d.btn.primary", ".b-button-icon"), 0);
+        assert.equal(await svgIn("d.amount", ".b-field-icon"), 1, "alias, upper case");
+        assert.equal(await page.eval<boolean>(`document.querySelector('[data-node-id="d.btn.primary"] .b-button-icon').hidden`), true);
+        assert.equal(await page.eval<string>(`document.querySelector('[data-node-id="d.btn.primary"]').textContent.trim()`), "Submit");
+        assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
+      });
+
+      await t.test("re-rendering is idempotent, and an icon change swaps only that svg", async () => {
+        await page.eval(`window.show("gallery-b")`);
+        assert.equal(await page.eval<number>(IDEMPOTENT), 0);
+        const before = await page.eval<string>(`document.querySelector('[data-node-id="b.stat1"] svg path').getAttribute("d")`);
+        await page.eval(`(() => {
+          const find = (n, id) => n.id === id ? n : n.children.map((c) => find(c, id)).find(Boolean);
+          find(window.proto.root, "b.stat1").props.icon = "trending-up"; window.draw();
+        })()`);
+        const after = await page.eval<string>(`document.querySelector('[data-node-id="b.stat1"] svg path').getAttribute("d")`);
+        assert.notEqual(after, before);
+        assert.equal(await page.eval<number>(IDEMPOTENT), 0);
+      });
+
+      await t.test("nav and phone tabs draw screen icons; screenshots", async () => {
+        await page.eval(`window.show("gallery-b")`);
+        await shoot(page, dir, "icons-stats");
+        await page.screenshot(path.join(dir, "icons-sidebar.png"));
+        await page.eval(`(() => { Object.assign(window.proto.root.props, { device: "phone" }); window.draw(); })()`);
+        assert.equal(await count(".b-phone .b-app-navicon svg") > 0, true, "phone tabs");
+        await page.screenshot(path.join(dir, "icons-phone.png"));
+        await page.eval(`window.show("gallery-c")`);
+        await page.eval(`(() => { delete window.proto.root.props.device; window.draw(); })()`);
+        await shoot(page, dir, "icons-content");
+        t.diagnostic(`screenshots: ${dir}`);
+      });
+    });
+  }, { width: WIDTH, height: HEIGHT });
+});
