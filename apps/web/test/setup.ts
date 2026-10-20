@@ -27,4 +27,21 @@ if (typeof navigator !== "undefined") {
   Object.defineProperty(navigator, "sendBeacon", { value: blocked("navigator.sendBeacon"), configurable: true });
 }
 
-afterEach(() => cleanup());
+// jsdom has no matchMedia or ResizeObserver; Radix and the layout hook use them. Tests see the phone layout unless a
+// test sets `matchMediaMatches` (true means every query matches: the desktop layout).
+export const media = { matches: false };
+Object.defineProperty(window, "matchMedia", {
+  configurable: true,
+  value: (query: string) => ({
+    matches: media.matches, media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }),
+});
+g.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
+// axe probes a canvas for icon fonts; jsdom has none and prints a warning per call.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+
+afterEach(() => {
+  cleanup();
+  media.matches = false;
+});

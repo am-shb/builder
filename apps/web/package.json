@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p .",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build && node scripts/check-dist.ts",
+    "screenshots": "node scripts/screenshots.ts"
   },
   "dependencies": {
     "@builder/contracts": "*",
