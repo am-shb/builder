@@ -12,9 +12,21 @@ describe("apiOrigin", () => {
     expect(apiOrigin("http://localhost:3001")).toBe("http://localhost:3001");
   });
 
+  it("returns the normal form of an origin", () => {
+    expect(apiOrigin("https://API.example.test")).toBe("https://api.example.test");
+    expect(apiOrigin("https://api.example.test:443")).toBe("https://api.example.test");
+    expect(apiOrigin("https://api.example.test:8443")).toBe("https://api.example.test:8443");
+  });
+
+  it("refuses plain http to another computer in a production build", () => {
+    expect(apiOrigin("http://api.example.test", { production: true })).toBeNull();
+    expect(apiOrigin("http://127.0.0.1:3001", { production: true })).toBe("http://127.0.0.1:3001");
+    expect(buildCsp({ apiUrl: "http://api.example.test", production: true })).not.toContain("api.example.test");
+  });
+
   it("refuses anything that isn't a bare origin", () => {
     for (const bad of [undefined, "", "  ", "api.example.test", "ftp://api.example.test", "https://api.example.test/v1",
-      "https://api.example.test?x=1", "https://user:pw@api.example.test", "javascript:alert(1)", "https://a b.test"]) {
+      "https://api.example.test?x=1", "https://api.example.test#x", "https://user:pw@api.example.test", "javascript:alert(1)", "https://a b.test"]) {
       expect(apiOrigin(bad), String(bad)).toBeNull();
     }
   });

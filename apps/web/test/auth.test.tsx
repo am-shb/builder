@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clerk, setClerk } from "./helpers/clerk.tsx";
 import { App, AppRoutes } from "../src/App.tsx";
 import { readConfig } from "../src/config.ts";
+import { buildCsp, clerkFrontendApiHost } from "../build/csp.ts";
 import { safeReturnPath } from "../src/auth/guards.tsx";
 import { axeViolations } from "./helpers/axe.ts";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
@@ -233,13 +234,42 @@ describe("safeReturnPath", () => {
 });
 
 describe("readConfig", () => {
+  const pk = `pk_test_${btoa("clerk.example.test$")}`;
+
   it("takes a publishable key and an api origin", () => {
-    expect(readConfig({ VITE_CLERK_PUBLISHABLE_KEY: "pk_test_abc", VITE_API_URL: "http://localhost:3001/" }))
-      .toEqual({ clerkPublishableKey: "pk_test_abc", apiUrl: "http://localhost:3001" });
+    expect(readConfig({ VITE_CLERK_PUBLISHABLE_KEY: pk, VITE_API_URL: "http://localhost:3001/" }))
+      .toEqual({ clerkPublishableKey: pk, apiUrl: "http://localhost:3001" });
   });
 
-  it("refuses a secret key, an empty value or an api URL with a path", () => {
+  it("refuses a secret key, a key that doesn't decode to a host, an empty value or an api URL with a path", () => {
     expect(readConfig({ VITE_CLERK_PUBLISHABLE_KEY: "sk_test_abc", VITE_API_URL: "" })).toEqual({ clerkPublishableKey: null, apiUrl: null });
+    expect(readConfig({ VITE_CLERK_PUBLISHABLE_KEY: "pk_test_abc" }).clerkPublishableKey).toBeNull();
     expect(readConfig({ VITE_API_URL: "https://api.example.test/v1" }).apiUrl).toBeNull();
+  });
+
+  it("refuses plain http to another computer in a production build, but not to this one", () => {
+    expect(readConfig({ VITE_API_URL: "http://api.example.test", PROD: true }).apiUrl).toBeNull();
+    expect(readConfig({ VITE_API_URL: "http://api.example.test", PROD: false }).apiUrl).toBe("http://api.example.test");
+    expect(readConfig({ VITE_API_URL: "http://localhost:3001", PROD: true }).apiUrl).toBe("http://localhost:3001");
+    expect(readConfig({ VITE_API_URL: "https://api.example.test", PROD: true }).apiUrl).toBe("https://api.example.test");
+  });
+
+  it("accepts exactly the values the build's security policy allows", () => {
+    const keys = [pk, "pk_test_abc", `pk_live_${btoa("clerk.example.test")}`, "sk_live_x", ""];
+    const apis = ["https://api.example.test", "https://API.example.test", "https://api.example.test:443", "https://user:pw@api.example.test",
+      "https://api.example.test/v1", "http://api.example.test", "http://localhost:3001", "not a url", ""];
+    for (const production of [false, true]) {
+      for (const k of keys) {
+        const host = clerkFrontendApiHost(k);
+        const csp = buildCsp({ publishableKey: k, production });
+        expect(readConfig({ VITE_CLERK_PUBLISHABLE_KEY: k, PROD: production }).clerkPublishableKey !== null, k).toBe(host !== null);
+        if (host) expect(csp).toContain(`https://${host}`);
+      }
+      for (const a of apis) {
+        const api = readConfig({ VITE_API_URL: a, PROD: production }).apiUrl;
+        const connect = buildCsp({ apiUrl: a, production }).split("; ").find((d) => d.startsWith("connect-src ")) ?? "";
+        expect(api === null ? connect === "connect-src 'self' https://*.protect.clerk.com:*" : connect.includes(` ${api}`), `${a} ${production}`).toBe(true);
+      }
+    }
   });
 });
