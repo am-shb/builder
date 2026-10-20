@@ -233,6 +233,12 @@ test("a person may have at most maxActivePerUser active sessions across every or
     "someone else in that org isn't held back");
 });
 
+test("a person's session in another org from an older api (no active_until yet) still counts against their active limit", async () => {
+  const raw = await rawDb();
+  await raw.query("CREATE session:legacy CONTENT $row", { row: { org: new RecordId("org", "org_B"), created_by: "user_1", meeting_url: MEET, status: "joining", max_usd: 1, max_minutes: 60 } }).collect();
+  await assert.rejects(createSessionUnlessActive(raw, "org_A", newSession(), lim({ maxActivePerUser: 1 })), refused("user_active"));
+});
+
 test("a person may start at most maxPerUserPerDay sessions in 24 hours across every org", async () => {
   const raw = await rawDb();
   const limits = lim({ maxPerUserPerDay: 2 });

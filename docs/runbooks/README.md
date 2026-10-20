@@ -194,6 +194,9 @@ outside meetings, or turn off auto-deploy for the engine (Settings > Auto-Deploy
   private network carry no proxy headers, so other services in the workspace can reach them. Only our own services
   run there.
 - Bots are created only through the api (`POST /v1/sessions`), which needs Clerk and the session limits set.
+  The api's start guards limit starts per org and per person; in Clerk, also limit how many organizations a person
+  can create (Organizations Settings > Organization limit, or turn off user-created organizations), turn test mode
+  off (Instance Settings) and make sign-up Invite-only (Access mode) before the site is public.
 - No staging yet, no alerts and no uptime checks.
 
 ## Environments and CI

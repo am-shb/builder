@@ -93,7 +93,7 @@ export async function createSessionUnlessActive(db: Surreal, orgId: string, s: N
       LET $refused = IF $found != NONE { NONE }
         ELSE IF count(SELECT VALUE id FROM session WHERE org = $org AND status IN $holding AND active_until > time::now()) >= $maxActive { "active" }
         ELSE IF count(SELECT VALUE id FROM session WHERE org = $org AND created_at > time::now() - 1d) >= $maxPerDay { "daily" }
-        ELSE IF count(SELECT VALUE id FROM session WHERE created_by = $user AND status IN $holding AND active_until > time::now()) >= $maxActivePerUser { "user_active" }
+        ELSE IF count(SELECT VALUE id FROM session WHERE created_by = $user AND status IN $holding AND (active_until = NONE OR active_until > time::now())) >= $maxActivePerUser { "user_active" }
         ELSE IF count(SELECT VALUE id FROM session WHERE created_by = $user AND created_at > time::now() - 1d) >= $maxPerUserPerDay { "user_daily" }
         ELSE { NONE };
       IF $found = NONE AND $refused = NONE {
