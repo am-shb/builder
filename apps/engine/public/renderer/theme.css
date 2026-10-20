@@ -2,8 +2,19 @@
    them per prototype, and the .b-app block holds the house theme (themeVars(DEFAULT_THEME_VALUES)) for pages
    that render without one. Sized for the 900x720 canvas shared at 720p through Meet: 18px body text,
    nothing visible below 14px, 1px hairlines and one faint shadow. */
+/* Inter is bundled (fonts/README.md) so text has the same widths on every machine: the bot's Chrome runs on Linux,
+   where system-ui is far wider than on macOS. display: block, not swap: the bot screenshares frames, so a frame in
+   the fallback font must never be shown. The handoff export inlines this url as a data URL (src/handoff/export.ts). */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 :root {
-  --b-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --b-font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --b-draft: #b45309;
   --b-draft-bg: #fff4de;
   --b-bg: #f6f7f9; /* behind a prototype, outside its App (comparison previews) */

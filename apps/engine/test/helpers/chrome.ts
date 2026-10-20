@@ -18,6 +18,9 @@ export type Page = {
   setCpuThrottle(rate: number): Promise<void>;
   /** Traces for `ms`, returns total duration in ms per second of wall time, keyed by trace event name. */
   trace(ms: number): Promise<Record<string, number>>;
+  /** Waits until the page's fonts have loaded, then returns the families of the loaded font faces. Text is measured
+   *  in the bundled Inter (theme.css) only after this. */
+  fonts(): Promise<string[]>;
   /** Console messages and uncaught exceptions seen so far. */
   logs: string[];
 };
@@ -125,6 +128,11 @@ export async function withChrome(t: TestCtx, fn: (page: Page) => Promise<void>, 
         await loaded;
       },
       eval: evalIn,
+      fonts: () => evalIn<string[]>(`(async () => {
+        document.body?.getBoundingClientRect(); // a layout first, so every font the page uses has been requested
+        await document.fonts.ready;
+        return [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replace(/["']/g, ""));
+      })()`),
       async waitFor(expr, timeoutMs = 10_000) {
         const end = Date.now() + timeoutMs;
         while (Date.now() < end) {

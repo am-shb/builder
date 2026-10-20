@@ -53,6 +53,7 @@ export async function withStage(t: { skip(msg?: string): void }, fn: (s: Stage) 
       const stageUrl = new URL(((await (await fetch(`${base}/api/sessions/${session.id}`)).json()) as any).session.stage_url);
       await page.goto(`${base}${stageUrl.pathname}${stageUrl.search}`);
       await page.waitFor(`document.querySelector('[data-node-id="home"]')`);
+      assert.ok((await page.fonts()).includes("Inter"), "the stage loaded the bundled Inter");
       await page.eval(`window.__motionLog = []`);
       const script = async (steps: unknown[]) => {
         const r = await fetch(`${base}/api/sessions/${session.id}/script`, { method: "POST", body: JSON.stringify({ steps }) });

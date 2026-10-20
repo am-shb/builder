@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=1280, height=720">
 <script type="importmap">{"imports":{"@renderer/":"/renderer/"}}</script>
 <link rel="stylesheet" href="/renderer/theme.css">
+<!-- The bundled font (theme.css), fetched with the page so the first frame the bot shares is already in it. -->
+<link rel="preload" href="/renderer/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <title>Builder Stage</title>
 <style>
   /* Rendered by the Recall bot at 1280x720 and screenshared into the meeting at 15 fps, on a
@@ -21,7 +23,7 @@
      panel and dock step aside and Builder sits small in the top-right corner. */
   :root { --bg:#0f1115; --panel:#171a21; --ink:#f4f6fa; --muted:#b4bccb; --accent:#8fb0ff; --live:#3ddc84;
           --agreed:#34c473; --agreed-bg:#132219; --pending:#f0a43a; --pending-bg:#231c10; --track:#3a404d;
-          --ask:#c7a6ff; --line:#2a2f3b; --font:system-ui, -apple-system, "Segoe UI", sans-serif; }
+          --ask:#c7a6ff; --line:#2a2f3b; --font:var(--b-font); }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { margin:0; width:1280px; height:720px; overflow:hidden; background:var(--panel); color:var(--ink); font:18px/1.4 var(--font); }

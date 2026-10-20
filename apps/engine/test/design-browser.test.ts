@@ -32,6 +32,10 @@ window.drawWith = (changes) => { window.nodes = renderTree(root, proto, state, c
 window.show = (screen, open = {}) => { state = { ...state, screen, open }; window.draw(); window.scrollTo(0, 0); };
 bindInteractions(root, () => proto, () => state, (s) => { state = s; window.draw(); });
 window.draw();
+// Measure in the bundled Inter (theme.css), never in a fallback still showing while it loads.
+await document.fonts.load("18px Inter");
+document.body.getBoundingClientRect();
+await document.fonts.ready;
 window.ready = true;
 </script>`;
 
@@ -44,6 +48,12 @@ async function withGalleryServer(fn: (url: string) => Promise<void>) {
       try {
         const body = readFileSync(new URL(`../public/renderer/${m[1]}`, import.meta.url));
         return void res.writeHead(200, { "Content-Type": m[2] === "css" ? "text/css" : "text/javascript" }).end(body);
+      } catch { /* fall through */ }
+    }
+    const font = req.url?.match(/^\/renderer\/fonts\/([\w-]+\.woff2)$/);
+    if (font) {
+      try {
+        return void res.writeHead(200, { "Content-Type": "font/woff2" }).end(readFileSync(new URL(`../public/renderer/fonts/${font[1]}`, import.meta.url)));
       } catch { /* fall through */ }
     }
     const img = req.url?.match(/^\/renderer\/images\/([a-z]+-\d+\.webp)$/);
@@ -97,6 +107,16 @@ test("gallery: every catalog type renders without overflow, small text or errors
     await withGalleryServer(async (url) => {
       await page.goto(url);
       await page.waitFor("window.ready === true");
+
+      // The prototype is set in the bundled Inter, loaded, so text measures the same here as in the bot's Linux Chrome.
+      const font = await page.eval<{ family: string; check: boolean; faces: string[] }>(`(() => ({
+        family: getComputedStyle(document.querySelector(".b-app")).fontFamily,
+        check: document.fonts.check("500 18px Inter"),
+        faces: [...document.fonts].map((f) => f.family.replace(/["']/g, "") + " " + f.status),
+      }))()`);
+      assert.match(font.family, /^"?Inter"?,/, "the App's font is Inter first");
+      assert.deepEqual(font.faces, ["Inter loaded"], "the bundled face is the only one, and it loaded");
+      assert.equal(font.check, true, "18px Inter renders without a fallback");
 
       // every catalog type renders
       const types = await page.eval<string[]>(`[...new Set([...document.querySelectorAll("[data-type]")].map((e) => e.dataset.type))]`);

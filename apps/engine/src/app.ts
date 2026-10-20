@@ -157,7 +157,7 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     if (s.bot_status === "in_call_recording") await conversation?.resume(s.id);
     buildLoop?.resume(s.id);
   }
-  const RENDERER_CONTENT_TYPES: Record<string, string> = { js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", webp: "image/webp" };
+  const RENDERER_CONTENT_TYPES: Record<string, string> = { js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", webp: "image/webp", woff2: "font/woff2" };
   const rendererDir = new URL("../public/renderer/", import.meta.url);
   const stageUrl = async (s: Session) =>
     `${config.publicBaseUrl}/stage/${s.id}?token=${encodeURIComponent(s.stage_token ?? await store.ensureStageToken(s.id))}`;
@@ -550,8 +550,9 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
     }
 
     // Static renderer assets: public, no secrets.
-    // Built-in stock photos: /renderer/images/<name>.webp, a single path segment (no traversal).
-    const asset = path.match(/^\/renderer\/((?:components\/)?[A-Za-z0-9._-]+\.(js|css)|images\/[A-Za-z0-9_-]+\.(webp))$/);
+    // Built-in stock photos: /renderer/images/<name>.webp; the bundled font: /renderer/fonts/<name>.woff2. Each is a
+    // single path segment with no dots before the extension (no traversal).
+    const asset = path.match(/^\/renderer\/((?:components\/)?[A-Za-z0-9._-]+\.(js|css)|images\/[A-Za-z0-9_-]+\.(webp)|fonts\/[A-Za-z0-9_-]+\.(woff2))$/);
     if (req.method === "GET" && asset) {
       let body: Buffer;
       try {
@@ -559,7 +560,8 @@ export async function createApp(deps: { config: Config; recall: RecallClient; st
       } catch {
         return json(res, 404, { error: "not found" });
       }
-      res.writeHead(200, { "Content-Type": RENDERER_CONTENT_TYPES[asset[2] ?? asset[3]], "Cache-Control": asset[3] ? "public, max-age=3600" : "no-cache" });
+      const media = asset[3] ?? asset[4];
+      res.writeHead(200, { "Content-Type": RENDERER_CONTENT_TYPES[asset[2] ?? media], "Cache-Control": media ? "public, max-age=3600" : "no-cache" });
       return res.end(body);
     }
 
