@@ -1,0 +1,302 @@
+/* The design system's tokens and base styles (ADR 0013, "Boardroom"). The only file with raw colors: every component
+   uses these tokens through Tailwind (bg-surface, text-ink-2, ...). Light and dark follow the system; `data-theme` on
+   <html> forces one (the dev-only /_design page uses it). */
+
+/* Clerk's styles go in their own layer, before Tailwind's utilities, so our classes can override them. */
+@layer theme, base, clerk, components, utilities;
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/schibsted-grotesk";
+
+:root {
+  --bg: #f4f6f5;
+  --surface: #ffffff;
+  --sunk: #e9eeec;
+  --plate: #e6ecea;
+  --hair: #dbe2df;
+  --ink: #1a2220;
+  --ink-2: #56605d;
+  --ink-3: #616b68;
+  --input: #7d8784;
+  --primary: #0d5c4c;
+  --primary-hover: #0a4b3e;
+  --on-primary: #ffffff;
+  --live: #19a67a;
+  --dots: rgb(13 92 76 / 0.1);
+
+  --s-live-bg: #dcf3ea;
+  --s-live-ink: #0a5541;
+  --s-join-bg: #e4ecea;
+  --s-join-ink: #2c4a43;
+  --s-warn-bg: #fbecc9;
+  --s-warn-ink: #6e4300;
+  --s-fail-bg: #fbe3df;
+  --s-fail-ink: #9d2117;
+  --s-end-bg: #e8ebea;
+  --s-end-ink: #4f5956;
+
+  --accent-tint: rgb(13 92 76 / 0.1);
+  --accent-tint-hover: rgb(13 92 76 / 0.15);
+  --accent-ink: #0a5541;
+  --info-bg: #e4ecea;
+  --info-ink: #2c4a43;
+  --outline: rgb(125 135 132 / 0.55);
+  --warn-bg: #fbefd5;
+  --warn-ink: #6e4300;
+  --warn-chip: #fbe8bf;
+  --danger: #b42318;
+  --danger-bg: #fde8e5;
+  --on-danger: #ffffff;
+  --success: #19a67a;
+  --scrim: rgb(14 32 27 / 0.42);
+  --toast-bg: #1a2220;
+  --toast-ink: #f4f6f5;
+  --highlight: rgb(255 255 255 / 0.18);
+  --edge: rgb(255 255 255 / 0);
+  --lift: 0 1px 2px rgb(26 34 32 / 0.06), 0 24px 48px -24px rgb(13 92 76 / 0.28);
+  --glow: 0 6px 16px -8px rgb(13 92 76 / 0.7);
+  color-scheme: light;
+}
+
+/* Dark values are listed twice: once for the system setting, once for a forced `data-theme="dark"`. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1513;
+    --surface: #1b2421;
+    --sunk: #1f2a26;
+    --plate: #18211e;
+    --hair: #26302c;
+    --ink: #eef3f1;
+    --ink-2: #a3aeaa;
+    --ink-3: #8f9b97;
+    --input: #6f7b77;
+    --primary: #4fcfa6;
+    --primary-hover: #6edcb8;
+    --on-primary: #05261c;
+    --live: #4fcfa6;
+    --dots: rgb(95 224 181 / 0.07);
+    --s-live-bg: #133a2f;
+    --s-live-ink: #8bf0cd;
+    --s-join-bg: #1e2a27;
+    --s-join-ink: #c5d6d0;
+    --s-warn-bg: #352810;
+    --s-warn-ink: #f6c46d;
+    --s-fail-bg: #3a1a17;
+    --s-fail-ink: #ffa094;
+    --s-end-bg: #1f2724;
+    --s-end-ink: #a3aeaa;
+    --accent-tint: rgb(79 207 166 / 0.12);
+    --accent-tint-hover: rgb(79 207 166 / 0.18);
+    --accent-ink: #8bf0cd;
+    --info-bg: #1e2a27;
+    --info-ink: #c5d6d0;
+    --outline: rgb(102 114 110 / 0.75);
+    --warn-bg: #2b2213;
+    --warn-ink: #f3c06a;
+    --warn-chip: #3d2f12;
+    --danger: #ff8c7f;
+    --danger-bg: #3a1a17;
+    --on-danger: #1b2421;
+    --success: #4fcfa6;
+    --scrim: rgb(2 10 8 / 0.62);
+    --toast-bg: #26312d;
+    --toast-ink: #eef3f1;
+    --highlight: rgb(255 255 255 / 0.12);
+    --edge: rgb(255 255 255 / 0.07);
+    --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
+    --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1513;
+  --surface: #1b2421;
+  --sunk: #1f2a26;
+  --plate: #18211e;
+  --hair: #26302c;
+  --ink: #eef3f1;
+  --ink-2: #a3aeaa;
+  --ink-3: #8f9b97;
+  --input: #6f7b77;
+  --primary: #4fcfa6;
+  --primary-hover: #6edcb8;
+  --on-primary: #05261c;
+  --live: #4fcfa6;
+  --dots: rgb(95 224 181 / 0.07);
+  --s-live-bg: #133a2f;
+  --s-live-ink: #8bf0cd;
+  --s-join-bg: #1e2a27;
+  --s-join-ink: #c5d6d0;
+  --s-warn-bg: #352810;
+  --s-warn-ink: #f6c46d;
+  --s-fail-bg: #3a1a17;
+  --s-fail-ink: #ffa094;
+  --s-end-bg: #1f2724;
+  --s-end-ink: #a3aeaa;
+  --accent-tint: rgb(79 207 166 / 0.12);
+  --accent-tint-hover: rgb(79 207 166 / 0.18);
+  --accent-ink: #8bf0cd;
+  --info-bg: #1e2a27;
+  --info-ink: #c5d6d0;
+  --outline: rgb(102 114 110 / 0.75);
+  --warn-bg: #2b2213;
+  --warn-ink: #f3c06a;
+  --warn-chip: #3d2f12;
+  --danger: #ff8c7f;
+  --danger-bg: #3a1a17;
+  --on-danger: #1b2421;
+  --success: #4fcfa6;
+  --scrim: rgb(2 10 8 / 0.62);
+  --toast-bg: #26312d;
+  --toast-ink: #eef3f1;
+  --highlight: rgb(255 255 255 / 0.12);
+  --edge: rgb(255 255 255 / 0.07);
+  --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
+  --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+  color-scheme: dark;
+}
+
+/* Tailwind reads the tokens, so `bg-surface`, `text-ink-2`, `shadow-lift`, `rounded-plate` and so on exist. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-plate: var(--plate);
+  --color-hair: var(--hair);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-on-primary: var(--on-primary);
+  --color-live: var(--live);
+  --color-s-live-bg: var(--s-live-bg);
+  --color-s-live-ink: var(--s-live-ink);
+  --color-s-join-bg: var(--s-join-bg);
+  --color-s-join-ink: var(--s-join-ink);
+  --color-s-warn-bg: var(--s-warn-bg);
+  --color-s-warn-ink: var(--s-warn-ink);
+  --color-s-fail-bg: var(--s-fail-bg);
+  --color-s-fail-ink: var(--s-fail-ink);
+  --color-s-end-bg: var(--s-end-bg);
+  --color-s-end-ink: var(--s-end-ink);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-hover: var(--accent-tint-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-info-bg: var(--info-bg);
+  --color-info-ink: var(--info-ink);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-ink: var(--warn-ink);
+  --color-warn-chip: var(--warn-chip);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-on-danger: var(--on-danger);
+  --color-scrim: var(--scrim);
+  --color-toast-bg: var(--toast-bg);
+  --color-toast-ink: var(--toast-ink);
+
+  --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
+
+  --radius-field: 14px;
+  --radius-plate: 18px;
+  --radius-panel: 24px;
+  --radius-sheet: 28px;
+
+  /* The one elevation level (ADR 0013): the start panel, the empty state, page states, sheets and dialogs. */
+  --shadow-elevated: inset 0 1px 0 var(--edge), var(--lift);
+  --shadow-glow: inset 0 1px 0 var(--highlight), var(--glow);
+  --shadow-outline: inset 0 0 0 1.5px var(--outline);
+
+  /* The type scale. Small text keeps the body's line height. */
+  --text-sm--line-height: 1.55;
+  --text-label: 15px;
+  --text-label--line-height: 1.4;
+  --text-heading: 22px;
+  --text-heading--line-height: 1.2;
+  --text-heading-lg: 24px;
+  --text-heading-lg--line-height: 1.2;
+  --text-code: 28px;
+  --text-code--line-height: 1.1;
+  --text-code-lg: 34px;
+  --text-code-lg--line-height: 1.1;
+  --text-title: 34px;
+  --text-title--line-height: 1.1;
+  --text-title-lg: 46px;
+  --text-title-lg--line-height: 1.1;
+
+  --breakpoint-md: 768px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 16px/1.55 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+  /* A heading or the page's main area, focused by the app on moving to a page (RouteFocus): not a control, so no ring. */
+  h1[tabindex="-1"]:focus, main[tabindex="-1"]:focus {
+    outline: none;
+  }
+  /* The meeting codes and other figures line up. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Signature texture: a faint dot grid in the top-left corner that fades out. */
+@utility dot-texture {
+  background-image: radial-gradient(var(--dots) 1.2px, transparent 1.4px);
+  background-size: 20px 20px;
+  mask-image: radial-gradient(110% 90% at 0 0, #000, transparent 70%);
+}
+
+/* Motion that answers a state: the live dot breathes, the joining ring turns. Off under reduced motion. */
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--live) 0%, transparent);
+  }
+}
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@utility animate-breathe {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+}
+@utility animate-turn {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: turn 3s linear infinite;
+  }
+}
+@utility animate-spin-soft {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: turn 0.9s linear infinite;
+  }
+}
+
+/* Clerk's generated default avatars (no uploaded logo or photo) are purple and blue. Their image URL carries
+   {"type":"default"} in base64 (an undocumented detail: if Clerk changes it, the default colors simply come back), so
+   only those are made neutral and take the accent tint of the box behind them. Uploaded images are left alone. */
+@layer components {
+  .cl-avatarImage[src*="eyJ0eXBlIjoiZGVmYXVsdCI"] {
+    filter: grayscale(1) contrast(0.9);
+    mix-blend-mode: luminosity;
+    opacity: 0.8;
+  }
+}

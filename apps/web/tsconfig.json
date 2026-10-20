@@ -1,0 +1,13 @@
+{
+  // The root base, changed only where a browser bundle needs it (ADR 0012). tsc type-checks; Vite transforms.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["esnext", "dom"],
+    // node stays: vite.config.ts, build/ and the source-scan tests use node:fs and node:path.
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "build", "scripts", "test", "vite.config.ts"]
+}

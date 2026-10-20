@@ -9,6 +9,7 @@ import type { Log } from "./router.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { meRoutes } from "./routes/me.ts";
 import { sessionCreateRoutes, sessionReadRoutes } from "./routes/sessions.ts";
+import { engineEventRoutes } from "./routes/engine-events.ts";
 import { createClerkAuth } from "./auth/clerk.ts";
 import type { Authenticator } from "./auth/clerk.ts";
 import { createEngineClient } from "./engine/client.ts";
@@ -20,7 +21,8 @@ import { errorCode } from "./error-code.ts";
 // Everything the server needs is passed in, so tests can use fakes. `auth` defaults to Clerk with the config's key,
 // and `engine` to the engine client when ENGINE_INTERNAL_URL and ENGINE_INTERNAL_TOKEN are set. Without `db` or
 // `engine`, the routes that need them answer 503.
-export type Deps = { config: Config; log?: Log; auth?: Authenticator; db?: Db | null; engine?: EngineClient | null };
+// `now` is the start rate limit's clock, for tests.
+export type Deps = { config: Config; log?: Log; auth?: Authenticator; db?: Db | null; engine?: EngineClient | null; now?: () => number };
 
 export const jsonLog: Log = (msg, fields) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }));
 
@@ -33,8 +35,10 @@ export function createServer(deps: Deps): Server {
     ...healthRoutes,
     ...meRoutes(auth),
     ...sessionReadRoutes(auth, db),
-    ...sessionCreateRoutes({ auth, db, engine, limits: deps.config.defaultLimits, log }),
-  ], log);
+    ...sessionCreateRoutes({ auth, db, engine, limits: deps.config.defaultLimits, guards: deps.config.startGuards, log, ...(deps.now ? { now: deps.now } : {}) }),
+    // The engine's status events (A2), with the same token the api sends the engine. Off without it.
+    ...engineEventRoutes({ db, token: deps.config.engine?.token ?? null, log }),
+  ], log, { allowedOrigins: deps.config.clerk?.authorizedParties ?? [] });
   return createHttpServer((req, res) => void handle(req, res));
 }
 
@@ -59,6 +63,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       clerk: config.clerk !== null,
       engine: config.engine !== null,
       default_limits: config.defaultLimits !== null,
+      start_guards: config.startGuards,
       db: config.surreal.url ? "server" : "in-process",
     });
   });

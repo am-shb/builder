@@ -26,7 +26,8 @@ browser (Clerk, active org)
 ```
 
 **Not in this slice:** live updates (the api doesn't receive engine events yet), cost so far, hand-off links and
-library, billing, calendar, staff pages, invitations beyond what Clerk's components already offer, a design system.
+library, billing, calendar, staff pages, invitations beyond what Clerk's components already offer, a full design
+system (this slice has the foundation in [Visual design](#visual-design), not a component library for every future page).
 
 ## What changed on 2026-10-19
 Read against `main` at `e9b01b5`. `apps/web`, `contracts/` and the api's routes are unchanged since this plan was
@@ -148,6 +149,12 @@ service to this choice). Step W0 records it as ADR 0012.
   and `zod` 4.6.7 (the api's version; the web app parses replies with it).
   `@clerk/react` accepts React `~19.3.0-0`. None has a TypeScript peer, so no `overrides` entry is needed (unlike
   `surrealdb`). Check again at install: if a peer conflict shows up, use a scoped override, as the root does.
+- **Design packages** ([ADR 0013](../adr/0013-web-visual-design.md); checked on npm on 2026-10-19 and 2026-10-20,
+  every peer range accepts React 19.3 and Vite 8), also installed in W1 so the lockfile changes once:
+  `radix-ui` 1.8.1, `class-variance-authority` 0.7.1, `clsx` 2.1.1, `tailwind-merge` 3.7.0, `lucide-react` 1.56.0
+  (not 1.59.0, which is two days old), `sonner` 2.0.8, `@fontsource-variable/schibsted-grotesk` 5.3.0; dev only:
+  `tailwindcss` and `@tailwindcss/vite` 4.3.3, `tw-animate-css` 1.4.0, `axe-core` 4.14.0 and `playwright-core` 1.64.1.
+  Not added: the `shadcn` CLI package, `vaul`, an animation library and `@clerk/themes` (reasons in ADR 0013).
 - **TypeScript:** `apps/web/tsconfig.json` extends the root base and changes only what a browser bundle needs:
   `module: "esnext"`, `moduleResolution: "bundler"`, `jsx: "react-jsx"`, `lib: ["esnext", "dom"]` (add
   `"dom.iterable"` only if TypeScript 7 still needs it), and `types: ["vite/client", "node"]`. Keeping `node` matters:
@@ -201,8 +208,9 @@ pages or reloading the page. W0 also checks whether `@clerk/react-router` fits d
   listed under [Changes outside apps/web](#changes-outside-appsweb) (D-ID).
 - **Switching org.** `<OrganizationSwitcher>` changes the active org, so the next token carries the new org. The web
   app never sends an org id. Every query is keyed by `orgId` from `useAuth()`: on a change, in-flight requests are
-  aborted, cached lists are dropped, and the list reloads. On `/sessions/:id`, a switch goes back to `/`, because the
-  session belongs to the old org (and would 404 under the new one).
+  aborted, cached lists are dropped, and the list reloads. On `/sessions/:id`, a switch while a session is on screen
+  goes back to `/`, because the session belongs to the old org. On "No such session" (or while it's still loading) the
+  page stays and reads the session again for the new org, as the 404's message suggests.
 - **A `POST /v1/sessions` is never aborted,** by an org switch or anything else: aborting it would turn a known
   outcome into an unknown one. Its result is still shown after a switch, naming the org it was started in. The form
   is disabled while a start is in flight, and the switcher is the only way to change org, so a start can't silently
@@ -212,7 +220,7 @@ pages or reloading the page. W0 also checks whether `@clerk/react-router` fits d
 
 **Session list (`/`):** newest first, up to 50 (no paging, as in the api). Each row: the meeting link as plain text,
 the status label, when it was started (local time, relative), and a link to its detail page. **No stage link in the
-list.** States: loading, empty (points at the form), error (by code, below). A Refresh button. No polling (WD6).
+list.** States: loading, empty (points at the form), error (by code, below). A Refresh button, and a quiet refresh every 10 seconds while a session may still change (WD6).
 
 **Start form (on `/`):**
 - One field (the meeting link) and a Start button.
@@ -224,12 +232,24 @@ list.** States: loading, empty (points at the form), error (by code, below). A R
 - **Guard after an unknown outcome (WD8):** if the list has a `start_unknown` session for the same normalized link
   from the last 30 minutes, Start shows a confirmation first: "An earlier start for this link didn't confirm.
   Check the meeting for a {BOT} bot before starting another." with "Start anyway" and "Cancel".
+- **Guard for another copy of the link:** the api and engine match exact links, so `…/abc-defg-hij?authuser=0` would
+  send a second bot to a meeting that already has one. If the list has a `starting`, `joining` or `in_meeting` session
+  for the same normalized meeting under a different link, still within its time limit plus 30 minutes, Start asks
+  first: "This meeting already has a {BOT} session ({status}), started from another copy of the link. Starting again
+  sends a second {BOT} bot." The exact same link doesn't ask: the api reuses that session. The api-side fix is the
+  meeting-key ADR draft (0014, in review).
 - Outcomes are in [Errors](#errors-every-api-code).
 
 **Session detail (`/sessions/:id`):** from `GET /v1/sessions/:id`. Shows the status label and a one-line
 explanation, the meeting link as text, created and updated times, the limits (`maxUsd`, `maxMinutes`), the
 `errorCode` if there is one (as a code, for support), the stage link (below), and a Refresh button. 404 shows "No
-such session in this organization." with a link back.
+such session in this organization" with "Back to sessions" (the same words as the back link above the title).
+A Refresh that works says "Updated." to screen readers; one that fails says "Couldn't refresh".
+
+**Moving between pages** starts the new page at its top, with focus on its `h1` (and on the loaded page's `h1` once
+it has loaded, until the person does anything), as a full page load would. The first load and its redirects are
+left to the browser, and so are the steps inside Clerk's sign-in and sign-up, which focus their own fields. A page that throws while rendering
+shows "Something went wrong" with Reload instead of a blank page.
 
 **Status labels:**
 
@@ -240,7 +260,7 @@ such session in this organization." with a link back.
 | `in_meeting` | In the meeting | {BOT} is in the meeting. |
 | `ended` | Ended | |
 | `failed` | Failed | {BOT} left the meeting because of an error. |
-| `start_failed` | Didn't start | The meeting service refused. Check the link and try again. |
+| `start_failed` | Didn't start | From `errorCode`, worded as the start's reply: `recall_rejected` "{BOT} couldn't join this meeting. Check the link and that the meeting is open, then try again."; `meeting_in_use` "{BOT} already has a session in this meeting. Check the meeting. No second bot was sent."; any other "Starting meetings isn't working right now ({code})."; no code: "The meeting service refused. Check the link and try again." |
 | `start_unknown` | Check the meeting | We couldn't confirm whether {BOT} joined. Check the meeting before starting again. |
 | anything else | Unknown | Shown without crashing, so a new status from the api doesn't break the page. |
 
@@ -250,9 +270,8 @@ The api returns `stageUrl` to members of the owning org (api plan D8). It holds 
 - Shown **only on the detail page**, behind a "Show stage link" button, never in the list or in any URL of the web app.
 - Next to it: "This link controls the stage shown in the meeting. Anyone with it can change what's on screen and
   interrupt {BOT}'s voice. Don't share it, and don't open it while the meeting is running unless you mean to."
-- Opening it puts the token in that browser's history; the warning says so. Hiding it in the list is about not
-  showing it by accident: `GET /v1/sessions` still returns it for every row, so dropping it from the list response
-  is an api change for later (A3).
+- Opening it puts the token in that browser's history; the warning says so. `GET /v1/sessions` no longer returns it
+  (the api's start-guards change); only `GET /v1/sessions/:id` does.
 - Rendered only if it parses as a URL with protocol `https:` (or `http:` when `import.meta.env.DEV`, for the local
   engine). Anything else isn't shown, so a bad value can never become a `javascript:` link.
 - A "Copy" button, and an "Open" link with `target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"`.
@@ -312,6 +331,11 @@ The same mapping is used on every screen. "Network" codes are made by the web ap
 | 503 | `db_unavailable` | sessions routes | "Sessions aren't available right now." | Refresh |
 | 503 | `engine_unavailable` | `POST` | "Starting meetings isn't available right now." Nothing was started | none |
 | 503 | `limits_unavailable` | `POST` | "Starting meetings isn't set up on this server yet." Nothing was started | none |
+| 429 | `rate_limited` | `POST` | "Too many starts in a short time. Wait a minute, then try again. Nothing was started." | none |
+| 429 | `active_limit_reached` | `POST` | "This organization has as many sessions running as it's allowed. A session counts until its time limit has passed. Try again later. Nothing was started." | none |
+| 429 | `daily_limit_reached` | `POST` | "This organization has started as many sessions as it's allowed in 24 hours. Try again later. Nothing was started." | none |
+| 429 | `user_active_limit_reached` | `POST` | "You have as many sessions running as you're allowed. A session counts until its time limit has passed. Try again later. Nothing was started." | none |
+| 429 | `user_daily_limit_reached` | `POST` | "You've started as many sessions as you're allowed in 24 hours. Try again later. Nothing was started." | none |
 | 504 | `engine_outcome_unknown` | `POST` | **Warning:** "We couldn't confirm whether {BOT} joined. Check the meeting for a {BOT} bot before trying again." | link to the session; **no retry button**; list reloads; the WD8 guard applies |
 | (none) | `network_error` | `POST` | **The 504 warning:** "We lost the connection while starting. Check the session list and the meeting before trying again." | list reloads; no retry button |
 | (none) | `network_error` | `GET` | "Can't reach {PRODUCT}. Check your connection." | Refresh |
@@ -377,6 +401,83 @@ outcome (201 aside) shows the 504 warning**, because a bot may exist.
   added later, it must strip URLs and bodies first.
 - **Tenancy** is enforced by the api from the token. The web app never sends an org id, and the tests prove it.
 
+## Visual design
+Settled in [ADR 0013](../adr/0013-web-visual-design.md): the **Boardroom** direction, chosen from three previewed
+directions and refined after two separate reviews. UI and design are a judging criterion and the app will be shown to
+investors, so the look is part of "done" for every screen step, not polish for later. In short:
+
+- **Character:** calm, premium, minimal. The boldness is in one place: each session is identified by its meeting
+  code, set large (`kfp-qzwd-nre`). No borders on surfaces, no grey card stacks, no default shadcn/ui styling.
+- **Stack:** Tailwind CSS 4 for layout and tokens, Radix primitives for behavior and accessibility only, our own
+  components in `src/components/`, `lucide-react` icons, `sonner` toasts, Schibsted Grotesk (one family, self-hosted).
+- **Tokens:** semantic CSS variables in `src/styles/globals.css`, light and dark, following the system setting. All
+  text is AA or better (measured; the full table, including the status pills, is in ADR 0013):
+
+  | | Light | Dark |
+  |---|---|---|
+  | page / surface | `#f4f6f5` / `#ffffff` | `#0f1513` / `#1b2421` |
+  | text / secondary / tertiary | `#1a2220` / `#56605d` / `#616b68` | `#eef3f1` / `#a3aeaa` / `#8f9b97` |
+  | primary (evergreen) | `#0d5c4c` | `#4fcfa6` |
+  | live dot | `#19a67a` | `#4fcfa6` |
+
+- **Brand:** `PRODUCT_NAME` beside the mark: an evergreen tile with a dashed frame behind a solid one, the product's own
+  "still being decided, then agreed" rule. The favicon is the mark. `BOT_NAME` in every line that names the bot. Both
+  names from `src/brand.ts`.
+- **Signature details:** the mark; a dashed underline under the code of sessions still on their way; a faint dot grid
+  in the top-left corner that fades out.
+- **Sessions list:** one tappable row per session (the whole row is the link), inset hairlines, a soft plate on hover
+  and press, a chevron. The code first and largest, then the status pill, then platform and time. Ended and failed
+  codes fade. On phones the pill and "Google Meet, 12 min ago" share a line; on desktop the pill aligns to the right
+  edge, the list is at most 720px wide, and "Recent" shares a baseline with the page title.
+- **Status pills:** 30px, 14px semibold, a tint and a dot per status: In the meeting (mint, a breathing dot), Starting
+  and Joining (a dashed, slowly turning ring), Check the meeting (amber), Didn't start (red tint), Failed (solid red,
+  a diamond), Ended (quiet grey), Unknown (grey, a "?"). Never color alone.
+- **Navigation:** the slice has one top-level page (Sessions), so no bottom tab bar yet: a one- or two-tab bar would
+  look empty and add a tap for nothing. Instead:
+
+  | | Phone (below 768px) | Desktop (768px and up) |
+  |---|---|---|
+  | Top bar | the mark, org switcher, account button (wordmark hidden under 400px) | the same, with the wordmark |
+  | New session | full-width pill in a sticky bottom bar (thumb reach, above the safe area), opens a bottom sheet | 768-1023px: the same bar, opening a centered dialog; 1024px and up: the start panel, sticky in the left column |
+  | Session detail | a pushed screen with a back button | a page with a back link |
+  | Confirmations | bottom sheet | centered dialog |
+
+  When the library, billing and settings pages arrive (three to five top-level pages), phones get a bottom tab bar
+  and desktop a sidebar.
+- **Each screen's states:** skeletons shaped like the rows (after 150 ms); busy buttons with a spinner; the empty state
+  (a small dashed-to-solid illustration, "Start your first session", the three real steps, and on phones one button);
+  error callouts with the error table's text and action; centered page states (not configured, no such session);
+  toasts only for non-critical confirmations. The unknown-outcome warning is always a persistent amber callout.
+- **Motion:** 150–250 ms, ease-out: sheets slide up, dialogs fade and scale, rows and buttons press, the live dot
+  breathes, the joining ring turns. Nothing moves under reduced motion.
+- **Responsive:** 360px phones to large desktops, no sideways scrolling, content at most 1180px wide, gutters 20 and
+  40px. Touch targets 44px or more (rows 64px or more), inputs at 16px (no iOS zoom), safe-area insets, `theme-color`.
+- **Accessibility (WCAG 2.2 AA):** contrast as measured, a visible focus ring everywhere, labels with linked hints and
+  errors, landmarks and headings in order, start results in `role="status"`, the warning in `role="alert"`, Radix
+  dialogs and sheets (focus trapped and restored, Escape closes), nothing that depends on hover.
+- **Clerk** is themed through `appearance.variables` pointing at the same CSS variables, so sign-in, sign-up, the org
+  switcher and the user menu match in light and dark.
+- **The previews** the direction was chosen from are outside the repo; `/_design` (W1b) becomes the reference.
+
+### How the look is checked
+- **`/_design`** (dev server only, not in the production build): every component and state, light and dark
+  (`?theme=light|dark`), with a reduced-motion switch.
+- **Screenshots** by `apps/web/scripts/screenshots.ts` (`npm run screenshots -w @builder/web`): `playwright-core`
+  drives the installed Chrome against the local dev server only, at 360×780, 390×844, 768×1024, 1280×800 and
+  1536×960, light and dark, full page, into `apps/web/screenshots/` (git-ignored). It also runs `axe-core` in the page,
+  contrast included, and fails on any violation and on any page wider than the viewport. It never runs in
+  `npm test` or CI. `/_design` loads no Clerk script and calls nothing. Screens from W2 on are captured against the
+  local setup (engine in local mode, so no bot and no model spend) and the free Clerk development instance.
+- **While building:** each screen and state is opened in a real browser at those widths, in both modes, and fixed
+  until it looks right.
+- **Approval gate:** after W1b, the `/_design` screenshots (phone and desktop, light and dark) are shown for approval
+  before W2 starts. Changes asked for there are made in W1b.
+- **Review per screen step (W2–W6):** a separate review agent, which didn't build the step, judges that step's
+  screenshots for polish, consistency with `/_design` and responsiveness. Its findings are fixed, or listed with a
+  reason, before the step is reported done.
+- **In the tests:** `axe-core` on each rendered screen and state in jsdom (names, roles, structure; jsdom can't
+  compute contrast), and a guard that fails on a raw color outside `globals.css` and the favicon.
+
 ## Local development
 Three terminals, all on Node 24 (`.nvmrc`). This setup sends **no bot and spends nothing**: the engine runs in local
 mode, which uses a stand-in for Recall, and with no model key set.
@@ -435,7 +536,8 @@ mode, which uses a stand-in for Recall, and with no model key set.
     the link has `rel="noopener noreferrer"`.
   - A reply that doesn't match the schema shows an error instead of crashing; a new status or extra field doesn't.
   - Guards: no `VITE_*` name other than the two; no `dangerouslySetInnerHTML`, `innerHTML`, `localStorage` or
-    `console.` in `src/`.
+    `console.` in `src/`; no raw colors outside `globals.css` and the favicon.
+  - `axe-core` finds no violations on each screen and state (see [How the look is checked](#how-the-look-is-checked)).
 - **Not in this slice:** browser end-to-end tests (Clerk's testing helpers need a real instance and its secret key).
   Instead, the [manual check](#manual-check-before-the-demo).
 
@@ -474,13 +576,15 @@ service, and it comes right after W1 (a placeholder page that calls nothing).
 - **`autoDeployTrigger: checksPass`** and `branch: main`, as for the other services.
 - **Routes:** one `rewrite`, source `/*`, destination `/index.html`. Render doesn't apply a rewrite to a path where a
   file exists, so `/assets/*` still load.
-- **Headers** for `/*`, all URL-free: the `frame-ancestors` CSP and the other headers from [Security](#security). The
+- **Headers** for `/*`, all URL-free: the `frame-ancestors` CSP and the other headers from [Security](#security), plus
+  `Cross-Origin-Opener-Policy: same-origin-allow-popups` (no other site's window can script the app; the stage still
+  opens in a new tab). The
   origin-bearing CSP is in the built `index.html` (WD11). Render keeps header and route rules made in the dashboard
   that aren't in the Blueprint, so set them only in `render.yaml`.
 - **Env:** `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL` (`{API_ORIGIN}`, from `builder-api`'s page), both
-  `sync: false`. Neither is secret, but `sync: false` keeps origins out of the repo. Render asks for them only when it
-  first sees the new service in the Blueprint; later changes are made in the dashboard. They're read at build time,
-  so changing either needs a new deploy of the site.
+  `sync: false`. Neither is secret, but `sync: false` keeps origins out of the repo. Render asks for `sync: false`
+  values only when a Blueprint is first created, so on this existing Blueprint they're set by hand on `builder-web`'s
+  page (runbook, "The web app"). They're read at build time, so changing either needs a new deploy of the site.
 - **Not from `fromService`:** Render's `fromService` gives a service's private `host`, `port` or `hostport`, not its
   public URL, so it can't fill `VITE_API_URL`.
 - **The api's settings** (dashboard, on `builder-api`, since both are `sync: false`): add `{WEB_ORIGIN}` to
@@ -508,7 +612,8 @@ to 2 hours, M = about half a day, L = about a day.
 | # | Branch | What | Size | Safe alone because |
 |---|---|---|---|---|
 | W0 | `web/adr-stack` | ADR 0012: Vite + React static app, React Router, the Clerk wiring and org flow, Bearer tokens to the api, no retries, the error mapping rule, stage-link handling, Render static site with the split CSP, names and origins from configuration. Settles WD1, WD2, WD5–WD11 for the web app | S | docs only |
-| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
+| W1 | `web/scaffold` | Vite + React + TS in `apps/web`: `index.html`, `src/main.tsx`, `src/App.tsx`, `vite.config.ts`, `tsconfig.json`, `.env.example`, `.gitignore`, scripts `dev`, `build`, `test`, `typecheck`, `check`; `src/brand.ts`; the build-time CSP plugin and its test; network-blocking test setup; the source-scan guard tests (including no URLs); README update. Installs every package in the version list, Clerk and the design packages included, so later steps don't touch the lockfile. **Lockfile change: redeploys the engine and the api, so merge outside meetings** | M | renders a placeholder; calls nothing |
+| W1b | `web/design-foundation` | ADR 0013 (Boardroom) in code: Tailwind via `@tailwindcss/vite`, `src/styles/globals.css` (tokens, light and dark, base styles, focus ring, the dot texture, Clerk's layer), Schibsted Grotesk, `src/lib/cn.ts`, the components in `src/components/` (button, input and field, status pill, session row, skeleton, callout, dialog, bottom sheet, responsive modal, toaster, empty state, page state, the mark), the app shell (top bar, sticky action bar, content container) with the mark and wordmark, `src/clerk/appearance.ts`, `index.html` (`viewport-fit`, `theme-color`, favicon), `public/favicon.svg`, the dev-only `/_design` page, `scripts/screenshots.ts` and `npm run screenshots`, `screenshots/` in `.gitignore`, axe and raw-color tests. **Ends at the approval gate** | M | only `apps/web/`; no lockfile change; the placeholder home uses the shell and calls nothing; `/_design` isn't in the production build |
 | I1 | `infra/render-web` | `builder-web` static site in `render.yaml`, the runbook's production section; then, in the dashboard, its two variables and `{WEB_ORIGIN}` in the api's `CLERK_AUTHORIZED_PARTIES`. Placeholder checked live: loads, routes rewrite, headers present, no CSP errors | S | the site calls nothing yet; the Blueprint change adds a service and touches no other |
 | W2 | `web/clerk-auth` | `ClerkProvider` with the wiring above, the routes and guard, sign-in/up, `/choose-organization` with its fallback, header with `<OrganizationSwitcher hidePersonal />` and `<UserButton />`, "not configured" screen, `test/helpers/clerk.tsx`. Org flow checked by hand on the dev instance | M–L | no api calls yet |
 | W3 | `web/api-client` | `src/api/client.ts`, `src/api/schemas.ts` (tolerant), `ApiError`, the error mapping, `test/helpers/fake-api.ts`; `GET /v1/me` shows the role in the header | M | `/v1/me` exists; reads only. Needs A1 to work in a real browser |
@@ -516,9 +621,12 @@ to 2 hours, M = about half a day, L = about a day.
 | W5 | `web/start-session` | The form, every `POST` outcome, the warnings, the WD8 guard | M–L | the api reuses active sessions and the engine refuses a second bot per org and meeting; no retries |
 | W6 | `web/session-detail` | `/sessions/:id`, status explanation, limits, error code, the stage link behind "Show" | M | reads only |
 
-- **Order:** W0 and the outside items A1, WC1 and K1 first (they're small and others wait on them). W1–W3 can start
-  at once. I1 right after W1. W4–W6 need WC1 (or the temporary copy below). After each step from W2 on merges, its
-  screens are checked on the deployed site too.
+- **Order:** W0 and the outside items A1, WC1 and K1 first (they're small and others wait on them). Then W1, W1b and
+  I1. **W2 starts only after the W1b screenshots are approved.** W2–W3 can then start at once; W4–W6 need WC1 (or the
+  temporary copy below). After each step from W2 on merges, its screens are checked on the deployed site too.
+- **Done for a screen step** means, besides its tests: every state styled from the shared components; checked in a
+  real browser at 360, 390, 768, 1280 and 1536px, light and dark, reduced motion on and off; no sideways scrolling;
+  `npm run screenshots` passes (axe included); and the separate visual review's findings fixed or listed with a reason.
 - **Merges that redeploy the engine** (and so end live meetings): W1 (lockfile) and WC1 (`contracts/`). Merge them
   when no meeting is running, or pause the engine's auto-deploy first (runbook). The other web steps change only
   `apps/web/` and deploy only the site.
@@ -526,12 +634,14 @@ to 2 hours, M = about half a day, L = about a day.
   1. The WD8 guard's confirmation step (the 504 warning itself is never cut; the engine already refuses a second
      bot for the same org and meeting in nearly every case).
   2. The role in the header (`GET /v1/me`).
-  3. The session detail page: show the status in the list and drop the stage link from the web app for the demo.
-  4. Checking every screen on the deployed site: if the deployed site misbehaves late, demo locally instead.
-  5. Styling beyond Clerk's defaults and one CSS file.
+  3. Route transitions and the pulsing status dots (the rest of the motion stays).
+  4. The two-column detail layout on large screens (one column everywhere).
+  5. Checking every screen on the deployed site: if the deployed site misbehaves late, demo locally instead.
+  6. The session detail page: show the status in the list and drop the stage link from the web app for the demo.
 
-  Never cut: sign-in, org choice and switching, the list, the start form, the `POST` warnings, and (when deployed)
-  the CSP.
+  Never cut: sign-in, org choice and switching, the list, the start form, the `POST` warnings, the design foundation
+  (tokens, components, light and dark), responsive layout down to 360px, WCAG 2.2 AA, the per-step visual review, and
+  (when deployed) the CSP.
 
 ## Changes outside apps/web
 Each needs review from that area. None of them changes how another area behaves except as written.
@@ -547,8 +657,8 @@ Each needs review from that area. None of them changes how another area behaves 
   - The allowed list is `CLERK_AUTHORIZED_PARTIES` (WD4): the same web origins that may hold tokens. With Clerk off,
     CORS is off.
   - Tests: allowed origin on 200 and on an error, other origin, preflight, no credentials header.
-- **A2 (later). `POST /internal/engine-events`,** the api's next slice. Statuses only move after it, and then the web
-  app adds polling on the detail page (WD6).
+- **A2. `POST /internal/engine-events`.** Built on 2026-10-20: statuses move with the engine's events, and the list
+  and the session page refresh quietly while a session may still change (WD6).
 - **A3 (later). Leave `stageUrl` out of `GET /v1/sessions`,** keeping it on `GET /v1/sessions/:id` and the `POST`
   reply, so the list never carries control tokens.
 - **D5 (the api plan's open decision).** `DEFAULT_MAX_USD` and `DEFAULT_MAX_MINUTES` on `builder-api`. Not needed
@@ -586,7 +696,7 @@ Each needs review from that area. None of them changes how another area behaves 
 - **R1 (optional).** A root `npm run dev` that starts the engine in local mode, the api and the web app together.
 
 ## Decisions
-Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID need their areas' agreement.
+Each has a recommendation. W0 records the web ones in ADR 0012 and ADR 0013 records WD12; D-INFRA and D-ID need their areas' agreement.
 
 - **WD1. Framework.** *Recommended:* Vite + React static site. Alternative: Next.js on a $7 web service.
 - **WD2. Routing.** *Recommended:* React Router with five routes, Clerk on `routing="path"`. Alternative: one page
@@ -597,8 +707,10 @@ Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID
   `CORS_ORIGINS` variable, or a Vite dev proxy plus a Render rewrite (no CORS, but local and production then differ).
 - **WD5. The stage link.** *Recommended:* detail page only, behind "Show", with the warning, until X1 gives a
   read-only link. Alternative: don't show it at all in the web app for now.
-- **WD6. Status updates.** *Recommended:* a Refresh button now; polling on the detail page after A2. Polling now
-  would show nothing new.
+- **WD6. Status updates.** *Done with A2 (2026-10-20):* a Refresh button, and the list and a session's page
+  refresh themselves quietly every 10 seconds while a session may still change (starting, joining, in the meeting
+  or unconfirmed, within its time limit plus 30 minutes), only while the tab is visible. A background refresh
+  that fails changes nothing on screen and announces nothing.
 - **WD7. Clerk instance for the demo.** *Recommended:* the development instance on the site's `onrender.com` origin.
   The domain isn't chosen, so a production instance (which needs DNS on our own domain) waits for that decision.
 - **WD8. Starting again after an unknown outcome.** *Recommended:* the web app asks first (above), as a second line
@@ -612,15 +724,19 @@ Each has a recommendation. W0 records the web ones in ADR 0012; D-INFRA and D-ID
   `VITE_*` variables, plus a URL-free header policy in `render.yaml` for `frame-ancestors`. Alternatives: the whole
   policy as a `render.yaml` header (writes the api and Clerk origins into the repo, and needs editing when the domain
   changes), or a looser `connect-src https:` (allows any host).
-- **Styling.** One plain CSS file with a few variables; Clerk's components bring their own look. Sharing tokens with
-  the stage theme is the design-system decision in the web README, later.
-
-## Timeline
-- **Effort:** W0 + W1 about a day, I1 about two hours, W2–W6 about three and a half days. That fits before
-  2026-10-25 if W0, A1, WC1 and K1 land by 2026-10-20.
+- **WD12. Visual design.** *Decided:* the Boardroom direction ([ADR 0013](../adr/0013-web-visual-design.md)):
+  Tailwind CSS for layout and tokens, Radix for behavior only, our own components, one token set for light and dark,
+  mobile-first with a sticky action bar and bottom sheets on phones, and an approval gate before the screens. Chosen
+  over "Blueprint" (bold ultramarine) and "Huddle" (warm tiles) from previews, and over plain CSS (accessible dialogs
+  and sheets by hand) and a full component library (a recognizable look). The engine's `theme.css` isn't reused: it's
+  the prototype kit sized for the screenshare.
+- **Effort:** W0 and W1 done (W1 gets the design packages before it merges). W1b about a day, I1 about two hours,
+  W2–W6 about four days with the visual review in each. That fits before 2026-10-25 if W1b is approved by about
+  2026-10-21, and A1, WC1 and K1 land by then too.
 - **Outside items the demo needs:** A1, WC1 and K1 by about 2026-10-20; I1 by about 2026-10-21 (the engine and api
   are on Render already). For a start from the deployed site, D5's limits set by about 2026-10-23. Otherwise, the
   local fallback.
-- **The biggest risk** is now Clerk's org flow, checked by hand in W2, and on the deployed site from W2 on. The
+- **The biggest risks** are now the time the visual work takes (W1b's approval gate keeps it from spreading into
+  every screen step) and Clerk's org flow, checked by hand in W2, and on the deployed site from W2 on. The
   deploy is smaller than before: the Blueprint and CD exist, and I1 lands early with a page that calls nothing. The
   other risk is a merge that redeploys the engine during someone's meeting (W1, WC1).

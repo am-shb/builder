@@ -1,0 +1,50 @@
+import { OrganizationSwitcher, UserButton } from "@clerk/react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Link } from "react-router";
+import { AppShell } from "../components/AppShell.tsx";
+import { RoleLabel } from "./RoleLabel.tsx";
+
+// The app shell for members: Clerk's org switcher (personal accounts hidden) and account menu in the top bar.
+// Switching org changes the session token, so every request after it is for the new org.
+export function SignedInShell({ actionBar, children }: { actionBar?: ReactNode; children: ReactNode }) {
+  return (
+    <AppShell
+      org={<><LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" appearance={SWITCHER_APPEARANCE} /></LabelInName><RoleLabel /></>}
+      account={<UserButton />}
+      actionBar={actionBar}
+      homeLink={({ className, children: mark }) => <Link to="/" className={className}>{mark}</Link>}
+    >
+      {children}
+    </AppShell>
+  );
+}
+
+// The switcher's root box has min-width: auto, which would stop it shrinking in the header; for this component only, so
+// Clerk's sign-in and sign-up cards keep their width. The real-browser header check (fit at 320 to 1280px, equal
+// margins) is what catches a Clerk update that moves this.
+const SWITCHER_APPEARANCE = { elements: { rootBox: "min-w-0" } };
+
+// Clerk's org switcher shows the org's name but labels its button "Open organization switcher", so a voice-control user
+// who says the name they see can't reach it (WCAG 2.5.3, label in name). Clerk's appearance options can't set ARIA, so
+// this keeps the label starting with the visible name, and follows Clerk's re-renders.
+function LabelInName({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const fix = () => {
+      const button = el.querySelector("button");
+      const name = button?.textContent?.trim();
+      if (!button || !name) return;
+      const label = `${name}, switch organization`;
+      if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+    };
+    fix();
+    const observer = new MutationObserver(fix);
+    observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-label"] });
+    return () => observer.disconnect();
+  }, []);
+  // A flex item that may shrink (and Clerk's root box inside it: SWITCHER_APPEARANCE), so on a narrow phone the org name
+  // is cut short with an ellipsis instead of pushing the color mode and account buttons off screen.
+  return <span ref={box} className="flex min-w-0">{children}</span>;
+}

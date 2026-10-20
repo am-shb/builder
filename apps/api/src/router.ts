@@ -63,13 +63,40 @@ export function createRouter(routes: Route[]) {
 }
 
 /**
+ * CORS for the web app (A1 in docs/plans/web-first-slice.md). A browser on one of `allowedOrigins` (the api's
+ * CLERK_AUTHORIZED_PARTIES: the same web origins that may hold tokens) may read every reply, errors included. Exact
+ * origins only, no wildcard, and no credentials: the web app sends a Bearer token, never cookies. Any other origin gets
+ * no CORS headers, so the browser keeps the reply from it. An empty list (Clerk off) turns CORS off.
+ */
+export type CorsOptions = { allowedOrigins: readonly string[] };
+
+const PREFLIGHT_HEADERS = {
+  "access-control-allow-methods": "GET, POST",
+  "access-control-allow-headers": "Authorization, Content-Type",
+  "access-control-max-age": "600",
+};
+
+/**
  * Turns routes into a node:http request handler. An HttpError answers with its status and code. Anything else
  * answers 500 and is logged by error name only: messages can quote request bodies.
  */
-export function createHandler(routes: Route[], log: Log) {
+export function createHandler(routes: Route[], log: Log, cors: CorsOptions = { allowedOrigins: [] }) {
   const router = createRouter(routes);
+  const allowed = new Set(cors.allowedOrigins);
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://api.local");
+    // Before route matching, so 404, 405 and 500 replies carry it too.
+    // Vary on every reply, allowed origin or not: the reply depends on the Origin header either way, so no cache may
+    // hand one origin's reply to another.
+    res.setHeader("vary", "Origin");
+    const origin = req.headers.origin;
+    if (origin && allowed.has(origin)) res.setHeader("access-control-allow-origin", origin);
+    // A browser's preflight before a request with Authorization or a JSON body. It carries no token, so it needs none.
+    if (req.method === "OPTIONS" && (url.pathname === "/v1" || url.pathname.startsWith("/v1/"))) {
+      res.writeHead(204, PREFLIGHT_HEADERS);
+      res.end();
+      return;
+    }
     const match = router.match(req.method ?? "GET", url.pathname);
     if (match.kind === "not_found") return sendError(res, 404, "not_found", "No such route.");
     if (match.kind === "method_not_allowed") {
@@ -79,7 +106,7 @@ export function createHandler(routes: Route[], log: Log) {
       await match.route.handler({ req, res, params: match.params, url });
     } catch (err) {
       if (err instanceof HttpError) {
-        if (!res.headersSent) sendError(res, err.status, err.code, err.message);
+        if (!res.headersSent) sendError(res, err.status, err.code, err.message, err.headers);
         return;
       }
       log("http.error", { route: `${match.route.method} ${match.route.path}`, error: err instanceof Error ? err.name : "unknown" });

@@ -212,6 +212,7 @@ part of that.
    Teams). Otherwise 400 `invalid_request`.
 3. If this org already has a `starting`, `joining` or `in_meeting` session for the same URL, return it with 200 and
    `reused: true`, and don't call the engine. This keeps a double-click from sending two bots. Decision D7.
+   Otherwise the start guards below apply (429), in the same transaction that creates the session.
 4. Work out the limits. There are no plans yet, so they come from config: `DEFAULT_MAX_USD` and
    `DEFAULT_MAX_MINUTES` (decision D5). Billing replaces this later (ADR 0009).
 5. Insert the row with `status = starting` before calling the engine (intent first, as the engine does).
@@ -222,13 +223,43 @@ part of that.
 7. Response body: `{ session: SessionView }`, where `SessionView` is `{ id, meetingUrl, status, errorCode?, stageUrl?,
    limits, createdAt, updatedAt }`. Whether `stageUrl` is included is decision D8.
 
+### Start guards (added 2026-10-20)
+Every start can send a paid bot and sign-up is open, so one org or one person can't start an unbounded number. Any
+signed-in person can make organizations, so each limit is also counted per person across every org they're in:
+- **Per user:** at most `START_RATE_LIMIT_PER_MINUTE` (default 5) `POST /v1/sessions` per user in any minute,
+  counted before anything else (invalid and reused requests too). Over it: 429 `rate_limited` with `Retry-After`.
+  In memory: the api runs as one instance; with more, each would count on its own.
+- **Active at once:** at most `MAX_ACTIVE_SESSIONS_PER_ORG` per org and `MAX_ACTIVE_SESSIONS_PER_USER` per person
+  (default 2 each). A session holds a place while `starting`, `joining`, `in_meeting` or `start_unknown` (a bot may
+  exist), until its `active_until`. Over it: 429 `active_limit_reached` or `user_active_limit_reached`. Reusing an
+  active session still works at the limit.
+- **Per day:** at most `MAX_STARTS_PER_ORG_PER_DAY` per org and `MAX_STARTS_PER_USER_PER_DAY` per person (default 20
+  each) sessions created in any 24 hours, whatever became of them. Over it: 429 `daily_limit_reached` or
+  `user_daily_limit_reached`.
+- All four are checked in the transaction that creates the session. Every start writes the org's row
+  (`last_start_at`) and the person's `starter` row, so two starts for one org or one person at once conflict and one
+  is retried after the other: they can't both pass a count. Nothing is saved and the engine isn't called when one is
+  refused. Clerk's per-person limit on creating organizations is a second line (dashboard).
+- **Stale sessions (a fallback since A2):** before the engine's status events, a session would stay `joining`
+  and block its meeting link for good. With A2 (below) an ended or failed session frees its link at once; this
+  margin still covers an event that never arrives. Each session has `active_until`: its time limit plus
+  `ACTIVE_MARGIN_MINUTES` (default 30). The engine counts the time limit from when the bot is let in, so the margin
+  covers the wait in the meeting's lobby and the leave; the engine sets no lobby timeout of its own, so keep the margin
+  above Recall's. Past it, a session no longer counts as active (for reuse or the active limits); its status is left
+  as it was. `db/0002_start_guards.surql` adds the field and backfills the sessions that may have a bot with a
+  30-minute margin. During a deploy, the old api keeps serving (with no limits) until the new one is up; rows it
+  writes get their `active_until` on the org's next start.
+- Unset variables take the defaults (`src/start-guards.ts`); a bad value stops the server with an error naming the
+  variable.
+
 ### `GET /v1/sessions`
-- `requireOrg`, any role. Returns `{ sessions: SessionView[] }`, the org's 50 newest. No paging for the hackathon.
+- `requireOrg`, any role. Returns `{ sessions: SessionListItem[] }` (a `SessionView` without `stageUrl`: the stage
+  link is a control link, sent only by `GET /v1/sessions/:id`), the org's 50 newest. No paging for the hackathon.
   When it's needed, add an optional `limit` and an opaque `nextCursor` (base64 of `(created_at, id)`), which is an
   additive change.
 - Also add `GET /v1/sessions/:id`. It answers 404 for an id in another org, the same as for an id that doesn't exist,
   so it doesn't reveal that the id exists.
-- Until engine events arrive (the next slice), the status shown is whatever the engine said at start.
+- The status shown moves with the engine's status events (A2, below).
 
 ### Shapes between the api and web
 `CreateSessionBody`, `SessionView` and `SessionList` are zod schemas in `apps/api/src/routes/schemas.ts` for now.
@@ -241,6 +272,9 @@ Built in step 1:
 - `CLERK_JWT_KEY`, `CLERK_AUTHORIZED_PARTIES` (comma-separated origins)
 - `ENGINE_INTERNAL_URL`, `ENGINE_INTERNAL_TOKEN`
 - `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES`
+- Start guards, each optional with a default: `MAX_ACTIVE_SESSIONS_PER_ORG` (2), `MAX_STARTS_PER_ORG_PER_DAY` (20),
+  `MAX_ACTIVE_SESSIONS_PER_USER` (2), `MAX_STARTS_PER_USER_PER_DAY` (20), `START_RATE_LIMIT_PER_MINUTE` (5),
+  `ACTIVE_MARGIN_MINUTES` (30). See "Start guards".
 
 Step 3 adds the database variables. They're the engine's five, with the same names and rules (its
 `surrealSettings()` in `apps/engine/src/config.ts`):
@@ -297,9 +331,35 @@ None of them needs the engine side to exist.
 
 Steps 1 and 2 can start right away. Steps 3 and 4 depend only on 1, so they can go in parallel. Step 6 needs 2–5.
 
-**Next slice, not this one:** `POST /internal/engine-events` (bearer token, `parseEngineEvent`, idempotent by event
-id, usage stored as the latest cumulative value). Then the Clerk webhook mirror (users, memberships, Svix signature
-check). Then billing.
+**Next slice:** A2, session status events, below. Then usage events (stored as the latest cumulative value), the
+Clerk webhook mirror (users, memberships, Svix signature check), then billing.
+
+### A2: session status events (built 2026-10-20)
+The engine tells the api when a session's status changes, so statuses move on from what the start answered:
+joining, in the meeting, ended, failed. ADR 0008 has the delivery rules.
+- **Engine** (kept small): `src/api-events.ts`, the status reporter, sends `SessionStatusEvent` from `contracts/` to
+  `POST {API_INTERNAL_URL}/internal/engine-events` with `ENGINE_INTERNAL_TOKEN` as the bearer token. The poll calls
+  it after each saved status (`createApp`'s `onStatusChange`). Only the latest status per session waits, in memory;
+  retries back off from 2 s to 60 s; a restart re-sends the statuses of org sessions changed in the last day. Only
+  sessions the api started (with an org) are reported. `API_INTERNAL_URL` unset: nothing is sent, as before. No
+  migration.
+- **api:** `src/routes/engine-events.ts`, no Clerk or CORS; the token, 404 when it's unset or the request came
+  through a public proxy. `applyStatusEvent()` moves a session forward only (`starting`/`start_unknown` <
+  `joining` < `in_meeting` < `ended`/`failed`; `start_failed` never changes), within the event's org; `error_code`
+  is the event's. An event before the start answer is saved: the start answer's stage link is still saved, and the
+  event's status stays. Usage, hand-off and unknown event types: 202, nothing stored. No migration.
+- **Web:** the list and a session's page refresh quietly every 10 seconds while a session may still change (WD6),
+  and say why a session ended or failed.
+- **Infra:** `API_INTERNAL_URL` on `builder-engine`, from `builder-api`'s private `hostport`, is on the
+  `infra/render-web` branch with the other `render.yaml` changes. Either can merge first: an engine without A2
+  ignores it, and an api without A2 answers 404, which the engine retries for up to 6 hours.
+- **Known gaps:**
+  - A `start_unknown` session that events move on has no stage link: the engine's start reply never reached the
+    api. Fix later by having the api ask the engine again with the same `sessionId` (E2 replays it), or by
+    carrying the stage link in an event.
+  - After an engine restart, the sweep has no Recall history, so an end reason the api missed is lost (the status
+    still arrives).
+  - A status that changes on its own isn't announced to screen readers; the page and list update quietly (WD6).
 
 ## Changes outside apps/api
 These need approval before anyone builds them. None of them blocks a step: O1, the only one that did, is on `main`.

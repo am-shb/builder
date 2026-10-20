@@ -41,13 +41,27 @@ Option 1, defined in a `render.yaml` Blueprint at the repo root. Prices are from
 - **Monorepo:** don't set `rootDir`. Render doesn't make files outside it available, so `contracts/` would be missing.
   Build from the repo root with a workspace-scoped install. Use `buildFilter` so each service deploys only when its
   app or `contracts/**` changes.
-- **Node version:** Render reads `.nvmrc`, so every service runs the same Node as CI.
+- **Node version:** the Docker services take Node from their images (`node:24.22`), the same as `.nvmrc` and CI. The
+  static site pins `NODE_VERSION` (see the amendment below).
 - **Environments:** production only for now (repo owner, 2026-10-18). `main` deploys to production automatically once
   CI passes on the commit (`autoDeployTrigger: checksPass`). Add `staging` to the same Blueprint (about $14 a month)
   when we need to try changes on real infrastructure first; then `main` deploys to staging and production by hand.
 - **Builds:** each app has a Dockerfile, used both by `docker compose` on a laptop and by Render, so both run the same
   image.
 - **Secrets:** environment groups in the Render dashboard (`sync: false` in the Blueprint). Never in `render.yaml`.
+
+## Amendment (2026-10-20): the web app is a static site with no Dockerfile
+- `builder-web` is a Render static site (ADR 0012 chose a static single-page app), free and served from Render's
+  CDN. A static site runs no process, so it has no Dockerfile; "each app has a Dockerfile" applies to the services
+  that run one. CI's image job is unchanged.
+- It builds from the repo root like the others (no `rootDir`) with a workspace-scoped install, and deploys after CI
+  passes with its own `buildFilter`.
+- Render reads `NODE_VERSION` (or `.node-version`), not `.nvmrc`, for a static site's build, so the Blueprint pins
+  `NODE_VERSION` to the Dockerfiles' Node (24.22.0). The two Docker services take Node from their images.
+- Its security headers and the single-page rewrite are in `render.yaml`; the policy that names the api and Clerk is
+  written into `index.html` at build time (ADR 0012).
+- Render asks for `sync: false` values only when a Blueprint is first created. Values for a service added to the
+  existing Blueprint are set on its page (runbook, "The web app").
 
 ## Consequences
 - About $45 a month for production at launch, plus about $20 for staging. Meetings (Recall per bot-hour, models, TTS)

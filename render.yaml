@@ -1,12 +1,13 @@
 # Render Blueprint (ADR 0005): production only for now. Create it in the Render dashboard (New > Blueprint, branch
 # main), as docs/runbooks/README.md says.
 #
-# No secret is in this file. Render asks for every `sync: false` value in the dashboard when the Blueprint is first
-# created, and generates the internal token itself. Everything runs in US East, next to SurrealDB Cloud (AWS
+# No secret is in this file. Render asks for every `sync: false` value in the dashboard only when the Blueprint is
+# first created; a service added later (builder-web) gets its values set by hand on its page. Render generates the
+# internal token itself. Everything runs in US East, next to SurrealDB Cloud (AWS
 # us-east-1) and Recall (us-east-1).
 #
-# CD: both services deploy a commit on main only after its CI checks pass (autoDeployTrigger: checksPass), and only
-# when a path in their buildFilter changed. The pre-deploy command runs the migrations before the new instance
+# CD: every service deploys a commit on main only after its CI checks pass (autoDeployTrigger: checksPass), and only
+# when a path in its buildFilter changed. The pre-deploy command runs the migrations before the new instance
 # starts; if it fails, the deploy stops. Render moves traffic to the new instance once its health check passes, and
 # a failing one leaves the old instance serving.
 
@@ -60,6 +61,14 @@ services:
       # PUBLIC_API_BASE_URL isn't set: the engine uses RENDER_EXTERNAL_URL, which Render sets. Set it in the dashboard
       # only for a custom domain.
       - fromGroup: builder-internal
+      # The api's private-network address, host:port (builder-api:10000), where the engine sends session status
+      # changes (A2: POST /internal/engine-events, with ENGINE_INTERNAL_TOKEN from builder-internal). The engine reads
+      # a bare host:port as http. Unset, the engine sends nothing and the api's statuses stay at what the start said.
+      - key: API_INTERNAL_URL
+        fromService:
+          type: web
+          name: builder-api
+          property: hostport
       # SurrealDB Cloud: wss://<instance host>, and the `engine` user that infra/surrealdb/setup.surql defines.
       - key: SURREAL_URL
         sync: false
@@ -134,4 +143,70 @@ services:
       - key: DEFAULT_MAX_USD
         sync: false
       - key: DEFAULT_MAX_MINUTES
+        sync: false
+
+  # The web app (ADR 0012): a static site on Render's CDN, free. No Dockerfile: a static site runs no process (ADR 0005,
+  # amended). Static sites take no region, plan, instances, pre-deploy command or health check.
+  - type: web
+    name: builder-web
+    runtime: static
+    branch: main
+    autoDeployTrigger: checksPass
+    # No rootDir, as for the other two: the build needs contracts/. Only the web workspace's packages are installed.
+    buildCommand: npm ci --workspace @builder/web --include-workspace-root && npm run build -w @builder/web
+    staticPublishPath: ./apps/web/dist
+    buildFilter:
+      paths:
+        - apps/web/**
+        - contracts/**
+        - package.json
+        - package-lock.json
+        - .nvmrc
+      ignoredPaths:
+        - apps/web/test/**
+        - apps/web/README.md
+        - contracts/README.md
+    # Every path is the app: React Router handles it in the browser. Render serves a file that exists (/assets/*)
+    # before it applies a rewrite.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    # Headers that name no URL (ADR 0012, docs/plans/web-first-slice.md "Security"). The policy that names the api and
+    # Clerk is written into index.html at build time (apps/web/build/csp.ts). Set these only here: Render keeps rules
+    # made in the dashboard that aren't in this file.
+    headers:
+      # What a <meta> policy can't do: refuse to be framed, plus a backstop for the page's own policy.
+      - path: /*
+        name: Content-Security-Policy
+        value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      # The stage link carries a token: no page of the app sends its address anywhere.
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=()"
+      # Another site's window can't script this one; the stage still opens in a new tab (with noopener).
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin-allow-popups
+    envVars:
+      # Render's docs read NODE_VERSION (not .nvmrc) for a static site: the same Node as the Dockerfiles.
+      - key: NODE_VERSION
+        value: 24.22.0
+      # Read at build time, so a change needs a new deploy of the site. Not secrets, but kept out of the repo. Render
+      # asks for sync: false values only when a Blueprint is first created: on this existing Blueprint, set them on
+      # builder-web in the dashboard (docs/runbooks/README.md).
+      # The Clerk publishable key, from the same Clerk instance as builder-api's CLERK_JWT_KEY.
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+      # builder-api's public https origin, such as https://builder-api-xxxx.onrender.com.
+      - key: VITE_API_URL
         sync: false

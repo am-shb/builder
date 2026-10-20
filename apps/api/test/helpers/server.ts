@@ -1,12 +1,14 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Config } from "../../src/config.ts";
+import { DEFAULT_START_GUARDS } from "../../src/start-guards.ts";
 
 export const testConfig = (over: Partial<Config> = {}): Config => ({
   port: 0,
   clerk: null,
   engine: null,
   defaultLimits: null,
+  startGuards: DEFAULT_START_GUARDS,
   surreal: { url: null, user: null, pass: null, auth: "database", path: "data/surreal" },
   ...over,
 });
