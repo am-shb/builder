@@ -87,3 +87,9 @@ test("the prompt lists every image subject, name and caption, and says when to u
   assert.match(prompt, /subject name/);
   assert.match(prompt, /placeholder/);
 });
+
+test("the prompt says the app starts with a home Screen to update, and where region applies", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /starts with one empty Screen, `home`: for the first page, update it \(title, icon, template\) instead of adding another/);
+  assert.match(prompt, /`region` only matters on direct children of a templated Screen/);
+});

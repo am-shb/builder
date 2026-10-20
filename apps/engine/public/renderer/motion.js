@@ -104,6 +104,13 @@ export function tagAbove(el) {
   return Math.max(0, -(parseFloat(tag.top) || 0));
 }
 
+/** How much of the canvas top the app frame's sticky top bar covers (0 for a sidebar, a phone, no frame). */
+export function topInset(root) {
+  const bar = root.querySelector(".b-app-chrome");
+  if (!bar || getComputedStyle(bar).position !== "sticky" || !bar.offsetHeight) return 0;
+  return bar.offsetHeight + (parseFloat(getComputedStyle(bar).top) || 0);
+}
+
 /** Overlay layer (content coordinates of the root) for settle outlines. */
 export function motionLayer(root) {
   let layer = root.querySelector(":scope > .m-layer");
@@ -213,6 +220,8 @@ function canvasRoot(container) {
   return container;
 }
 
+const scrollsOf = new WeakMap(); // theme fade copy -> [element, scrollTop, scrollLeft] of what was scrolled
+
 /** A static copy of the canvas content as it looks now, for the theme fade; null when too big to copy. */
 export function snapshotCanvas(container) {
   const content = [...container.children].filter((c) => c.dataset.nodeId);
@@ -220,7 +229,19 @@ export function snapshotCanvas(container) {
   if (content.reduce((n, c) => n + 1 + c.getElementsByTagName("*").length, 0) > MAX_THEME_CLONE) return null;
   const snap = document.createElement("div");
   snap.className = "m-theme-fade";
-  for (const c of content) snap.append(c.cloneNode(true));
+  // cloneNode drops scroll positions: note where each scrolled element (the phone's screen area) was, in
+  // step with its copy, and restore them once the copy is in the page (playThemeFade).
+  const scrolled = [];
+  for (const c of content) {
+    const copy = c.cloneNode(true);
+    const live = [c, ...c.getElementsByTagName("*")];
+    const twin = [copy, ...copy.getElementsByTagName("*")];
+    live.forEach((el, i) => {
+      if (el.scrollTop || el.scrollLeft) scrolled.push([twin[i], el.scrollTop, el.scrollLeft]);
+    });
+    snap.append(copy);
+  }
+  scrollsOf.set(snap, scrolled);
   // A copy must never be found as the node it shows (focus, lookups, interactions).
   for (const n of snap.querySelectorAll("[data-node-id]")) n.removeAttribute("data-node-id");
   snap.inert = true;
@@ -236,6 +257,10 @@ export function playThemeFade(container, snapshot) {
     left: "0px", top: "0px", width: `${root.clientWidth}px`, height: `${Math.max(root.scrollHeight, root.clientHeight)}px`,
   });
   root.append(snapshot);
+  for (const [el, top, left] of scrollsOf.get(snapshot) ?? []) {
+    el.scrollTop = top;
+    el.scrollLeft = left;
+  }
   whenDone(animate(snapshot, [{ opacity: 1 }, { opacity: 0 }], { duration: THEME_FADE_MS, easing: EASE }), () => snapshot.remove());
   logMotion({ fn: "playThemeFade" });
 }

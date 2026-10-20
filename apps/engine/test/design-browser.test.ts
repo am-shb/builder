@@ -813,3 +813,106 @@ test("image resolution", async (t) => {
     });
   }, { width: WIDTH, height: HEIGHT });
 });
+
+// Fixes from the final review of parts 2 and 3.
+const textNode = (id: string, text: string) => ({ id, type: "Text", props: { text }, status: "agreed", children: [] });
+const tallDraftScreen = (id: string) => ({
+  id, type: "Screen", props: { title: "Long" }, status: "draft",
+  children: [
+    ...Array.from({ length: 40 }, (_, i) => textNode(`${id}.t${i}`, `Line ${i}`)),
+    { id: `${id}.modal`, type: "Modal", props: { title: "Sure?", open: false }, status: "draft", children: [textNode(`${id}.modal.t`, "Body")] },
+    { id: `${id}.drawer`, type: "Drawer", props: { title: "Filters", open: false }, status: "draft", children: [textNode(`${id}.drawer.t`, "Body")] },
+  ],
+});
+
+test("review fixes", async (t) => {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), "design-")), "screens");
+  mkdirSync(dir, { recursive: true });
+  await withChrome(t, async (page) => {
+    await withGalleryServer(async (url) => {
+      const fresh = async () => {
+        await page.goto(url);
+        await page.waitFor("window.ready === true");
+      };
+      type Box = { x: number; y: number; w: number; h: number };
+      const rect = (sel: string) => page.eval<Box>(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
+
+      for (const kind of ["modal", "drawer"]) {
+        await t.test(`phone ${kind} on a scrolled tall draft Screen stays inside the phone`, async () => {
+          await fresh();
+          await page.eval(`(() => { window.proto.root.props.device = "phone"; window.proto.root.children.push(${JSON.stringify(tallDraftScreen("tall"))}); window.show("tall"); })()`);
+          await page.eval(`document.querySelector(".b-phone .b-app-body").scrollTop = 400`);
+          await page.eval(`window.show("tall", { "tall.${kind}": true })`);
+          const phone = await rect(".b-phone");
+          const bar = await rect(".b-phone .b-app-screentitle");
+          const box = await rect(`[data-node-id="tall.${kind}"] .b-${kind}-box`);
+          const inner = { x: phone.x + 10, y: phone.y + 10, w: phone.w - 20, h: phone.h - 20 };
+          const overlay = await rect(`[data-node-id="tall.${kind}"]`);
+          assert.ok(overlay.y >= inner.y - 0.5 && overlay.y + overlay.h <= inner.y + inner.h + 0.5, `${kind} overlay covers the phone, not the screen: ${JSON.stringify({ overlay, phone })}`);
+          assert.ok(box.x >= inner.x - 0.5 && box.x + box.w <= inner.x + inner.w + 0.5, `${kind} box inside the phone: ${JSON.stringify({ box, phone })}`);
+          assert.ok((kind === "drawer" || box.y >= bar.y + bar.h - 0.5) && box.y + box.h <= inner.y + inner.h + 0.5, `${kind} box below the title bar, inside the phone: ${JSON.stringify({ box, bar, phone })}`);
+          if (kind === "modal") await page.screenshot(path.join(dir, "phone-modal-open.png"));
+        });
+      }
+
+      await t.test("desktop overlays on a draft Screen still cover the app", async () => {
+        await fresh();
+        await page.eval(`(() => { window.proto.root.children.push(${JSON.stringify(tallDraftScreen("tall"))}); window.show("tall", { "tall.modal": true }); })()`);
+        const app = await rect('[data-node-id="app"]');
+        const overlay = await rect('[data-node-id="tall.modal"]');
+        assert.deepEqual([overlay.x, overlay.w], [app.x, app.w], "covers the app's width");
+        assert.ok(overlay.y >= app.y - 0.5 && overlay.y + overlay.h <= app.y + app.h + 0.5, `inside the app: ${JSON.stringify({ overlay, app })}`);
+      });
+
+      await t.test("the sidebar shows a two-word app name and a long screen title in full", async () => {
+        await fresh();
+        await page.eval(`(() => {
+          window.proto.root.props.title = "Expense Tracker";
+          window.proto.root.children.find((s) => s.id === "gallery-b").props.title = "Team budget planning";
+          window.draw();
+        })()`);
+        const clipped = await page.eval<string[]>(`[...document.querySelectorAll(".b-app-title, .b-app-navlabel")].filter((e) => e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight + 1).map((e) => e.textContent)`);
+        assert.deepEqual(clipped, [], "nothing is clipped");
+        const title = await page.eval<{ h: number; lh: number; fs: number }>(`(() => { const e = document.querySelector(".b-app-title"); const c = getComputedStyle(e); return { h: e.getBoundingClientRect().height, lh: parseFloat(c.lineHeight), fs: parseFloat(c.fontSize) }; })()`);
+        assert.ok(title.fs >= 14, "title at least 14px");
+        assert.ok(title.h <= title.lh * 2 + 1, `title takes at most two lines: ${JSON.stringify(title)}`);
+        await page.eval(`window.draw()`);
+        await page.screenshot(path.join(dir, "sidebar-two-word-name.png"));
+        // The top bar keeps one line.
+        await page.eval(`(() => { window.proto.root.props.nav = "top"; window.draw(); })()`);
+        const lines = await page.eval<number[]>(`[...document.querySelectorAll(".b-app-title, .b-app-navlabel")].map((e) => Math.round(e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight)))`);
+        assert.ok(lines.every((n) => n <= 1), `top bar stays single line: ${lines}`);
+      });
+
+      await t.test("opening another screen on a phone starts at the top", async () => {
+        await fresh();
+        await page.eval(`(() => { window.proto.root.props.device = "phone"; window.proto.root.children.push(${JSON.stringify(tallDraftScreen("tall"))}, ${JSON.stringify(tallDraftScreen("tall2"))}); window.show("tall"); })()`);
+        await page.eval(`document.querySelector(".b-phone .b-app-body").scrollTop = 300`);
+        await page.eval(`window.draw()`);
+        assert.equal(await page.eval<number>(`document.querySelector(".b-phone .b-app-body").scrollTop`), 300, "a redraw of the same screen keeps the scroll");
+        await page.eval(`window.show("tall2")`);
+        assert.equal(await page.eval<number>(`document.querySelector(".b-phone .b-app-body").scrollTop`), 0);
+      });
+
+      await t.test("a lone stat card keeps its quarter of the row", async () => {
+        await fresh();
+        await page.eval(`window.show("template-dashboard")`);
+        const sel = '[data-node-id="template-dashboard"] [data-region="stats"]';
+        const before = await page.eval<{ count: number; region: number; first: number }>(`(() => { const r = document.querySelector('${sel}'); return { count: r.children.length, region: r.getBoundingClientRect().width, first: r.children[0].getBoundingClientRect().width }; })()`);
+        await page.eval(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          const stats = s.children.filter((c) => c.props.region === "stats");
+          for (const c of stats.slice(1)) s.children.splice(s.children.indexOf(c), 1);
+          window.draw();
+        })()`);
+        const after = await page.eval<{ count: number; region: number; first: number }>(`(() => { const r = document.querySelector('${sel}'); return { count: r.children.length, region: r.getBoundingClientRect().width, first: r.children[0].getBoundingClientRect().width }; })()`);
+        assert.equal(after.count, 1);
+        assert.ok(Math.abs(after.first - after.region / 4) < after.region * 0.05, `one card is about a quarter of the row: ${JSON.stringify({ before, after })}`);
+        await page.screenshot(path.join(dir, "dashboard-one-stat.png"));
+      });
+
+      t.diagnostic(`screenshots: ${dir}`);
+      assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
+    });
+  }, { width: WIDTH, height: HEIGHT });
+});

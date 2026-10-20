@@ -402,6 +402,57 @@ test("a theme value change fades the old canvas out", async (t) => {
   });
 });
 
+test("the theme fade copy of a scrolled phone shows what the live one shows", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Phone", ops: [{ op: "update", id: "app", props: { title: "Notes", device: "phone" } }, ...lines(30)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l29"]')`);
+    await sleep(1700);
+    await page.eval(`document.querySelector(".b-phone .b-app-body").scrollTop = 400`);
+    const tops = await page.eval<{ live: number; copy: number | null }>(`(() => {
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent", { value: "warm", status: "draft", decisionId: "d1", previous: "neutral" })};
+      const copy = document.querySelector(".m-theme-fade .b-app-body");
+      return { live: document.querySelector(".b-phone .b-app-body").scrollTop, copy: copy ? copy.scrollTop : null };
+    })()`);
+    assert.ok(tops.live > 100, `the live body is scrolled: ${JSON.stringify(tops)}`);
+    assert.equal(tops.copy, tops.live, "the copy is scrolled the same");
+  });
+});
+
+test("a reveal clears the sticky top bar", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Long", ops: [{ op: "update", id: "app", props: { title: "Notes", nav: "top" } }, ...lines(40)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l39"]')`);
+    await sleep(1700);
+    // Scroll so line 10 sits right under the bar's band (its top 20px below the viewport top, behind the bar).
+    await page.eval(`(() => { const c = document.getElementById("proto"); const l = document.querySelector('[data-node-id="l10"]'); c.scrollTop += l.getBoundingClientRect().top - c.getBoundingClientRect().top - 20; })()`);
+    const bar = await page.eval<{ y: number; h: number }>(`(() => { const r = document.querySelector(".b-app-chrome").getBoundingClientRect(); return { y: r.top, h: r.height }; })()`);
+    const before = await page.eval<{ y: number }>(`(() => ({ y: document.querySelector('[data-node-id="l10"]').getBoundingClientRect().top }))()`);
+    assert.ok(before.y < bar.y + bar.h, `line 10 starts under the bar: ${JSON.stringify({ before, bar })}`);
+    await page.eval(`window.__motionLog = []`);
+    await script([{ batch: { label: "Edited: line 11", by: "Ada", ops: [{ op: "update", id: "l10", props: { text: "Line number 11, edited" } }] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus" && e.id === "l10")`, 5000);
+    await sleep(600);
+    const after = await page.eval<number>(`document.querySelector('[data-node-id="l10"]').getBoundingClientRect().top`);
+    assert.ok(after >= bar.y + bar.h, `line 10 shows below the bar after the reveal: ${after} vs ${bar.y + bar.h}`);
+  });
+});
+
+test("a new screen opens at the top of the canvas", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Long", ops: [
+      ...lines(40),
+      add("app", { id: "about", type: "Screen", props: { title: "About" }, status: "agreed", children: Array.from({ length: 40 }, (_, i) => text(`about.t${i}`, `About line ${i}`)) }),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l39"]')`);
+    await sleep(1700);
+    await page.eval(`document.getElementById("proto").scrollTop = 500`);
+    assert.equal(await page.eval<number>(`document.getElementById("proto").scrollTop`), 500);
+    await script([{ batch: { label: "Show about", ops: [{ op: "set_screen", screenId: "about" }] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="about"]').getClientRects().length > 0`, 3000);
+    assert.equal(await page.eval<number>(`document.getElementById("proto").scrollTop`), 0);
+  });
+});
+
 test("a settled theme plays the agreed frame", async (t) => {
   await withStage(t, async ({ page, script }) => {
     await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);

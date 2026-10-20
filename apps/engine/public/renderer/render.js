@@ -9,6 +9,8 @@ export { initialUiState } from "@renderer/interact.js";
 const registry = new WeakMap(); // container -> Map<id, element> from the previous render
 const propsKey = new WeakMap(); // element -> JSON of the props it last showed
 
+const shownScreen = new WeakMap(); // container -> the Screen it showed at its last render
+
 export function renderTree(container, proto, uiState, changes) {
   const prev = registry.get(container) ?? new Map();
   const next = new Map();
@@ -69,6 +71,13 @@ export function renderTree(container, proto, uiState, changes) {
   }
 
   registry.set(container, next);
+  // A Screen that opens starts at the top: the canvas (desktop) and the phone's screen area keep their scroll
+  // otherwise, which would open the new Screen part way down.
+  if (shownScreen.has(container) && shownScreen.get(container) !== uiState.screen) {
+    container.scrollTop = 0;
+    for (const body of app.querySelectorAll(".b-app-body")) body.scrollTop = 0;
+  }
+  shownScreen.set(container, uiState.screen);
   if (motion) animateReconcile(prevRects, next, changes, { removed, previous });
   return next;
 }

@@ -1,7 +1,7 @@
 // Focus moments and responsiveness cues: the spotlight on what changed (one at a time, 1500 ms),
 // the shimmering placeholder where a streamed element is coming, and the voice-command pointer.
 import { animate, logMotion } from "@renderer/clock.js";
-import { rootOf, layoutBox, fadeOutInPlace, tagAbove, scrollerOf, scrollWithin } from "@renderer/motion.js";
+import { rootOf, layoutBox, fadeOutInPlace, tagAbove, scrollerOf, scrollWithin, topInset } from "@renderer/motion.js";
 import { slotOf } from "@renderer/components.js";
 
 export const SPOTLIGHT_MS = 1500;
@@ -102,11 +102,13 @@ function reveal(root, el, box) {
       box = { ...box, y: box.y - moved };
     }
   }
+  // The sticky top bar covers the canvas top: what sits under it is not visible, and a reveal lands below it.
+  const inset = topInset(root);
   const view = root.clientHeight;
   const top = root.scrollTop;
-  if (box.y >= top + 8 && box.y + box.h <= top + view - 8) return box;
+  if (box.y >= top + inset + 8 && box.y + box.h <= top + view - 8) return box;
   const max = Math.max(0, root.scrollHeight - view);
-  const target = Math.min(max, Math.max(0, box.y - 64));
+  const target = Math.min(max, Math.max(0, box.y - Math.max(64, inset + 24)));
   const delta = target - top;
   if (Math.abs(delta) < 1) return box;
   root.scrollTop = target;
