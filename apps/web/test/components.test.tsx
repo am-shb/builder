@@ -27,6 +27,15 @@ describe("StatusPill", () => {
     render(<StatusPill status="something_new" />);
     expect(screen.getByText("Unknown")).toBeTruthy();
   });
+
+  it("a status named like a built-in property is Unknown too, with the unknown mark", () => {
+    for (const status of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const { container, unmount } = render(<StatusPill status={status} />);
+      expect(container.textContent, status).toBe("?Unknown");
+      expect(container.querySelector("[aria-hidden] span")?.textContent, status).toBe("?");
+      unmount();
+    }
+  });
 });
 
 describe("Button", () => {

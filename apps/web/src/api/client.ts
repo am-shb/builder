@@ -2,10 +2,11 @@
 // as a Bearer token and nothing else that identifies the caller: the api takes the org from the token, so no org id is
 // ever sent. No cookies, no retries, and no timeout on a start: a retried or cut-off start can send a second paid bot.
 import type { z } from "zod";
-import { CreateSessionResponse, ErrorBody, MeResponse, SessionList, SessionResponse, type SessionView } from "./schemas.ts";
+import { CreateSessionResponse, ErrorBody, MeResponse, SessionList, SessionResponse, SessionView } from "./schemas.ts";
 
-// Codes the web app makes itself; every other code is the api's.
-export type ClientCode = "network_error" | "bad_response" | "signed_out";
+// Codes the web app makes itself; every other code is the api's. `token_error`: Clerk couldn't give a session token,
+// so nothing was sent.
+export type ClientCode = "network_error" | "bad_response" | "signed_out" | "token_error";
 
 // One error type for every failure. The UI branches on `code` and shows its own text, never `message`.
 export class ApiError extends Error {
@@ -41,7 +42,12 @@ export function createApiClient({ baseUrl, getToken, fetch: doFetch = globalThis
   fetch?: typeof globalThis.fetch;
 }): ApiClient {
   async function call<S extends z.ZodType>(method: "GET" | "POST", path: string, schema: S, opts: { body?: unknown; signal?: AbortSignal } = {}): Promise<z.infer<S>> {
-    const token = await getToken();
+    let token: string | null;
+    try {
+      token = await getToken();
+    } catch {
+      throw new ApiError(0, "token_error");
+    }
     if (!token) throw new ApiError(0, "signed_out");
     if (opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
     const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${token}` };
@@ -69,10 +75,12 @@ export function createApiClient({ baseUrl, getToken, fetch: doFetch = globalThis
       throw new ApiError(res.status, res.ok ? "bad_response" : `http_${res.status}`);
     }
     if (!res.ok) {
+      // The code and the saved session are read separately: a session the web can't read (a field renamed in a later
+      // api) must not hide the code, which says whether a bot may have been sent.
       const body = ErrorBody.safeParse(json);
-      throw body.success
-        ? new ApiError(res.status, body.data.error.code, body.data.session)
-        : new ApiError(res.status, `http_${res.status}`);
+      if (!body.success) throw new ApiError(res.status, `http_${res.status}`);
+      const saved = SessionView.safeParse((json as { session?: unknown }).session);
+      throw new ApiError(res.status, body.data.error.code, saved.success ? saved.data : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new ApiError(res.status, "bad_response");

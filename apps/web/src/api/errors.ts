@@ -41,7 +41,8 @@ function unknownOutcome(title = `We couldn't confirm whether ${BOT_NAME} joined.
 }
 
 export function explainError(err: unknown, context: ErrorContext): ExplainedError {
-  const e = err instanceof ApiError ? err : new ApiError(0, "network_error");
+  // Anything else is a bug in our own code, not a lost connection. A start can't tell how far it got, so it warns.
+  const e = err instanceof ApiError ? err : new ApiError(0, "unexpected");
   const start = context === "start";
   const plain = (title: string, action: ErrorAction = "none", detail?: string): ExplainedError =>
     ({ title, ...(detail ? { detail } : {}), tone: "error", action, botMayExist: false });
@@ -53,7 +54,13 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
       ? { ...unknownOutcome("We lost the connection while starting."), detail: "Check the session list and the meeting before trying again. Nothing is retried on its own." }
       : plain(`Can't reach ${PRODUCT_NAME}. Check your connection.`, "refresh");
   }
-  if (e.code === "bad_response") return start ? unknownOutcome() : plain(somethingWrong("bad_response"), "refresh");
+  if (e.code === "bad_response" || e.code === "unexpected") return start ? unknownOutcome() : plain(somethingWrong(e.code), "refresh");
+  // Clerk didn't give a token, so nothing was sent.
+  if (e.code === "token_error") {
+    return start
+      ? plain("Couldn't start: sign-in didn't respond.", "none", "Nothing was sent. Try again in a moment.")
+      : plain("Sign-in didn't respond.", "refresh", "Try again in a moment.");
+  }
 
   // A start that may have reached the engine: unless the reply proves no bot was sent, warn. Only the api's own error
   // body proves it: a 502 or 503 with any other body (a proxy's page, when the api restarted mid-request) may come after

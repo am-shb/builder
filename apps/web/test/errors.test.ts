@@ -62,8 +62,17 @@ describe("starting", () => {
     expect(x.detail).toMatch(/before trying again/);
   });
 
-  it("anything that isn't an ApiError counts as a lost connection", () => {
+  it("anything that isn't an ApiError is unexpected: a start warns, a read says so without blaming the connection", () => {
     expect(explainError(new Error("boom"), "start").botMayExist).toBe(true);
+    const read = explainError(new Error("boom"), "read");
+    expect([read.title, read.botMayExist]).toEqual(["Something went wrong (unexpected).", false]);
+  });
+
+  it("no token from Clerk: nothing was sent, so no warning and no bot", () => {
+    const start = explainError(new ApiError(0, "token_error"), "start");
+    expect([start.tone, start.botMayExist, start.detail]).toEqual(["error", false, "Nothing was sent. Try again in a moment."]);
+    const read = explainError(new ApiError(0, "token_error"), "read");
+    expect([read.title, read.action]).toEqual(["Sign-in didn't respond.", "refresh"]);
   });
 });
 

@@ -7,7 +7,7 @@ const HOSTNAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 // The api's origin from VITE_API_URL: an https URL (or http in development) with no path, query, fragment or
-// credentials, returned in its normal form ("https://api.example.test"). Anything else is null. A production build
+// credentials, returned in its normal form (lower-case host, no default port). Anything else is null. A production build
 // refuses plain http, which would send the session token in clear text, except to this computer (a local preview).
 export function apiOrigin(apiUrl: string | undefined, { production = false } = {}): string | null {
   const raw = apiUrl?.trim().replace(/\/+$/, "");
