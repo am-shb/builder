@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
@@ -81,16 +81,20 @@ describe("the session page", () => {
   });
 
   it.each([
-    ["starting", "Starting"], ["joining", "Joining"], ["in_meeting", "In the meeting"], ["ended", "Ended"], ["failed", "Failed"],
-    ["start_failed", "Didn't start"], ["start_unknown", "Check the meeting"], ["paused", "Unknown"], ["constructor", "Unknown"],
-  ])("status %s reads as %s, with its explanation", async (status, label) => {
+    ["starting", "Starting", `We're asking ${BOT_NAME} to join.`],
+    ["joining", "Joining", `${BOT_NAME} is joining the meeting. Admit it if the meeting asks.`],
+    ["in_meeting", "In the meeting", `${BOT_NAME} is in the meeting.`],
+    ["ended", "Ended", null],
+    ["failed", "Failed", `${BOT_NAME} left the meeting because of an error.`],
+    ["start_failed", "Didn't start", "The meeting service refused. Check the link and try again."],
+    ["start_unknown", "Check the meeting", `We couldn't confirm whether ${BOT_NAME} joined. Check the meeting before starting again.`],
+    ["paused", "Unknown", "This page doesn't know this status yet. Refresh later."],
+    ["constructor", "Unknown", "This page doesn't know this status yet. Refresh later."],
+  ])("status %s reads as %s, with the plan's explanation", async (status, label, explanation) => {
     setClerk({ session: "active", orgId: "org_a" });
     page(ok({ status }));
-    const region = within(await screen.findByRole("region", { name: "Status" }));
-    expect(region.getByText(label)).toBeTruthy();
-    const explanation = statusExplanation(status);
-    if (explanation) expect(region.getByText(explanation)).toBeTruthy();
-    else expect(region.queryByRole("paragraph")).toBeNull();
+    const region = await screen.findByRole("region", { name: "Status" });
+    expect(region.textContent).toBe(`${label === "Unknown" ? "?" : ""}${label}${explanation ?? ""}`);
   });
 
   it("Refresh reads again and keeps the page on screen; a failed refresh says so quietly", async () => {
@@ -100,7 +104,7 @@ describe("the session page", () => {
       ? new Response(JSON.stringify(ok({ status: "joining" }).body), { status: 200 })
       : new Response(JSON.stringify(errorBody("db_unavailable")), { status: 503 })));
     await screen.findByText("Joining");
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toMatch(/^Couldn't refresh\. Showing the details from /);
     expect(screen.getByRole("heading", { level: 1, name: "kfp-qzwd-nre" })).toBeTruthy();
@@ -112,7 +116,7 @@ describe("the session page", () => {
     let n = 0;
     page(async () => new Response(JSON.stringify(ok({ status: ++n === 1 ? "joining" : "in_meeting" }).body), { status: 200 }));
     await screen.findByText("Joining");
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
     expect(await screen.findByText("In the meeting")).toBeTruthy();
   });
 
@@ -162,6 +166,71 @@ describe("the session page", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" })).toBeTruthy();
   });
 
+  it("going to another session's page reads that session and never shows the previous one", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const other = "22222222-2222-4222-8222-222222222222";
+    let finish: (() => void) | undefined;
+    const api = fakeApi({
+      [PATH]: ok({ stageUrl: STAGE }),
+      [`GET /v1/sessions/${other}`]: () => new Promise<Response>((r) => {
+        finish = () => r(new Response(JSON.stringify({ session: session({ id: other, meetingUrl: "https://meet.google.com/abc-defg-hij", status: "ended" }) }), { status: 200 }));
+      }),
+    });
+    function Go() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate(`/sessions/${other}`)}>Next session</button>;
+    }
+    render(
+      <ApiProvider baseUrl={API} fetch={api.fetch}>
+        <MemoryRouter initialEntries={[`/sessions/${ID}`]}>
+          <Routes><Route path="/sessions/:id" element={<><SessionPage now={NOW} /><Go /></>} /></Routes>
+        </MemoryRouter>
+      </ApiProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Show stage link" }));
+    expect(screen.getByText(STAGE)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Next session" }));
+    expect(screen.getByRole("status", { name: "Loading session" })).toBeTruthy();
+    expect(screen.queryByText("kfp-qzwd-nre")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("stage-secret-token");
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    await act(async () => finish!());
+    expect(await screen.findByRole("heading", { level: 1, name: "abc-defg-hij" })).toBeTruthy();
+    expect(api.requests.map((r) => r.path).filter((p) => p.startsWith("/v1/sessions/"))).toEqual([`/v1/sessions/${ID}`, `/v1/sessions/${other}`]);
+  });
+
+  it("a second failed refresh shows (and announces) the failure again", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let n = 0;
+    let fail: (() => void) | undefined;
+    page(async () => {
+      if (++n === 1) return new Response(JSON.stringify(ok().body), { status: 200 });
+      return new Promise<Response>((r) => { fail = () => r(new Response(JSON.stringify(errorBody("db_unavailable")), { status: 503 })); });
+    });
+    await screen.findByRole("heading", { level: 1 });
+    for (const round of [1, 2]) {
+      fail = undefined;
+      await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+      expect(screen.queryByRole("alert"), `round ${round}: gone while retrying`).toBeNull();
+      await waitFor(() => expect(fail).toBeTypeOf("function"));
+      await act(async () => fail!());
+      expect(await screen.findByRole("alert")).toBeTruthy();
+    }
+  });
+
+  it("a refresh that finds the session gone shows the 404 page, not the old details or stage link", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let n = 0;
+    page(async () => (++n === 1
+      ? new Response(JSON.stringify(ok({ stageUrl: STAGE }).body), { status: 200 })
+      : new Response(JSON.stringify(errorBody("not_found")), { status: 404 })));
+    await userEvent.click(await screen.findByRole("button", { name: "Show stage link" }));
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+    expect(await screen.findByRole("heading", { level: 1, name: "No such session in this organization." })).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain("stage-secret-token");
+    expect(screen.queryByText("kfp-qzwd-nre")).toBeNull();
+  });
+
   it("has no accessibility violations: loaded with the stage link shown, and the 404", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     useScreen(DESKTOP_MOUSE);
@@ -183,7 +252,10 @@ describe("the stage link", () => {
     const show = await screen.findByRole("button", { name: "Show stage link" });
     expect(document.body.innerHTML).not.toContain("stage-secret-token");
     expect(show.getAttribute("aria-describedby")).toBeTruthy();
-    expect(document.getElementById(show.getAttribute("aria-describedby")!)!.textContent).toMatch(/controls the stage shown in the meeting/);
+    expect(document.getElementById(show.getAttribute("aria-describedby")!)!.textContent).toBe(
+      `This link controls the stage shown in the meeting. Anyone with it can change what's on screen and interrupt ${BOT_NAME}'s voice. `
+      + "Don't share it, and don't open it while the meeting is running unless you mean to. Opening it also saves it in this browser's history.",
+    );
     await userEvent.click(show);
     expect(screen.getByText(STAGE)).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Copy" }));
@@ -212,6 +284,20 @@ describe("the stage link", () => {
     await userEvent.click(screen.getByRole("button", { name: "Hide" }));
     expect(document.body.innerHTML).not.toContain("stage-secret-token");
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show stage link" }));
+  });
+
+  it("a second Copy is announced again; Hide and Show again drop the old \"Copied.\"", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+    page(ok({ stageUrl: STAGE }));
+    await userEvent.click(await screen.findByRole("button", { name: "Show stage link" }));
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    const first = await screen.findByText("Copied.");
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(screen.getByText("Copied.")).not.toBe(first));
+    await userEvent.click(screen.getByRole("button", { name: "Hide" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show stage link" }));
+    expect(screen.queryByText("Copied.")).toBeNull();
   });
 
   it("when copying fails, says so and selects the link to copy by hand", async () => {

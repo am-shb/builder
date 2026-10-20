@@ -62,7 +62,8 @@ export function SessionsList({ list, now, emptyAction }: {
   return (
     <section aria-labelledby="recent">
       {header}
-      {list.status === "error" && <RefreshFailed error={list.error} loadedAt={list.loadedAt} />}
+      {/* Hidden while a retry runs, so a second failure appears (and is announced) again. */}
+      {list.status === "error" && !list.refreshing && <RefreshFailed error={list.error} loadedAt={list.loadedAt} />}
       {sessions.length === 0 ? (
         <EmptyState
           className="mt-2"
@@ -97,7 +98,7 @@ export function RefreshFailed({ error, loadedAt, what = "the list", context = "r
   return (
     <p role="alert" className={cn("flex items-center gap-2 text-sm font-medium text-danger", className)}>
       <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
-      Couldn't refresh.{when ? ` Showing ${what} from ${when}.` : ""}
+      <span>Couldn't refresh.{when && <> Showing {what} from <span className="whitespace-nowrap">{when}</span>.</>}</span>
     </p>
   );
 }

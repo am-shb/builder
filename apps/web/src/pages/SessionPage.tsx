@@ -34,9 +34,11 @@ export function SessionPage({ now }: { now?: Date }) {
     </Link>
   );
 
-  if (query.status === "error" && !session) {
-    // No such session (or another org's): a whole-page state with the way back.
-    if (query.error instanceof ApiError && query.error.code === "not_found") {
+  const notFound = query.status === "error" && query.error instanceof ApiError && query.error.code === "not_found";
+  if (notFound || (query.status === "error" && !session)) {
+    // No such session (or another org's, or gone since it loaded): a whole-page state with the way back. Nothing of the
+    // session stays on screen, its stage link included.
+    if (notFound) {
       return (
         <SignedInShell>
           <PageState icon={<DraftToAgreed />} title="No such session in this organization."
@@ -69,7 +71,7 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
   const limits = limitsText(session.limits);
   return (
     <>
-      <header className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+      <header className="mt-3 flex items-start justify-between gap-x-4 sm:gap-x-6">
         <div className="min-w-0">
           <h1 className={cn(
             "tabular m-0 text-title font-semibold tracking-[-0.03em] break-words lg:text-title-lg",
@@ -79,12 +81,15 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
           </h1>
           <p className="mt-2 mb-0 text-ink-2">{meeting.platformLabel}, started {startedWhen(session.createdAt, now)}</p>
         </div>
-        <Button variant="quiet" size="sm" onClick={query.refresh} busy={query.refreshing} busyLabel="Refreshing…">
-          <RotateCw aria-hidden="true" />Refresh
+        {/* Beside the title at every width; on narrow phones only its icon shows, with "Refresh" as its name. */}
+        <Button variant="quiet" size="sm" onClick={query.refresh} busy={query.refreshing}
+          className="group shrink-0 max-[480px]:w-11 max-[480px]:px-0">
+          <RotateCw aria-hidden="true" className="group-aria-busy:hidden" />
+          <span className="max-[480px]:sr-only">{query.refreshing ? "Refreshing…" : "Refresh"}</span>
         </Button>
       </header>
 
-      {query.status === "error" && (
+      {query.status === "error" && !query.refreshing && (
         <RefreshFailed error={query.error} loadedAt={query.loadedAt} what="the details" context="detail" className="mt-4 mb-0" />
       )}
 
@@ -137,8 +142,11 @@ function Loading() {
         <Skeleton className="mt-4 h-9 w-[min(22rem,70%)] lg:h-12" />
         <Skeleton className="mt-3 h-4 w-48" />
         <Skeleton className="mt-7 h-[30px] w-36 rounded-full" />
-        <div className="mt-9 grid gap-3">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-5 w-full max-w-[560px]" />)}
+        <div className="mt-9 grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-16">
+          <div className="grid content-start gap-3">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-5 w-full max-w-[560px]" />)}
+          </div>
+          <Skeleton className="h-48 rounded-panel" />
         </div>
       </div>
     </div>

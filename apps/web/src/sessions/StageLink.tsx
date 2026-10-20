@@ -10,7 +10,8 @@ import { safeStageUrl } from "./detail.ts";
 // clipboard; opening it uses a new tab with no opener and no referrer. It's never logged or stored by this page.
 export function StageLink({ stageUrl, dev = import.meta.env.DEV }: { stageUrl: string | undefined; dev?: boolean }) {
   const [shown, setShown] = useState(false);
-  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  // Each copy is a new event (n), so a second Copy restarts the timer and is announced again.
+  const [copy, setCopy] = useState<{ kind: "idle" | "copied" | "failed"; n: number }>({ kind: "idle", n: 0 });
   const headingId = useId();
   const warningId = useId();
   const linkText = useRef<HTMLParagraphElement>(null);
@@ -25,13 +26,14 @@ export function StageLink({ stageUrl, dev = import.meta.env.DEV }: { stageUrl: s
   const toggle = (next: boolean) => {
     toggled.current = true;
     setShown(next);
+    setCopy((c) => ({ kind: "idle", n: c.n }));
   };
   const url = safeStageUrl(stageUrl, { dev });
 
   // "Copied" goes away after a few seconds, so it doesn't stay on screen as stale news.
   useEffect(() => {
-    if (copy === "idle") return;
-    const timer = setTimeout(() => setCopy("idle"), 4000);
+    if (copy.kind === "idle") return;
+    const timer = setTimeout(() => setCopy((c) => ({ kind: "idle", n: c.n })), 4000);
     return () => clearTimeout(timer);
   }, [copy]);
 
@@ -39,9 +41,9 @@ export function StageLink({ stageUrl, dev = import.meta.env.DEV }: { stageUrl: s
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
-      setCopy("copied");
+      setCopy((c) => ({ kind: "copied", n: c.n + 1 }));
     } catch {
-      setCopy("failed");
+      setCopy((c) => ({ kind: "failed", n: c.n + 1 }));
       // Selected, so it can be copied by hand.
       const range = document.createRange();
       if (linkText.current) {
@@ -87,8 +89,9 @@ export function StageLink({ stageUrl, dev = import.meta.env.DEV }: { stageUrl: s
           )}
           {/* Always mounted, so "Copied" is announced. */}
           <p role="status" className="m-0 mt-3 text-sm font-medium text-ink-2 empty:mt-0">
-            {shown && copy === "copied" && "Copied."}
-            {shown && copy === "failed" && "Couldn't copy. The link is selected; copy it yourself."}
+            {/* Keyed by the copy, so the same message twice is a new node and is announced again. */}
+            {shown && copy.kind === "copied" && <span key={copy.n}>Copied.</span>}
+            {shown && copy.kind === "failed" && <span key={copy.n}>Couldn't copy. The link is selected; copy it yourself.</span>}
           </p>
         </>
       )}

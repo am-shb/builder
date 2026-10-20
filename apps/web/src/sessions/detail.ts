@@ -33,7 +33,7 @@ export function exactTime(iso: string, locale?: string): string {
   return d.toLocaleString(locale, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-// The limits as people read them: "$5.00" and "60 minutes". Zero means no spending or no time at all, said as such.
+// The limits as people read them: "$5.00" and "60 minutes".
 export function limitsText(limits: SessionLimits, locale?: string): { spend: string; time: string } {
   const spend = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(limits.maxUsd);
   const minutes = limits.maxMinutes;

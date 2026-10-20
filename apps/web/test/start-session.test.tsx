@@ -470,14 +470,19 @@ describe("the start in the real app (through RequireOrg)", () => {
   it("a start keeps running across the app's own pages: its warning is shown and announced on return, and the next start asks", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     const slow = pending();
-    const api = apiWith(slow.reply);
+    const old = session({ id: "old", meetingUrl: "https://meet.google.com/xtr-mbha-qpo", status: "ended" });
+    const api = fakeApi({
+      "GET /v1/sessions": { status: 200, body: { sessions: [old] } },
+      "GET /v1/sessions/old": { status: 200, body: { session: old } },
+      "POST /v1/sessions": slow.reply,
+    });
     app(api);
     await screen.findByText("xtr-mbha-qpo");
     await startWith();
     await userEvent.click(screen.getByRole("link", { name: /xtr-mbha-qpo/ }));
-    expect(await screen.findByRole("heading", { name: "No such session in this organization." })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "xtr-mbha-qpo" })).toBeTruthy();
     await act(async () => slow.finish(new Response("<html>Gateway timeout</html>", { status: 504 })));
-    await userEvent.click(screen.getByRole("link", { name: "Back to sessions" }));
+    await userEvent.click(screen.getByRole("link", { name: "Sessions" }));
     expect((await shown()).textContent).toMatch(/couldn't confirm/);
     expect(await announced("alert")).toMatch(/couldn't confirm/);
     await startWith();
