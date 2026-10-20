@@ -29,7 +29,7 @@ export const TEMPLATES = {
     main: "main",
     areas: '"header header" "stats stats" "main side"',
     columns: "2fr 1fr",
-    suggest: "PageHeader in header; StatCards in stats; ChartCard/Table in main; ActivityList in side",
+    suggest: "PageHeader in header; StatCard in stats; ChartCard/Table in main; ActivityList in side",
   },
   "list-detail": {
     regions: {
@@ -51,7 +51,7 @@ export const TEMPLATES = {
     main: "main",
     areas: '"header header" "main aside"',
     columns: "2fr 1fr",
-    suggest: "Inputs/Selects/Toggles in main; help Card or Banner in aside",
+    suggest: "Input/Select/Toggle in main; help Card or Banner in aside",
   },
   feed: {
     regions: {
@@ -62,7 +62,7 @@ export const TEMPLATES = {
     main: "main",
     areas: '"header header" "main side"',
     columns: "2fr 1fr",
-    suggest: "MediaCards/Comments in main; AvatarGroup/Card in side",
+    suggest: "MediaCard/Comment in main; AvatarGroup/Card in side",
   },
   landing: {
     regions: {
@@ -74,7 +74,7 @@ export const TEMPLATES = {
     main: "features",
     areas: '"hero" "features" "pricing" "footer"',
     columns: "1fr",
-    suggest: "Hero in hero; FeatureGrid in features; PricingTiers in pricing",
+    suggest: "Hero in hero; FeatureGrid in features; PricingTier in pricing",
   },
   chat: {
     regions: {
@@ -95,7 +95,7 @@ export const TEMPLATES = {
     main: "main",
     areas: '"header header" "main summary"',
     columns: "1.6fr 1fr",
-    suggest: "Steps in header; Inputs in main; Card with totals in summary",
+    suggest: "Steps in header; Input in main; Card with totals in summary",
   },
 };
 

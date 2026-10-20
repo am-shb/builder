@@ -60,7 +60,7 @@
 | list-detail | header (row), list (stack), detail (stack) | detail | `"header header" "list detail"` | `1fr 1.6fr` | List/Table in list; Card/MediaCard in detail |
 | form | header (row), main (stack), aside (stack) | main | `"header header" "main aside"` | `2fr 1fr` | Inputs/Selects/Toggles in main; help Card or Banner in aside |
 | feed | header (row), main (stack), side (stack) | main | `"header header" "main side"` | `2fr 1fr` | MediaCards/Comments in main; AvatarGroup/Card in side |
-| landing | hero (stack), features (stack), pricing (grid of up to 3), footer (row) | features | `"hero" "features" "pricing" "footer"` | `1fr` | Hero in hero; FeatureGrid in features; PricingTiers in pricing |
+| landing | hero (stack), features (stack), pricing (grid of up to 3), footer (row) | features | `"hero" "features" "pricing" "footer"` | `1fr` | Hero in hero; FeatureGrid in features; PricingTier in pricing |
 | chat | list (stack), main (stack) | main | `"list main"` | `1fr 2fr` | ActivityList/List in list; ChatThread in main |
 | checkout | header (row), main (stack), summary (stack) | main | `"header header" "main summary"` | `1.6fr 1fr` | Steps in header; Inputs in main; Card with totals in summary |
 

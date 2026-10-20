@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSystemPrompt, componentTable } from "../src/agent/prompt-catalog.ts";
 import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, TEMPLATES } from "../public/renderer/catalog.js";
+import { PHONE_TABS } from "../public/renderer/interact.js";
 import { THEME_OPTIONS } from "../public/renderer/theme.js";
 
 test("the system prompt lists every component", () => {
@@ -58,4 +59,15 @@ test("the prompt lists every template with its regions and says the frame is aut
     assert.ok(row.includes(t.suggest), `${name} row lacks suggest`);
   }
   assert.ok(prompt.includes("never build navigation"));
+});
+
+test("every component-like word in a template's suggest line is a real type", () => {
+  for (const [name, t] of Object.entries(TEMPLATES)) {
+    for (const word of t.suggest.match(/\b[A-Z][A-Za-z]+\b/g) ?? []) assert.ok(COMPONENT_TYPES.includes(word), `${name} suggests unknown type ${word}`);
+  }
+});
+
+test("the prompt states the phone tab limit from the renderer", () => {
+  assert.ok(buildSystemPrompt().includes(`first ${PHONE_TABS} Screens as bottom tabs`));
+  assert.ok(buildSystemPrompt().includes("sidebar on a desktop screen"));
 });

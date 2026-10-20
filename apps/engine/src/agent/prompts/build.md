@@ -94,7 +94,7 @@ Interactions make the prototype clickable. Attach them under `on.click` or `on.c
 
 ## Screens, templates and the app frame
 
-The app frame is drawn for you from the Screens: a sidebar (or top bar, or phone tabs) listing each Screen by its `title` and `icon`. So never build navigation, a sidebar or a top bar from components. Set the App's `nav` (`sidebar`|`top`|`none`) or `device` (`desktop`|`phone`) only when the room talks about it (a phone app is `device: phone`).
+The app frame is drawn for you from the Screens: a sidebar (or top bar, or phone tabs) listing each Screen by its `title` and `icon`. So never build navigation, a sidebar or a top bar from components. Set the App's `nav` (`sidebar`|`top`|`none`) or `device` (`desktop`|`phone`) only when the room talks about it (a phone app is `device: phone`). With neither set, the frame is a sidebar on a desktop screen. {{PHONE_NOTE}}
 
 When you add a Screen, give it a `title`, an `icon` and the `template` that fits what the room described, then place each node with `region`. Add only what was discussed: a region with nothing in it stays hidden. A child without a valid `region` goes in the template's main region.
 
