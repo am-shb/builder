@@ -17,8 +17,14 @@ function filesIn(dir: string): string[] {
 const read = (files: string[]) => files.map((p) => ({ file: relative(root, p), text: readFileSync(p, "utf8") }));
 // The app's own code, which ships to the browser.
 const src = read(filesIn(join(root, "src")));
+// The public folder's scripts and pages, which ship as they are.
+const publicDir = join(root, "public");
+const publicFiles = read((function all(dir: string): string[] {
+  return readdirSync(dir).flatMap((n) => (statSync(join(dir, n)).isDirectory() ? all(join(dir, n)) : /\.(js|html)$/.test(n) ? [join(dir, n)] : []));
+})(publicDir));
+const appCode = [...src, ...publicFiles];
 // Everything that ends up in the built site or decides what goes in it.
-const shipped = [...src, ...read([join(root, "index.html"), join(root, "vite.config.ts"), ...filesIn(join(root, "build"))])];
+const shipped = [...appCode, ...read([join(root, "index.html"), join(root, "vite.config.ts"), ...filesIn(join(root, "build"))])];
 
 function offenders(files: { file: string; text: string }[], pattern: RegExp): string[] {
   return files.filter(({ text }) => pattern.test(text)).map(({ file }) => file);
@@ -35,7 +41,7 @@ describe("the app's code", () => {
     ["eval or new Function", /\beval\s*\(|\bnew\s+Function\b/],
     ["console", /\bconsole\./],
   ])("never uses %s", (_name, pattern) => {
-    expect(offenders(src, pattern)).toEqual([]);
+    expect(offenders(appCode, pattern)).toEqual([]);
   });
 });
 
@@ -44,23 +50,31 @@ describe("the app's code", () => {
 describe("browser storage", () => {
   const STORAGE = /\b(local|session)Storage\b|\bindexedDB\b|\bdocument\.cookie\b/;
   const EXCEPTIONS = new Set(["src/lib/color-mode.ts", "public/color-mode.js"]);
-  // The public folder's scripts and pages ship as they are.
-  const publicFiles = read(readdirSync(join(root, "public")).filter((n) => /\.(js|html)$/.test(n)).map((n) => join(root, "public", n)));
-
+  // The first argument of every getItem, setItem and removeItem call.
+  const storageKeys = (text: string) => [...text.matchAll(/\.(getItem|setItem|removeItem)\(\s*([^,)]+)/g)].map((m) => m[2]!.trim());
   it("finds the public script", () => {
     expect(publicFiles.map(({ file }) => file)).toContain("public/color-mode.js");
   });
 
   it("is used only by the color mode setting", () => {
-    expect(offenders([...src, ...publicFiles], STORAGE).filter((f) => !EXCEPTIONS.has(f))).toEqual([]);
+    expect(offenders(appCode, STORAGE).filter((f) => !EXCEPTIONS.has(f))).toEqual([]);
   });
 
-  it("the exceptions use localStorage only, for the one key", () => {
-    for (const { file, text } of [...src, ...publicFiles].filter(({ file }) => EXCEPTIONS.has(file))) {
+  it("the exceptions use localStorage only, through getItem, setItem and removeItem, for the one key", () => {
+    const exceptions = appCode.filter(({ file }) => EXCEPTIONS.has(file));
+    expect(exceptions.map(({ file }) => file).sort()).toEqual([...EXCEPTIONS].sort());
+    for (const { file, text } of exceptions) {
       expect(text, file).not.toMatch(/\bsessionStorage\b|\bindexedDB\b|\bdocument\.cookie\b/);
-      const keys = [...text.matchAll(/["'](builder\.[\w.-]+)["']/g)].map((m) => m[1]);
-      expect(new Set(keys), file).toEqual(new Set(["builder.color-mode"]));
+      // No other storage call (clear, key, length) and no property access on storage (storage[key], storage.x = ...).
+      expect(text, file).not.toMatch(/\.(clear|key)\(|localStorage\s*\[|\b(?:s|localStorage)\.(?!getItem|setItem|removeItem)\w+\s*=/);
+      const calls = storageKeys(text);
+      expect(calls.length, file).toBeGreaterThan(0);
+      for (const key of calls) expect(["STORAGE_KEY", '"builder.color-mode"'], `${file}: ${key}`).toContain(key);
     }
+  });
+
+  it("the key check catches another key", () => {
+    expect(storageKeys('s.removeItem(STORAGE_KEY); localStorage.setItem("prefs", "x"); s.getItem(key)')).toEqual(["STORAGE_KEY", '"prefs"', "key"]);
   });
 });
 

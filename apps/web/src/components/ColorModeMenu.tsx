@@ -1,5 +1,6 @@
 import { Check, Moon, Sun, SunMoon, type LucideIcon } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
+import { useId } from "react";
 import { useColorMode } from "../hooks/useColorMode.ts";
 import { COLOR_MODES, type ColorMode } from "../lib/color-mode.ts";
 import { cn } from "../lib/cn.ts";
@@ -19,6 +20,7 @@ const CHOICES: Record<ColorMode, { label: string; icon: LucideIcon }> = {
 export function ColorModeMenu({ className }: { className?: string }) {
   const [mode, setMode] = useColorMode();
   const { label, icon: Icon } = CHOICES[mode];
+  const headingId = useId();
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger
@@ -41,8 +43,8 @@ export function ColorModeMenu({ className }: { className?: string }) {
           "motion-safe:duration-150",
         )}
       >
-        <DropdownMenu.Label className="px-3 pt-1.5 pb-1 text-sm font-medium text-ink-2">Color mode</DropdownMenu.Label>
-        <DropdownMenu.RadioGroup value={mode} onValueChange={(value) => setMode(value as ColorMode)}>
+        <DropdownMenu.Label id={headingId} className="px-3 pt-1.5 pb-1 text-sm font-medium text-ink-2">Color mode</DropdownMenu.Label>
+        <DropdownMenu.RadioGroup aria-labelledby={headingId} value={mode} onValueChange={(value) => setMode(value as ColorMode)}>
           {COLOR_MODES.map((m) => {
             const { label: itemLabel, icon: ItemIcon } = CHOICES[m];
             return (

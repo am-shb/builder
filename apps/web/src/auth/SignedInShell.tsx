@@ -39,5 +39,7 @@ function LabelInName({ children }: { children: ReactNode }) {
     observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-label"] });
     return () => observer.disconnect();
   }, []);
-  return <span ref={box} className="contents">{children}</span>;
+  // A flex item that may shrink, and Clerk's root box inside it too (its min-width is auto), so on a narrow phone the
+  // org name is cut short with an ellipsis instead of pushing the color mode and account buttons off screen.
+  return <span ref={box} className="flex min-w-0 [&>.cl-rootBox]:min-w-0">{children}</span>;
 }

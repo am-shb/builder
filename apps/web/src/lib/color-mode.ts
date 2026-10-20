@@ -33,13 +33,14 @@ export function readStoredMode(): ColorMode {
   }
 }
 
-// Keeps the choice for the next visit. False when storage refused it; the choice still applies to this page.
+// Keeps the choice for the next visit. False when storage refused it; the choice still applies to this page. The old
+// value goes first, so a write refused for a full quota leaves System for the next visit, not an older choice.
 export function storeMode(mode: ColorMode): boolean {
   try {
     const s = storage();
     if (!s) return false;
-    if (mode === "system") s.removeItem(STORAGE_KEY);
-    else s.setItem(STORAGE_KEY, mode);
+    s.removeItem(STORAGE_KEY);
+    if (mode !== "system") s.setItem(STORAGE_KEY, mode);
     return true;
   } catch {
     return false;
@@ -47,7 +48,8 @@ export function storeMode(mode: ColorMode): boolean {
 }
 
 // Sets the page to a mode: `data-theme` on <html>, and the theme-color tags. index.html has one per system mode
-// (media="(prefers-color-scheme: light|dark)"); a forced mode gives both that mode's color, System puts them back.
+// (media="(prefers-color-scheme: light|dark)"); a forced mode gives every tag the first matching tag's color, System
+// puts them back.
 export function applyColorMode(mode: ColorMode, doc: Document = document): void {
   const root = doc.documentElement;
   if (mode === "system") delete root.dataset.theme;
@@ -55,15 +57,16 @@ export function applyColorMode(mode: ColorMode, doc: Document = document): void 
 
   const metas = [...doc.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
   for (const m of metas) m.dataset.defaultContent ??= m.content;
-  const colorFor = (scheme: string) => metas.find((m) => (m.getAttribute("media") ?? "").includes(scheme))?.dataset.defaultContent;
+  const colorFor = (scheme: string) => metas.find((m) => (m.getAttribute("media") ?? "").includes(`prefers-color-scheme: ${scheme}`))?.dataset.defaultContent;
   for (const m of metas) {
     const own = m.dataset.defaultContent ?? m.content;
     m.content = mode === "system" ? own : (colorFor(mode) ?? own);
   }
 }
 
-// The current choice, shared by every toggle on the page, with listeners for React (useColorMode).
-let current: ColorMode = "system";
+// The current choice, shared by every toggle on the page, with listeners for React (useColorMode). Read from storage
+// when this module loads, so the menu shows the stored choice even before initColorMode runs.
+let current: ColorMode = readStoredMode();
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((l) => l());
 
@@ -79,9 +82,10 @@ export function getColorMode(): ColorMode {
   return current;
 }
 
-export function setColorMode(mode: ColorMode): void {
+// `remember: false` applies a mode to this page only (the dev-only design page's ?theme=).
+export function setColorMode(mode: ColorMode, { remember = true } = {}): void {
   current = mode;
-  storeMode(mode);
+  if (remember) storeMode(mode);
   applyColorMode(mode);
   notify();
 }

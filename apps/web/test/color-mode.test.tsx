@@ -34,6 +34,15 @@ function setThemeColorTags() {
 }
 const themeColors = () => [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((m) => m.content);
 const theme = () => document.documentElement.getAttribute("data-theme");
+// A narrower tag a later change might add after the two; it mustn't win over the plain dark one.
+const CONTRAST = "#000000";
+function addContrastTag() {
+  const m = document.createElement("meta");
+  m.setAttribute("name", "theme-color");
+  m.setAttribute("media", "(prefers-color-scheme: dark) and (prefers-contrast: more)");
+  m.setAttribute("content", CONTRAST);
+  document.head.append(m);
+}
 
 // Storage that throws on every use, as in a browser that blocks site data, or a full quota.
 function breakStorage(how: "access" | "calls") {
@@ -78,6 +87,13 @@ describe("the stored choice", () => {
     expect(localStorage.length).toBe(0);
   });
 
+  it("a write refused for a full quota leaves System for the next visit, not an older choice", () => {
+    storeMode("light");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+    expect(storeMode("dark")).toBe(false);
+    expect(readStoredMode()).toBe("system");
+  });
+
   it.each(["access", "calls"] as const)("with storage blocked (%s), reads System and writes nothing, without throwing", (how) => {
     breakStorage(how);
     expect(readStoredMode()).toBe("system");
@@ -106,6 +122,15 @@ describe("applying a mode", () => {
     expect(themeColors()).toEqual([LIGHT, DARK]);
   });
 
+  it("with a third, narrower tag, the first tag for the mode gives the color", () => {
+    setThemeColorTags();
+    addContrastTag();
+    applyColorMode("dark");
+    expect(themeColors()).toEqual([DARK, DARK, DARK]);
+    applyColorMode("system");
+    expect(themeColors()).toEqual([LIGHT, DARK, CONTRAST]);
+  });
+
   it("works with no theme-color tags", () => {
     expect(() => applyColorMode("dark")).not.toThrow();
   });
@@ -117,6 +142,20 @@ describe("the store", () => {
     initColorMode();
     expect(getColorMode()).toBe("dark");
     expect(theme()).toBe("dark");
+  });
+
+  it("reads the stored choice when the module loads, before initColorMode", async () => {
+    localStorage.setItem(STORAGE_KEY, "dark");
+    vi.resetModules();
+    const fresh = await import("../src/lib/color-mode.ts");
+    expect(fresh.getColorMode()).toBe("dark");
+  });
+
+  it("a mode for this page only isn't remembered", () => {
+    setColorMode("dark", { remember: false });
+    expect(theme()).toBe("dark");
+    expect(getColorMode()).toBe("dark");
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("with storage blocked, a choice still applies to this page", () => {
@@ -155,9 +194,9 @@ describe("the store", () => {
 describe("before first paint (public/color-mode.js)", () => {
   it("index.html loads it as a blocking script from our origin, after the theme-color tags and before the app", () => {
     const head = indexHtml.slice(0, indexHtml.indexOf("</head>"));
-    const tag = /<script src="\/color-mode\.js"><\/script>/.exec(head);
+    const tag = /<script\b[^>]*color-mode\.js[^>]*>/.exec(head);
     expect(tag).not.toBeNull();
-    expect(tag![0]).not.toMatch(/\b(async|defer|type=)/);
+    expect(tag![0]).toBe('<script src="/color-mode.js">');
     expect(head.lastIndexOf('name="theme-color"')).toBeLessThan(tag!.index);
     expect(indexHtml.indexOf("/src/main.tsx")).toBeGreaterThan(tag!.index);
     // No inline script anywhere: every <script> has a src (the CSP allows no inline scripts).
@@ -168,14 +207,18 @@ describe("before first paint (public/color-mode.js)", () => {
     expect(publicScript).toContain(`"${STORAGE_KEY}"`);
   });
 
-  it.each(["system", "light", "dark"] as ColorMode[])("leaves the page as the app's applyColorMode would (%s)", (mode) => {
-    setThemeColorTags();
+  it.each([
+    ...(["system", "light", "dark"] as ColorMode[]).map((mode) => [mode, false] as const),
+    ...(["light", "dark"] as ColorMode[]).map((mode) => [mode, true] as const),
+  ])("leaves the page as the app's applyColorMode would (%s, a third tag: %s)", (mode, third) => {
+    const tags = () => { setThemeColorTags(); if (third) addContrastTag(); };
+    tags();
     storeMode(mode);
     runPublicScript();
     const fromScript = { theme: theme(), colors: themeColors() };
     // The same page through the app's own code.
     document.documentElement.removeAttribute("data-theme");
-    setThemeColorTags();
+    tags();
     applyColorMode(readStoredMode());
     expect(fromScript).toEqual({ theme: theme(), colors: themeColors() });
   });
@@ -222,6 +265,7 @@ describe("ColorModeMenu", () => {
     const menu = await screen.findByRole("menu");
     expect(menu.getAttribute("aria-labelledby")).toBe(button.id);
     const items = screen.getAllByRole("menuitemradio");
+    expect(screen.getByRole("group", { name: "Color mode" })).toBeTruthy();
     expect(items.map((i) => [i.textContent, i.getAttribute("aria-checked")])).toEqual([
       ["System", "true"], ["Light", "false"], ["Dark", "false"],
     ]);
