@@ -28,4 +28,29 @@ export const clerkAppearance = {
     fontFamilyButtons: "var(--font-sans)",
     borderRadius: "var(--radius-field)",
   },
+  // Our classes on Clerk's parts, so its cards and buttons match ours: the one elevation, pill buttons, our field.
+  elements: {
+    cardBox: "rounded-panel shadow-elevated",
+    // The box carries the one elevation; the card inside it gets none, so there's no seam above the footer.
+    card: "shadow-none",
+    dividerLine: "bg-input/50",
+    formButtonPrimary: "min-h-12 rounded-full bg-primary text-label font-semibold shadow-glow after:hidden hover:bg-primary-hover",
+    socialButtonsBlockButton: "min-h-11 rounded-full border-0 shadow-outline hover:bg-sunk",
+    socialButtonsBlockButtonText: "text-label font-semibold text-ink",
+    // Clerk's small secondary buttons (Upload, Manage) as our outline pill, 44px.
+    avatarImageActionsUpload: "min-h-11 rounded-full px-4 text-label font-semibold text-ink shadow-outline hover:bg-sunk",
+    organizationSwitcherPopoverActionButton__manageOrganization: "min-h-11 rounded-full px-4 text-ink shadow-outline hover:bg-sunk",
+    // The phone field is a box holding a country picker and an input: the box gets the border, the input none.
+    phoneInputBox: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus-within:border-primary focus-within:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)] [&_input]:border-0 [&_input]:shadow-none",
+    formFieldInput: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus:border-primary focus:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
+    organizationSwitcherTrigger: "h-11 rounded-full py-0 pr-2.5 pl-1.5 hover:bg-sunk focus-visible:outline-2 focus-visible:outline-primary",
+    organizationPreviewAvatarBox: "size-[30px] rounded-full bg-accent-tint",
+    organizationPreviewMainIdentifier: "text-sm font-medium text-ink",
+    organizationSwitcherPopoverCard: "ring-1 ring-hair",
+    organizationSwitcherPopoverActionButton: "min-h-12 text-ink",
+    userButtonPopoverCard: "ring-1 ring-hair",
+    userButtonPopoverActionButton: "min-h-12 text-ink",
+    userButtonTrigger: "grid size-11 place-items-center rounded-full hover:bg-sunk focus-visible:outline-2 focus-visible:outline-primary",
+    userButtonAvatarBox: "size-[30px] bg-accent-tint",
+  },
 } satisfies Appearance;

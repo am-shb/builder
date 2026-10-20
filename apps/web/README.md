@@ -1,7 +1,7 @@
 # apps/web: the customer app and staff pages
 
-**Status:** design foundation (W1b in [the plan](../../docs/plans/web-first-slice.md)). It renders a placeholder
-in the app shell and calls nothing. Stack and rules: [ADR 0012](../../docs/adr/0012-web-stack.md); visual design:
+**Status:** sign-in and organizations (W2 in [the plan](../../docs/plans/web-first-slice.md)): Clerk sign-in, sign-up,
+choosing an organization, and the signed-in shell with the org switcher. It doesn't call the api yet. Stack and rules: [ADR 0012](../../docs/adr/0012-web-stack.md); visual design:
 ADR 0013 ("Boardroom"). **Owner:** TBD. Claim it in
 [docs/workstreams.md](../../docs/workstreams.md).
 
@@ -19,7 +19,8 @@ Node 24 (`.nvmrc`), from the repo root after `npm ci`:
 | `npm run build -w @builder/web` | Static build in `apps/web/dist/` (git-ignored), with the Content Security Policy written into `index.html` |
 | `npm run preview -w @builder/web` | Serves the build on port 4173 |
 | `npm run check -w @builder/web` | Type check, tests, build, and a check that `/_design` isn't in the build. Needs no key and no network. Root `npm run check` and CI run it too |
-| `npm run screenshots -w @builder/web` | Starts its own dev server and takes screenshots of `/_design` and the app shell at 390 and 1280px (and 360), light and dark, into `apps/web/screenshots/` (git-ignored). Runs axe in Chrome, contrast included, and fails on a violation or sideways scrolling. Blocks every request that isn't to that local server. Needs Chrome (`CHROME_PATH` if it isn't found). Never run by `npm test` |
+| `npm run screenshots -w @builder/web` | Starts its own dev server and takes screenshots of `/_design` and the app shell at 390 and 1280px (and 360), light and dark, into `apps/web/screenshots/` (git-ignored). Runs axe in Chrome, contrast included, and fails on a violation or sideways scrolling. Blocks every request that isn't to that local server, except that sign-in shots may reach the Clerk development instance named by `apps/web/.env`. Signed-in shots need `SIGNED_IN_STATE` (and `PENDING_STATE`) from `save-session`; without them they're skipped. Needs Chrome (`CHROME_PATH` if it isn't found). Never run by `npm test` |
+| `npm run save-session -w @builder/web -- <folder> <+1XXX55501XX>` | Signs in headless to the Clerk development instance as an existing test account (a fictional 555-01xx number, Clerk's test code, no SMS) and saves the browser session to `<folder>`, outside the repo. Development keys only. It never signs up: sign-up has a bot check, so create the test account by hand once |
 
 In the dev server, **http://localhost:5173/_design** shows every component and state; `?view=shell` shows the sessions
 screen built from them (`&empty=1`, `&open=sheet`, `&open=confirm`, `&toast=1`), and `?theme=light` or `?theme=dark`

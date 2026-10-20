@@ -285,3 +285,14 @@
     animation: turn 0.9s linear infinite;
   }
 }
+
+/* Clerk's generated default avatars (no uploaded logo or photo) are purple and blue. Their image URL carries
+   {"type":"default"} in base64 (an undocumented detail: if Clerk changes it, the default colors simply come back), so
+   only those are made neutral and take the accent tint of the box behind them. Uploaded images are left alone. */
+@layer components {
+  .cl-avatarImage[src*="eyJ0eXBlIjoiZGVmYXVsdCI"] {
+    filter: grayscale(1) contrast(0.9);
+    mix-blend-mode: luminosity;
+    opacity: 0.8;
+  }
+}
