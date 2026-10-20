@@ -286,3 +286,33 @@ test("applyStatusEvent in the database: forward only, within the org", async () 
   assert.equal(await db.applyStatusEvent("org_a", s.id, "ended", null), "stale");
   assert.deepEqual([(await current(db, s)).status, (await current(db, s)).errorCode], ["failed", "fatal_x"]);
 });
+
+test("an unconfirmed start can't take a meeting link another session of the org holds: 409, and it stays as it is", async () => {
+  const { db, server, logs } = await api();
+  await db.upsertOrg("org_a");
+  const meetingUrl = newMeeting();
+  const a = (await db.createSessionUnlessActive("org_a", { id: randomUUID(), createdBy: "user_1", meetingUrl, limits: LIMITS })).session;
+  await db.setSessionStart("org_a", a.id, { kind: "unknown", errorCode: "timeout" });
+  const b = (await db.createSessionUnlessActive("org_a", { id: randomUUID(), createdBy: "user_1", meetingUrl, limits: LIMITS })).session;
+  await db.setSessionStart("org_a", b.id, { kind: "ok", status: "joining", stageUrl: "https://engine.example.com/stage/b" });
+  assert.equal(await db.applyStatusEvent("org_a", a.id, "joining", null), "conflict");
+  await withServer(server, async (base) => {
+    const res = await post(base, statusEvent(a, "in_meeting"));
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: { code: string } }).error.code, "meeting_in_use");
+    // Ending or failing never holds the link, so it always applies.
+    assert.deepEqual(await (await post(base, statusEvent(a, "ended"))).json(), { applied: true });
+  });
+  assert.equal((await current(db, a)).status, "ended");
+  assert.equal((await current(db, b)).status, "joining", "the session holding the link is untouched");
+  assert.ok(logs.some((l) => l.msg === "engine_event.status" && l.fields?.outcome === "conflict"));
+});
+
+test("a session already holding its link moves on, even with another session of the org in other meetings", async () => {
+  const db = await testDb();
+  const a = await startedSession(db);
+  const other = await startedSession(db);
+  await db.setSessionStart("org_a", other.id, { kind: "ok", status: "joining", stageUrl: "https://engine.example.com/stage/o" });
+  assert.equal(await db.applyStatusEvent("org_a", a.id, "joining", null), "applied");
+  assert.equal(await db.applyStatusEvent("org_a", a.id, "in_meeting", null), "applied");
+});

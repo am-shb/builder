@@ -152,6 +152,36 @@ describe("a quiet refresh", () => {
   });
 });
 
+describe("a quiet refresh while the person's Refresh runs", () => {
+  it("is skipped, so it can't cancel that Refresh or hide its failure", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let calls = 0;
+    let release: (() => void) | null = null;
+    const fetch = (async () => {
+      calls += 1;
+      if (calls === 1) return Response.json({ sessions: [session({ status: "joining" })] });
+      // The person's Refresh: slow, then failing.
+      await new Promise<void>((r) => { release = r; });
+      return Response.json(errorBody("db_unavailable"), { status: 503 });
+    }) as typeof globalThis.fetch;
+    const { result } = renderHook(() => useOrgQuery((api, signal) => api.listSessions(signal)), {
+      wrapper: ({ children }) => <ApiProvider baseUrl={API} fetch={fetch}>{children}</ApiProvider>,
+    });
+    await vi.waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.refresh());
+    await vi.waitFor(() => expect(calls).toBe(2));
+    act(() => result.current.quietRefresh());
+    await tick(0);
+    expect(calls).toBe(2);
+    expect(result.current.refreshing).toBe(true);
+    act(() => release!());
+    await vi.waitFor(() => expect(result.current.status).toBe("error"));
+    // Once it's settled, quiet refreshes run again.
+    act(() => result.current.quietRefresh());
+    await vi.waitFor(() => expect(calls).toBe(3));
+  });
+});
+
 describe("the list", () => {
   function home(sessions: () => SessionView[]) {
     const api = fakeApi({ "GET /v1/sessions": async () => Response.json({ sessions: sessions() }) });

@@ -5,7 +5,8 @@
 // Not for browsers: no Clerk, no CORS. It needs the shared bearer token (ENGINE_INTERNAL_TOKEN, the one the api
 // sends the engine), compared in constant time, and answers 404 when that isn't set or when the request came
 // through a public proxy, the same check the engine makes on its own /internal routes. The engine's reporter
-// (apps/engine/src/api-events.ts) tries again on 401, 5xx and network errors, and drops an event on any other 4xx.
+// (apps/engine/src/api-events.ts) tries again on 401, 5xx, network errors and a 404 for the route itself (an api
+// without this route, mid-deploy), and drops an event on any other 4xx, such as 404 session_not_found.
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { parseEngineEvent } from "../contracts.ts";
@@ -62,6 +63,8 @@ export function engineEventRoutes(deps: { db: Db | null; token: string | null; l
         : "not_found";
       deps.log("engine_event.status", { session_id: event.sessionId, org_id: event.orgId, status: event.status, outcome });
       if (outcome === "not_found") throw new HttpError(404, "session_not_found", "No such session in that organization.");
+      // Final for this event: the engine drops it on a 409.
+      if (outcome === "conflict") throw new HttpError(409, "meeting_in_use", "Another session of the organization holds this meeting link.");
       sendJson(res, 200, { applied: outcome === "applied" });
     },
   }];

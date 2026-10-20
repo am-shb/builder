@@ -30,7 +30,8 @@ export type OrgQuery<T> = {
   loadedAt: Date | undefined;
   refresh: () => void;
   // A refresh in the background (the auto-refresh while a session may still change): no busy state, and if it fails
-  // the data on screen stays as it was, with no error. The next one, or the person's Refresh, tries again.
+  // the data on screen stays as it was, with no error. The next one, or the person's Refresh, tries again. Skipped
+  // while another load (the first one, or a Refresh the person asked for) is still running, so it never cancels it.
   quietRefresh: () => void;
 };
 
@@ -41,6 +42,8 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
   const api = useApi();
   const { orgId } = useAuth();
   const [nonce, setNonce] = useState({ n: 0, quiet: false });
+  // Whether a load is running, and whether it's a quiet one.
+  const running = useRef<"quiet" | "loud" | null>(null);
   type State = { scope: string; status: OrgQuery<T>["status"]; data: T | undefined; error: unknown; refreshing: boolean; loadedAt: Date | undefined };
   const [state, setState] = useState<State>({ scope: "", status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined });
   const loadRef = useRef(load);
@@ -51,13 +54,19 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
     if (!orgId) return;
     const controller = new AbortController();
     const quiet = nonce.quiet;
+    running.current = quiet ? "quiet" : "loud";
+    const settled = () => { if (!controller.signal.aborted) running.current = null; };
     setState((s) => (s.scope === scope && s.data !== undefined
       // A quiet refresh leaves the busy state as it is (a Refresh the person asked for may be running).
       ? { ...s, refreshing: quiet ? s.refreshing : true }
       : { scope, status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined }));
     loadRef.current(api, controller.signal).then(
-      (data) => { if (!controller.signal.aborted) setState({ scope, status: "ready", data, error: undefined, refreshing: false, loadedAt: new Date() }); },
+      (data) => {
+        settled();
+        if (!controller.signal.aborted) setState({ scope, status: "ready", data, error: undefined, refreshing: false, loadedAt: new Date() });
+      },
       (error) => {
+        settled();
         if (controller.signal.aborted || isAbort(error)) return;
         setState((s) => {
           // A quiet refresh that fails changes nothing on screen.
@@ -72,7 +81,10 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
   }, [api, orgId, scope, nonce]);
 
   const refresh = useCallback(() => setNonce((x) => ({ n: x.n + 1, quiet: false })), []);
-  const quietRefresh = useCallback(() => setNonce((x) => ({ n: x.n + 1, quiet: true })), []);
+  const quietRefresh = useCallback(() => {
+    if (running.current === "loud") return;
+    setNonce((x) => ({ n: x.n + 1, quiet: true }));
+  }, []);
   // Never show another org's data, even for the one render before the effect runs.
   if (state.scope !== scope) return { status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined, refresh, quietRefresh };
   return { ...state, refresh, quietRefresh };

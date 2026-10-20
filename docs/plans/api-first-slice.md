@@ -351,7 +351,15 @@ joining, in the meeting, ended, failed. ADR 0008 has the delivery rules.
 - **Web:** the list and a session's page refresh quietly every 10 seconds while a session may still change (WD6),
   and say why a session ended or failed.
 - **Infra:** `API_INTERNAL_URL` on `builder-engine`, from `builder-api`'s private `hostport`, is on the
-  `infra/render-web` branch with the other `render.yaml` changes.
+  `infra/render-web` branch with the other `render.yaml` changes. Either can merge first: an engine without A2
+  ignores it, and an api without A2 answers 404, which the engine retries for up to 6 hours.
+- **Known gaps:**
+  - A `start_unknown` session that events move on has no stage link: the engine's start reply never reached the
+    api. Fix later by having the api ask the engine again with the same `sessionId` (E2 replays it), or by
+    carrying the stage link in an event.
+  - After an engine restart, the sweep has no Recall history, so an end reason the api missed is lost (the status
+    still arrives).
+  - A status that changes on its own isn't announced to screen readers; the page and list update quietly (WD6).
 
 ## Changes outside apps/api
 These need approval before anyone builds them. None of them blocks a step: O1, the only one that did, is on `main`.

@@ -79,15 +79,19 @@ test("sessions the api didn't start, or without a bot, have no event", () => {
 
 type Sent = { url: string; auth: string | null; body: SessionStatusEvent };
 
-/** A reporter against a fake api that answers with `reply` (a status, or a function throwing a network error). */
-function harness(reply: (n: number, body: SessionStatusEvent) => number | Promise<number> = () => 200) {
+/** A reporter against a fake api that answers with `reply`: a status, a status and an error code, or a throw. */
+type Answer = number | { status: number; code: string };
+function harness(reply: (n: number, body: SessionStatusEvent) => Answer | Promise<Answer> = () => 200) {
   let now = NOW;
   const sent: Sent[] = [];
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const fakeFetch = (async (url: string, init: RequestInit) => {
     const body = SessionStatusEvent.parse(JSON.parse(String(init.body)));
     sent.push({ url, auth: new Headers(init.headers).get("authorization"), body });
-    return new Response(JSON.stringify({ applied: true }), { status: await reply(sent.length, body) });
+    const a = await reply(sent.length, body);
+    const status = typeof a === "number" ? a : a.status;
+    const json = typeof a === "number" ? (status < 300 ? { applied: true } : { error: { code: "not_found" } }) : { error: { code: a.code } };
+    return new Response(JSON.stringify(json), { status });
   }) as typeof fetch;
   const store: { listOrgSessionsUpdatedSince: (since: Date) => Promise<Session[]> } = { listOrgSessionsUpdatedSince: async () => [] };
   const reporter = createStatusReporter({ apiUrl: API, token: TOKEN, store, log: (msg, fields) => logs.push({ msg, fields }), fetch: fakeFetch, clock: () => now });
@@ -143,7 +147,7 @@ test("401, 408, 429, 5xx and network errors are retried; other 4xx are dropped",
     await h.reporter.flush();
     assert.deepEqual([h.sent.length, h.reporter.waiting()], [2, 0], `${status} is retried, then delivered`);
   }
-  for (const status of [400, 403, 404, 409, 422]) {
+  for (const status of [400, 403, 409, 413, 415, 422]) {
     const h = harness(() => status);
     h.reporter.notify(session());
     await h.reporter.flush();
@@ -152,12 +156,76 @@ test("401, 408, 429, 5xx and network errors are retried; other 4xx are dropped",
     assert.deepEqual([h.sent.length, h.reporter.waiting()], [1, 0], `${status} is dropped`);
     assert.ok(h.logs.some((l) => l.msg === "api_events.dropped" && l.fields?.http === status));
   }
+  const gone = harness(() => ({ status: 404, code: "session_not_found" }));
+  gone.reporter.notify(session());
+  await gone.reporter.flush();
+  gone.advance(120_000);
+  await gone.reporter.flush();
+  assert.deepEqual([gone.sent.length, gone.reporter.waiting()], [1, 0], "404 session_not_found is dropped");
   const network = harness((n) => { if (n === 1) throw new TypeError("fetch failed"); return 200; });
   network.reporter.notify(session());
   await network.reporter.flush();
   network.advance(2_000);
   await network.reporter.flush();
   assert.deepEqual([network.sent.length, network.reporter.waiting()], [2, 0], "a network error is retried");
+});
+
+test("a 404 for the route itself (an api without it, mid-deploy) is retried, not dropped", async () => {
+  for (const code of ["not_found", "something_else"]) {
+    const h = harness((n) => (n === 1 ? { status: 404, code } : 200));
+    h.reporter.notify(session());
+    await h.reporter.flush();
+    assert.equal(h.reporter.waiting(), 1, code);
+    h.advance(2_000);
+    await h.reporter.flush();
+    assert.deepEqual([h.sent.length, h.reporter.waiting()], [2, 0], `${code}: retried, then delivered`);
+  }
+  // A 404 whose body isn't JSON (a proxy's page) is retried too.
+  let n = 0, t = NOW;
+  const plain = createStatusReporter({
+    apiUrl: API, token: TOKEN, store: { listOrgSessionsUpdatedSince: async () => [] }, log: () => {}, clock: () => t,
+    fetch: (async () => { n += 1; return new Response("Not Found", { status: n === 1 ? 404 : 200 }); }) as typeof fetch,
+  });
+  plain.notify(session());
+  await plain.flush();
+  t += 2_000;
+  await plain.flush();
+  assert.deepEqual([n, plain.waiting()], [2, 0]);
+});
+
+test("after 6 hours of failing, an event is dropped; retry lines are logged for the first few, then every tenth", async () => {
+  const h = harness(() => 503);
+  h.reporter.notify(session());
+  await h.reporter.flush();
+  for (let i = 0; i < 400 && h.reporter.waiting() > 0; i++) {
+    h.advance(60_000);
+    await h.reporter.flush();
+  }
+  assert.equal(h.reporter.waiting(), 0, "given up");
+  assert.ok(h.logs.some((l) => l.msg === "api_events.gave_up"));
+  const retries = h.logs.filter((l) => l.msg === "api_events.retry").map((l) => l.fields?.attempts as number);
+  assert.deepEqual(retries.slice(0, 5), [1, 2, 3, 10, 20]);
+  assert.ok(retries.length < 50, `${retries.length} retry lines`);
+});
+
+test("a lower status never replaces a higher one waiting (the restart sweep's older read)", async () => {
+  const h = harness((n) => (n === 1 ? 503 : 200));
+  const s = session({ bot_status: "done" });
+  h.reporter.notify(s);
+  await h.reporter.flush();
+  h.reporter.notify({ ...s, bot_status: "in_call_recording" });
+  h.reporter.notify({ ...s, bot_status: "joining_call" });
+  h.advance(2_000);
+  await h.reporter.flush();
+  assert.deepEqual(h.sent.map((x) => x.body.status), ["ended", "ended"]);
+  // Same rank (ended, then failed): the newer one still replaces it.
+  const g = harness((n) => (n === 1 ? 503 : 200));
+  const t = session({ bot_status: "done" });
+  g.reporter.notify(t);
+  await g.reporter.flush();
+  g.reporter.notify({ ...t, bot_status: "fatal" });
+  await g.reporter.flush();
+  assert.deepEqual(g.sent.map((x) => x.body.status), ["ended", "failed"]);
 });
 
 test("a send that hangs times out and is retried", { timeout: 5_000 }, async () => {

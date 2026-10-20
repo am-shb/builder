@@ -8,8 +8,12 @@
 //   refuses to move a session backwards.
 // - The event id is fixed for a session and status, so sending it again is harmless.
 // - 2xx: delivered. 401, 408, 429, 5xx, a timeout or a network error: tried again, waiting 2 s, then twice as long
-//   each time, up to 60 s. Any other 4xx (no such session, a malformed event): logged and dropped, since sending it
-//   again can't help.
+//   each time, up to 60 s. So is a 404 for the route itself (an api without it, mid-deploy, or the route turned off):
+//   only a 404 that says `session_not_found` is about the event. Any other 4xx (no such session, a malformed event,
+//   another session holding the link): logged and dropped, since sending it again can't help. After 6 hours of
+//   failing, an event is dropped too, so a wrong token can't keep events forever.
+// - A lower status never replaces a higher one waiting (joining < in_meeting < ended or failed), so the restart
+//   sweep's slower read can't push back a newer status the poll has just queued.
 // - Waiting events are kept in memory. After a restart, `sweep` queues the current status of every org session
 //   changed in the last day, and the api ignores what it already has.
 // Never logs more than ids, statuses, codes and HTTP statuses.
@@ -25,6 +29,8 @@ export const EVENTS_PATH = "/internal/engine-events";
 const FIRST_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 60_000;
 const TIMEOUT_MS = 5_000;
+const GIVE_UP_MS = 6 * 60 * 60 * 1000;
+const RANK: Record<SessionStatusEvent["status"], number> = { joining: 1, in_meeting: 2, ended: 3, failed: 3 };
 export const SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // Recall's sub-codes are plain snake_case codes; anything else is sent as a generic one.
@@ -59,7 +65,7 @@ export function statusEvent(s: Session, at: Date, changes: readonly StatusChange
   });
 }
 
-type Waiting = { event: SessionStatusEvent; attempts: number; nextAt: number };
+type Waiting = { event: SessionStatusEvent; attempts: number; nextAt: number; since: number };
 
 export type StatusReporter = {
   /** Queues the session's current status for the api, if it's new. Never throws. */
@@ -94,8 +100,10 @@ export function createStatusReporter(deps: {
     try {
       const event = statusEvent(s, new Date(clock()), changes);
       if (!event) return;
-      if (delivered.get(s.id) === event.id || waiting.get(s.id)?.event.id === event.id) return;
-      waiting.set(s.id, { event, attempts: 0, nextAt: clock() });
+      const queued = waiting.get(s.id)?.event;
+      if (delivered.get(s.id) === event.id || queued?.id === event.id) return;
+      if (queued && RANK[queued.status] > RANK[event.status]) return;
+      waiting.set(s.id, { event, attempts: 0, nextAt: clock(), since: clock() });
       void flush();
     } catch (err) {
       deps.log("api_events.queue_failed", { session_id: s.id, error: errorCode(err) });
@@ -112,8 +120,16 @@ export function createStatusReporter(deps: {
         body: JSON.stringify(event),
         signal: AbortSignal.timeout(deps.timeoutMs ?? TIMEOUT_MS),
       });
+      if (res.ok) {
+        await res.body?.cancel().catch(() => {});
+        return { outcome: "delivered", status: res.status };
+      }
+      if (res.status === 404) {
+        // Only the api's own "no such session" is final; any other 404 means the route isn't there (yet).
+        const code = await res.json().then((b: { error?: { code?: unknown } }) => b?.error?.code, () => undefined);
+        return { outcome: code === "session_not_found" ? "dropped" : "retry", status: res.status };
+      }
       await res.body?.cancel().catch(() => {});
-      if (res.ok) return { outcome: "delivered", status: res.status };
       const again = res.status === 401 || res.status === 408 || res.status === 429 || res.status >= 500;
       return { outcome: again ? "retry" : "dropped", status: res.status };
     } catch (err) {
@@ -144,8 +160,14 @@ export function createStatusReporter(deps: {
         deps.log("api_events.dropped", fields);
       } else if (!replaced) {
         w.attempts += 1;
+        if (clock() - w.since >= GIVE_UP_MS) {
+          waiting.delete(sessionId);
+          deps.log("api_events.gave_up", { ...fields, attempts: w.attempts });
+          continue;
+        }
         w.nextAt = clock() + Math.min(MAX_RETRY_MS, FIRST_RETRY_MS * 2 ** (w.attempts - 1));
-        deps.log("api_events.retry", { ...fields, attempts: w.attempts });
+        // The first few, then every tenth: an api that's down for hours doesn't fill the log.
+        if (w.attempts <= 3 || w.attempts % 10 === 0) deps.log("api_events.retry", { ...fields, attempts: w.attempts });
       }
     }
   }

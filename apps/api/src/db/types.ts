@@ -68,8 +68,11 @@ export type StartResult =
 
 export const MAX_LIST = 50;
 
-/** What an engine status event did (A2): moved the session on, changed nothing, or found no such session. */
-export type StatusEventResult = "applied" | "stale" | "not_found";
+/**
+ * What an engine status event did (A2): moved the session on, changed nothing, couldn't (another session of the org
+ * holds the meeting link), or found no such session.
+ */
+export type StatusEventResult = "applied" | "stale" | "conflict" | "not_found";
 
 /**
  * The only way into the database. Every function takes the org id first, from the verified token, and never
