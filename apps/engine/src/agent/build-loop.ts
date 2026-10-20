@@ -5,8 +5,8 @@
 // Also promotes pending decisions after 30 s without objection. When the call ends,
 // end() stops all of it, so the consensus and the handoff are final (spec §14).
 // Logs ids, counts and durations only: never transcript text, prompts or model output.
-import { readFileSync } from "node:fs";
 import { withCostRecording } from "./cost.ts";
+import { buildSystemPrompt } from "./prompt-catalog.ts";
 import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
@@ -29,7 +29,8 @@ export const TASK_DONE_MS = 3_000;
 const TASK_MAX = 40;
 const LABEL_MAX = 60;
 
-const SYSTEM = readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8");
+// Built once at module load, so the text is identical on every call and the prompt cache hits.
+const SYSTEM = buildSystemPrompt();
 
 export type Timers = {
   setTimeout(fn: () => void, ms: number): unknown;
