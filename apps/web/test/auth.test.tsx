@@ -203,7 +203,7 @@ describe("routes and the guard", () => {
 describe("the Clerk wiring", () => {
   const config = { clerkPublishableKey: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA", apiUrl: "http://localhost:3001" };
 
-  it("uses in-app URLs, the choose-organization task URL, our theme, and no telemetry", () => {
+  it("uses in-app URLs, redirects to this origin only, the choose-organization task URL, our theme, and no telemetry", () => {
     setClerk({ session: "none" });
     render(<App config={config} />);
     expect(clerk.providerProps).toMatchObject({
@@ -213,6 +213,7 @@ describe("the Clerk wiring", () => {
       taskUrls: { "choose-organization": "/choose-organization" },
       telemetry: false,
     });
+    expect(clerk.providerProps?.allowedRedirectOrigins).toEqual([window.location.origin]);
     expect(typeof clerk.providerProps?.routerPush).toBe("function");
     expect(typeof clerk.providerProps?.routerReplace).toBe("function");
     expect(clerk.providerProps?.localization).toBeTruthy();
