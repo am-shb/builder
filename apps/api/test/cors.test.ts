@@ -53,11 +53,12 @@ test("a 405 and a 500 carry it too", async () => {
   });
 });
 
-test("any other origin, a near miss or no origin gets no CORS headers at all", async () => {
+test("any other origin, a near miss or no origin gets no CORS headers, but still Vary: Origin", async () => {
   await run(undefined, async (base) => {
     for (const origin of ["https://evil.example", "http://localhost:5174", `${WEB}/`, "HTTP://LOCALHOST:5173", "null", undefined]) {
       const res = await fetch(`${base}/v1/me`, origin ? { headers: { Origin: origin } } : {});
-      assert.deepEqual(corsHeaders(res), { origin: null, vary: null, credentials: null }, String(origin));
+      // Vary on every reply, so a cache never hands an allowed origin's reply to another, or the other way round.
+      assert.deepEqual(corsHeaders(res), { origin: null, vary: "Origin", credentials: null }, String(origin));
     }
   });
 });
@@ -81,6 +82,7 @@ test("a preflight on /v1 answers 204 with the methods and headers the web app us
     const stranger = await fetch(`${base}/v1/sessions`, { method: "OPTIONS", headers: { Origin: "https://evil.example" } });
     assert.equal(stranger.status, 204);
     assert.equal(stranger.headers.get("access-control-allow-origin"), null);
+    assert.equal(stranger.headers.get("vary"), "Origin");
   });
 });
 

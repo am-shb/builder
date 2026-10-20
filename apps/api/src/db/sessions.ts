@@ -4,7 +4,9 @@ import { BoundQuery, RecordId } from "surrealdb";
 import type { DateTime, Surreal } from "surrealdb";
 import { orgRef } from "./orgs.ts";
 import { MAX_LIST } from "./types.ts";
-import type { ApiSessionStatus, CreateResult, NewSession, SessionRecord, StartResult } from "./types.ts";
+import { StartLimitError } from "./types.ts";
+import type { ApiSessionStatus, CreateResult, NewSession, OrgStartLimits, SessionRecord, StartResult } from "./types.ts";
+import { DEFAULT_START_GUARDS } from "../start-guards.ts";
 
 type Row = {
   id: RecordId<"session", string>;
@@ -41,13 +43,28 @@ async function findActive(db: Surreal, org: RecordId, meetingUrl: string): Promi
   return rows[0] && toRecord(rows[0]);
 }
 
+// When none are given (tests of other things): the defaults, which apply when the server's variables are unset.
+const DEFAULT_LIMITS: OrgStartLimits = {
+  maxActive: DEFAULT_START_GUARDS.maxActivePerOrg,
+  maxPerDay: DEFAULT_START_GUARDS.maxStartsPerOrgPerDay,
+  activeMarginMinutes: DEFAULT_START_GUARDS.activeMarginMinutes,
+};
+
 /**
- * In one transaction: make sure the org's row exists, look for its active session for this meeting, and create
- * the new one only if there's none. Two requests at once conflict, and the retried one finds the first one's row.
- * The unique index on (org, active_meeting) backs this up: if both still try to create, one fails on the index,
- * and the active session it finds after that is returned as reused.
+ * In one transaction:
+ * 1. Write the org's row (created on its first request, with the time of this start). Every start writes it, so two
+ *    starts for one org at once conflict, and the retried one sees the first one's session in the counts below.
+ * 2. Rewrite the org's active sessions, so any past their `active_until` stop counting as active (the stopgap until
+ *    engine events, db/0002_start_guards.surql). A row from before that file gets its `active_until` here.
+ * 3. Look for the org's active session for this meeting: if there is one, it's the answer (reused), with no limit
+ *    checked, since nothing new starts.
+ * 4. Otherwise check the org's limits: active sessions now, and sessions started in the last 24 hours.
+ * 5. Create the session, active until its time limit plus the margin.
+ * Two requests for the same meeting at once conflict too, and the retried one finds the first one's row. The unique
+ * index on (org, active_meeting) backs this up: if both still try to create, one fails on the index, and the active
+ * session it finds after that is returned as reused.
  */
-export async function createSessionUnlessActive(db: Surreal, orgId: string, s: NewSession): Promise<CreateResult> {
+export async function createSessionUnlessActive(db: Surreal, orgId: string, s: NewSession, limits: OrgStartLimits = DEFAULT_LIMITS): Promise<CreateResult> {
   const org = orgRef(orgId);
   const id = sessionRef(s.id);
   const content = {
@@ -55,16 +72,27 @@ export async function createSessionUnlessActive(db: Surreal, orgId: string, s: N
     max_usd: s.limits.maxUsd, max_minutes: s.limits.maxMinutes,
   };
   try {
-    // One query, four statements: the results come back one per statement, the last being the answer.
+    // One query, several statements: the results come back one per statement, the last being the answer.
     const results = await db.transaction<unknown[]>([new BoundQuery(`
-      UPSERT $org;
+      UPSERT $org SET last_start_at = time::now();
+      UPDATE session SET active_until = active_until ?? (created_at + duration::from_secs(math::round((max_minutes + $margin) * 60)))
+        WHERE org = $org AND active_meeting != NONE;
       LET $found = (SELECT VALUE id FROM session WHERE org = $org AND active_meeting = $url LIMIT 1)[0];
-      IF $found = NONE { CREATE $id CONTENT $content };
-      { reused: $found != NONE, row: (SELECT ${FIELDS} FROM ONLY ($found ?? $id)) };
-    `, { org, url: s.meetingUrl, id, content })]);
-    const out = results.at(-1) as { reused: boolean; row: Row };
+      LET $refused = IF $found != NONE { NONE }
+        ELSE IF count(SELECT VALUE id FROM session WHERE org = $org AND active_meeting != NONE) >= $maxActive { "active" }
+        ELSE IF count(SELECT VALUE id FROM session WHERE org = $org AND created_at > time::now() - 1d) >= $maxPerDay { "daily" }
+        ELSE { NONE };
+      IF $found = NONE AND $refused = NONE {
+        CREATE $id CONTENT $content;
+        UPDATE $id SET active_until = created_at + duration::from_secs(math::round((max_minutes + $margin) * 60));
+      };
+      { reused: $found != NONE, refused: $refused, row: IF $refused = NONE { (SELECT ${FIELDS} FROM ONLY ($found ?? $id)) } ELSE { NONE } };
+    `, { org, url: s.meetingUrl, id, content, margin: limits.activeMarginMinutes, maxActive: limits.maxActive, maxPerDay: limits.maxPerDay })]);
+    const out = results.at(-1) as { reused: boolean; refused: "active" | "daily" | null | undefined; row: Row };
+    if (out.refused) throw new StartLimitError(out.refused);
     return { session: toRecord(out.row), reused: out.reused };
   } catch (err) {
+    if (err instanceof StartLimitError) throw err;
     const active = await findActive(db, org, s.meetingUrl);
     if (active) return { session: active, reused: true };
     throw err;

@@ -49,9 +49,9 @@ test("GET /v1/sessions lists the caller's org's sessions, newest first, in the S
     assert.deepEqual(body.sessions.map((s) => s.id), [a2.id, a1.id]);
     const [started, starting] = body.sessions;
     assert.equal(started.status, "joining");
-    assert.equal(started.stageUrl, "https://stage.example.com/a2", "the stage URL is shown to the owning org (D8)");
+    assert.equal("stageUrl" in started, false, "no stage URL in the list: it's a control link, sent only for one session");
     assert.equal(starting.status, "starting");
-    assert.equal("stageUrl" in starting || "errorCode" in starting, false, "absent, not null, when there's nothing to say");
+    assert.equal("errorCode" in starting, false, "absent, not null, when there's nothing to say");
     assert.deepEqual(starting.limits, limits);
   });
 });
@@ -119,7 +119,8 @@ test("both admins and members may read", async () => {
 test("the list holds the org's 50 newest", async () => {
   const db = await testDb();
   const ids: string[] = [];
-  for (let i = 0; i < 52; i++) ids.push((await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?n=${i}` }))).session.id);
+  const roomy = { maxActive: 1000, maxPerDay: 1000, activeMarginMinutes: 10 };
+  for (let i = 0; i < 52; i++) ids.push((await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?n=${i}` }), roomy)).session.id);
   await withApi(db, async (base) => {
     const body = SessionList.parse(await (await get(base, "/v1/sessions?limit=500", tokenFor("org_a"))).json());
     assert.deepEqual(body.sessions.map((s) => s.id), ids.slice(-50).reverse());

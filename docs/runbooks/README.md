@@ -135,6 +135,7 @@ bandwidth. The SurrealDB instance is free ([ADR 0011](../adr/0011-surrealdb.md) 
    | `TTS_VOICE`, `BOT_VARIANT` | engine | optional, can stay empty (`apps/engine/.env.example`) |
    | `CLERK_JWT_KEY`, `CLERK_AUTHORIZED_PARTIES` | api | both or neither. Neither: the `/v1` routes answer 503 |
    | `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES` | api | both or neither, still to be decided (D5 in `docs/plans/api-first-slice.md`). Neither: starting a session answers 503 |
+   | `MAX_ACTIVE_SESSIONS_PER_ORG`, `MAX_STARTS_PER_ORG_PER_DAY`, `START_RATE_LIMIT_PER_MINUTE`, `ACTIVE_MARGIN_MINUTES` | api | optional; unset takes the defaults 2, 20, 5 and 10 ("Start guards" in `docs/plans/api-first-slice.md`). Lower them for a public demo rather than raise them |
 
    Render asks only when the Blueprint is first created. Change a value later in the service's Environment tab. If the
    dashboard won't take an empty value for an optional variable, add it there later instead.

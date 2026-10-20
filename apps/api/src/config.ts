@@ -2,6 +2,7 @@
 // Errors name the variable, never its value. Optional parts are null when their variables are unset; the routes
 // that need them answer 503 instead of the process refusing to start.
 import type { SessionLimits } from "@builder/contracts";
+import { DEFAULT_START_GUARDS, type StartGuards } from "./start-guards.ts";
 
 export type ClerkConfig = {
   // Clerk's PEM public key: tokens are checked offline, with no call to Clerk.
@@ -24,6 +25,8 @@ export type Config = {
   engine: EngineConfig | null;
   // Per-session limits until billing exists (decision D5 in docs/plans/api-first-slice.md).
   defaultLimits: SessionLimits | null;
+  // Limits on starting sessions (src/start-guards.ts). Always set: each falls back to its default.
+  startGuards: StartGuards;
   // SurrealDB (docs/adr/0011-surrealdb.md): a server with its credentials, or SurrealDB in this process.
   surreal: SurrealSettings;
 };
@@ -51,6 +54,7 @@ export function loadConfig(env: Env): Config {
     clerk: readClerk(env),
     engine: readEngine(env),
     defaultLimits: readLimits(env),
+    startGuards: readStartGuards(env),
     surreal: surrealSettings(env),
   };
 }
@@ -138,6 +142,24 @@ function readLimits(env: Env): SessionLimits | null {
   if (!Number.isFinite(maxUsd) || maxUsd <= 0) throw new ConfigError("DEFAULT_MAX_USD must be a number above 0");
   if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) throw new ConfigError("DEFAULT_MAX_MINUTES must be a number above 0");
   return { maxUsd, maxMinutes };
+}
+
+function readStartGuards(env: Env): StartGuards {
+  // A whole number, at least `min`; unset means the default.
+  const count = (name: string, fallback: number, min: number) => {
+    const raw = value(env, name);
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min) throw new ConfigError(`${name} must be a whole number of at least ${min}`);
+    return n;
+  };
+  const d = DEFAULT_START_GUARDS;
+  return {
+    maxActivePerOrg: count("MAX_ACTIVE_SESSIONS_PER_ORG", d.maxActivePerOrg, 1),
+    maxStartsPerOrgPerDay: count("MAX_STARTS_PER_ORG_PER_DAY", d.maxStartsPerOrgPerDay, 1),
+    startsPerUserPerMinute: count("START_RATE_LIMIT_PER_MINUTE", d.startsPerUserPerMinute, 1),
+    activeMarginMinutes: count("ACTIVE_MARGIN_MINUTES", d.activeMarginMinutes, 0),
+  };
 }
 
 function isOrigin(s: string): boolean {

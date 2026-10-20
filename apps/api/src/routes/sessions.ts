@@ -9,7 +9,10 @@ import type { Db, SessionRecord, StartResult } from "../db/index.ts";
 import type { EngineClient, StartOutcome } from "../engine/client.ts";
 import { HttpError, readJson, sendJson } from "../http.ts";
 import type { Log, Route } from "../router.ts";
-import { CreateSessionBody, toSessionView } from "./schemas.ts";
+import { createRateLimiter } from "../rate-limit.ts";
+import { DEFAULT_START_GUARDS, type StartGuards } from "../start-guards.ts";
+import { StartLimitError } from "../db/index.ts";
+import { CreateSessionBody, toSessionListItem, toSessionView } from "./schemas.ts";
 import type { CreateSessionResponse, SessionList, SessionResponse, StartFailedResponse } from "./schemas.ts";
 
 // Session ids are the api's randomUUID()s. Anything else can't exist, so it's a 404 without a query.
@@ -29,8 +32,9 @@ export function sessionReadRoutes(auth: Authenticator, db: Db | null): Route[] {
       path: "/v1/sessions",
       handler: async ({ req, res }) => {
         const { orgId } = requireOrg(await auth.authenticate(req));
-        // The org's 50 newest. No paging for the hackathon; `limit` and a cursor can be added later.
-        const body: SessionList = { sessions: (await needDb().listSessions(orgId)).map(toSessionView) };
+        // The org's 50 newest. No paging for the hackathon; `limit` and a cursor can be added later. No stage URLs:
+        // they're control links, sent only on a session's own read.
+        const body: SessionList = { sessions: (await needDb().listSessions(orgId)).map(toSessionListItem) };
         sendJson(res, 200, body);
       },
     },
@@ -56,7 +60,11 @@ export type SessionCreateDeps = {
   engine: EngineClient | null;
   // Per-session limits until billing exists (D5). null: not configured, so nothing can start.
   limits: SessionLimits | null;
+  // Limits on starting sessions: per org (active at once, per day) and per user (per minute). Defaults if absent.
+  guards?: StartGuards;
   log: Log;
+  // For tests: the rate limiter's clock.
+  now?: () => number;
 };
 
 // The engine's answer, as the session row records it.
@@ -70,8 +78,12 @@ function startResult(outcome: StartOutcome): StartResult {
 
 /**
  * POST /v1/sessions { meetingUrl }:
+ * 0. At most START_RATE_LIMIT_PER_MINUTE requests per user per minute: 429 rate_limited, with Retry-After.
  * 1. The org's active session for this meeting, if there is one, comes back with 200 and `reused: true`. The engine
- *    isn't called, so a double-click never sends two bots (D7).
+ *    isn't called, so a double-click never sends two bots (D7). A session past its time limit plus a margin no longer
+ *    counts as active (a stopgap until engine events).
+ * 1b. Otherwise, 429 active_limit_reached or daily_limit_reached when the org is at MAX_ACTIVE_SESSIONS_PER_ORG or
+ *    MAX_STARTS_PER_ORG_PER_DAY. Checked in the same transaction that creates the session, so nothing is saved.
  * 2. Otherwise the session is saved as `starting` before the engine is called, so a bot is never sent for a session
  *    the api has no record of.
  * 3. The engine is called once, never retried: a retry can send a second paid bot (ADR 0010).
@@ -81,12 +93,21 @@ function startResult(outcome: StartOutcome): StartResult {
  *      A bot may exist, so the web app says "check before retrying".
  */
 export function sessionCreateRoutes(deps: SessionCreateDeps): Route[] {
+  const guards = deps.guards ?? DEFAULT_START_GUARDS;
+  const perUser = createRateLimiter({ limit: guards.startsPerUserPerMinute, windowMs: 60_000, ...(deps.now ? { now: deps.now } : {}) });
   return [
     {
       method: "POST",
       path: "/v1/sessions",
       handler: async ({ req, res }) => {
         const { userId, orgId } = requireOrg(await deps.auth.authenticate(req));
+        // Counted before anything else, invalid and reused requests too: it's a limit on asking.
+        const allowed = perUser.take(userId);
+        if (!allowed.ok) {
+          deps.log("session.start", { org_id: orgId, outcome: "rate_limited" });
+          throw new HttpError(429, "rate_limited", "Too many starts in a short time. Try again shortly.",
+            { "retry-after": String(allowed.retryAfterSeconds) });
+        }
         const parsed = CreateSessionBody.safeParse(await readJson(req));
         if (!parsed.success) throw new HttpError(400, "invalid_request", "Send { meetingUrl } with an https Google Meet, Zoom or Teams link.");
         const { meetingUrl } = parsed.data;
@@ -97,7 +118,18 @@ export function sessionCreateRoutes(deps: SessionCreateDeps): Route[] {
         const db = deps.db;
         const limits = deps.limits;
 
-        const { session, reused } = await db.createSessionUnlessActive(orgId, { id: randomUUID(), createdBy: userId, meetingUrl, limits });
+        let created;
+        try {
+          created = await db.createSessionUnlessActive(orgId, { id: randomUUID(), createdBy: userId, meetingUrl, limits },
+            { maxActive: guards.maxActivePerOrg, maxPerDay: guards.maxStartsPerOrgPerDay, activeMarginMinutes: guards.activeMarginMinutes });
+        } catch (err) {
+          if (!(err instanceof StartLimitError)) throw err;
+          deps.log("session.start", { org_id: orgId, outcome: `${err.limit}_limit` });
+          throw err.limit === "active"
+            ? new HttpError(429, "active_limit_reached", "The organization has its maximum of sessions running. Nothing was started.")
+            : new HttpError(429, "daily_limit_reached", "The organization has started its maximum of sessions for the day. Nothing was started.");
+        }
+        const { session, reused } = created;
         if (reused) {
           deps.log("session.start", { session_id: session.id, org_id: orgId, outcome: "reused" });
           const body: CreateSessionResponse = { session: toSessionView(session), reused: true };

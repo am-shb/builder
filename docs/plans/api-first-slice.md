@@ -212,6 +212,7 @@ part of that.
    Teams). Otherwise 400 `invalid_request`.
 3. If this org already has a `starting`, `joining` or `in_meeting` session for the same URL, return it with 200 and
    `reused: true`, and don't call the engine. This keeps a double-click from sending two bots. Decision D7.
+   Otherwise the start guards below apply (429), in the same transaction that creates the session.
 4. Work out the limits. There are no plans yet, so they come from config: `DEFAULT_MAX_USD` and
    `DEFAULT_MAX_MINUTES` (decision D5). Billing replaces this later (ADR 0009).
 5. Insert the row with `status = starting` before calling the engine (intent first, as the engine does).
@@ -222,8 +223,29 @@ part of that.
 7. Response body: `{ session: SessionView }`, where `SessionView` is `{ id, meetingUrl, status, errorCode?, stageUrl?,
    limits, createdAt, updatedAt }`. Whether `stageUrl` is included is decision D8.
 
+### Start guards (added 2026-10-20)
+Every start can send a paid bot and sign-up is open, so one account or org can't start an unbounded number:
+- **Per user:** at most `START_RATE_LIMIT_PER_MINUTE` (default 5) `POST /v1/sessions` per user in any minute,
+  counted before anything else (invalid and reused requests too). Over it: 429 `rate_limited` with `Retry-After`.
+  In memory: the api runs as one instance; with more, each would count on its own.
+- **Per org, active at once:** at most `MAX_ACTIVE_SESSIONS_PER_ORG` (default 2). Over it: 429
+  `active_limit_reached`. Reusing an active session still works at the limit.
+- **Per org, per day:** at most `MAX_STARTS_PER_ORG_PER_DAY` (default 20) sessions created in any 24 hours, whatever
+  became of them. Over it: 429 `daily_limit_reached`.
+- Both org limits are checked in the transaction that creates the session. Every start writes the org's row
+  (`last_start_at`), so two starts for one org at once conflict and one is retried after the other: they can't both
+  pass a count. Nothing is saved and the engine isn't called when one is refused.
+- **Stale sessions (stopgap until engine events, A2):** statuses don't move yet, so a session would stay `joining`
+  and block its meeting link for good. Each session has `active_until`: its time limit plus
+  `ACTIVE_MARGIN_MINUTES` (default 10). Past it, it no longer counts as active (for reuse or the active limit); its
+  status is left as it was. `db/0002_start_guards.surql` adds the field and backfills existing rows with a
+  10-minute margin.
+- Unset variables take the defaults (`src/start-guards.ts`); a bad value stops the server with an error naming the
+  variable.
+
 ### `GET /v1/sessions`
-- `requireOrg`, any role. Returns `{ sessions: SessionView[] }`, the org's 50 newest. No paging for the hackathon.
+- `requireOrg`, any role. Returns `{ sessions: SessionListItem[] }` (a `SessionView` without `stageUrl`: the stage
+  link is a control link, sent only by `GET /v1/sessions/:id`), the org's 50 newest. No paging for the hackathon.
   When it's needed, add an optional `limit` and an opaque `nextCursor` (base64 of `(created_at, id)`), which is an
   additive change.
 - Also add `GET /v1/sessions/:id`. It answers 404 for an id in another org, the same as for an id that doesn't exist,
@@ -241,6 +263,8 @@ Built in step 1:
 - `CLERK_JWT_KEY`, `CLERK_AUTHORIZED_PARTIES` (comma-separated origins)
 - `ENGINE_INTERNAL_URL`, `ENGINE_INTERNAL_TOKEN`
 - `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES`
+- Start guards, each optional with a default: `MAX_ACTIVE_SESSIONS_PER_ORG` (2), `MAX_STARTS_PER_ORG_PER_DAY` (20),
+  `START_RATE_LIMIT_PER_MINUTE` (5), `ACTIVE_MARGIN_MINUTES` (10). See "Start guards".
 
 Step 3 adds the database variables. They're the engine's five, with the same names and rules (its
 `surrealSettings()` in `apps/engine/src/config.ts`):

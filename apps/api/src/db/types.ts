@@ -35,6 +35,19 @@ export type NewSession = {
 /** `reused`: the org already had an active session for this meeting, returned instead of a new one. */
 export type CreateResult = { session: SessionRecord; reused: boolean };
 
+/** The org limits a new session is checked against, in the same transaction that creates it. */
+export type OrgStartLimits = { maxActive: number; maxPerDay: number; activeMarginMinutes: number };
+
+/** A new session would go over an org limit: `active` (too many active at once) or `daily` (too many in 24 hours). */
+export class StartLimitError extends Error {
+  override name = "StartLimitError";
+  readonly limit: "active" | "daily";
+  constructor(limit: "active" | "daily") {
+    super(limit === "active" ? "The org has its maximum of active sessions." : "The org has started its maximum of sessions for the day.");
+    this.limit = limit;
+  }
+}
+
 /** What the engine said when asked to start the session, as step 6 records it. */
 export type StartResult =
   | { kind: "ok"; status: SessionStatus; stageUrl: string }
@@ -50,8 +63,11 @@ export const MAX_LIST = 50;
 export type Db = {
   /** Creates the org's row on its first request (D4). Safe to call on every request. */
   upsertOrg(orgId: string): Promise<void>;
-  /** The org's active session for this meeting if there is one, otherwise a new `starting` one. Atomic. */
-  createSessionUnlessActive(orgId: string, s: NewSession): Promise<CreateResult>;
+  /**
+   * The org's active session for this meeting if there is one, otherwise a new `starting` one, unless that would go
+   * over `limits` (StartLimitError). Atomic.
+   */
+  createSessionUnlessActive(orgId: string, s: NewSession, limits?: OrgStartLimits): Promise<CreateResult>;
   /** Records the engine's answer on a `starting` session. undefined if there's no such session in this org. */
   setSessionStart(orgId: string, id: string, result: StartResult): Promise<SessionRecord | undefined>;
   getSession(orgId: string, id: string): Promise<SessionRecord | undefined>;

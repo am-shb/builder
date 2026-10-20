@@ -86,11 +86,11 @@ export function createHandler(routes: Route[], log: Log, cors: CorsOptions = { a
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://api.local");
     // Before route matching, so 404, 405 and 500 replies carry it too.
+    // Vary on every reply, allowed origin or not: the reply depends on the Origin header either way, so no cache may
+    // hand one origin's reply to another.
+    res.setHeader("vary", "Origin");
     const origin = req.headers.origin;
-    if (origin && allowed.has(origin)) {
-      res.setHeader("access-control-allow-origin", origin);
-      res.setHeader("vary", "Origin");
-    }
+    if (origin && allowed.has(origin)) res.setHeader("access-control-allow-origin", origin);
     // A browser's preflight before a request with Authorization or a JSON body. It carries no token, so it needs none.
     if (req.method === "OPTIONS" && (url.pathname === "/v1" || url.pathname.startsWith("/v1/"))) {
       res.writeHead(204, PREFLIGHT_HEADERS);
@@ -106,7 +106,7 @@ export function createHandler(routes: Route[], log: Log, cors: CorsOptions = { a
       await match.route.handler({ req, res, params: match.params, url });
     } catch (err) {
       if (err instanceof HttpError) {
-        if (!res.headersSent) sendError(res, err.status, err.code, err.message);
+        if (!res.headersSent) sendError(res, err.status, err.code, err.message, err.headers);
         return;
       }
       log("http.error", { route: `${match.route.method} ${match.route.path}`, error: err instanceof Error ? err.name : "unknown" });

@@ -8,10 +8,13 @@ export class HttpError extends Error {
   override name = "HttpError";
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  // Sent with the error reply, such as Retry-After.
+  readonly headers: Record<string, string>;
+  constructor(status: number, code: string, message: string, headers: Record<string, string> = {}) {
     super(message);
     this.status = status;
     this.code = code;
+    this.headers = headers;
   }
 }
 

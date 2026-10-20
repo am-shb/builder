@@ -2,9 +2,10 @@
 // engine's test/migrate.test.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RecordId } from "surrealdb";
 import { connect } from "../src/db/connect.ts";
 import { migrate, MIGRATIONS_DIR } from "../src/db/migrate.ts";
 import { openDb } from "../src/db/index.ts";
@@ -93,4 +94,21 @@ test("a server that doesn't answer fails at startup with SURREAL_UNREACHABLE", a
   // A closed port on this machine: no network, and nothing outside it is contacted.
   await assert.rejects(connect({ url: "ws://127.0.0.1:9", user: "u", pass: "p", connectTimeoutMs: 1_000 }),
     (err) => errorCode(err) === "SURREAL_UNREACHABLE");
+});
+
+test("0002 gives sessions that were already there an active_until from their time limit, and frees expired links", async () => {
+  await withDb(async (db) => {
+    const first = dirWith({ "0001_init.surql": readFileSync(join(MIGRATIONS_DIR, "0001_init.surql"), "utf8") });
+    await migrate(db, first);
+    const row = { org: new RecordId("org", "org_a"), created_by: "u", status: "joining", max_usd: 1, max_minutes: 60 };
+    await db.query("CREATE session:old CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/old", created_at: new Date(Date.now() - 3 * 3_600_000) } }).collect();
+    await db.query("CREATE session:recent CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/new" } }).collect();
+    assert.deepEqual(await migrate(db), ["0002_start_guards.surql"]);
+    const [rows] = await db.query<[{ id: RecordId; ttl: string; active_meeting?: string }[]]>(
+      "SELECT id, <string> (active_until - created_at) AS ttl, active_meeting FROM session ORDER BY id").collect();
+    assert.deepEqual(rows.map((r) => [String(r.id.id), r.ttl, r.active_meeting ?? null]), [
+      ["old", "1h10m", null],
+      ["recent", "1h10m", "https://meet.google.com/new"],
+    ]);
+  });
 });

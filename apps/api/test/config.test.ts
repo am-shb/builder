@@ -19,6 +19,7 @@ function rejects(env: Record<string, string>, variable: RegExp) {
 test("an empty environment gives defaults with every optional part off", () => {
   assert.deepEqual(loadConfig({}), {
     port: 3001, clerk: null, engine: null, defaultLimits: null,
+    startGuards: { maxActivePerOrg: 2, maxStartsPerOrgPerDay: 20, startsPerUserPerMinute: 5, activeMarginMinutes: 10 },
     surreal: { url: null, user: null, pass: null, auth: "database", path: "data/surreal" },
   });
 });
@@ -101,4 +102,15 @@ test("production refuses to run without a SurrealDB server", () => {
   const cloud = { NODE_ENV: "production", SURREAL_URL: "wss://x.example.com", SURREAL_USER: "api", SURREAL_PASS: "p" };
   assert.equal(loadConfig(cloud).surreal.url, cloud.SURREAL_URL);
   assert.equal(loadConfig({ NODE_ENV: "development" }).surreal.url, null);
+});
+
+test("the start guards default to safe values and can each be set; bad values are refused by name", () => {
+  assert.deepEqual(loadConfig({
+    MAX_ACTIVE_SESSIONS_PER_ORG: "1", MAX_STARTS_PER_ORG_PER_DAY: "5", START_RATE_LIMIT_PER_MINUTE: "3", ACTIVE_MARGIN_MINUTES: "0",
+  }).startGuards, { maxActivePerOrg: 1, maxStartsPerOrgPerDay: 5, startsPerUserPerMinute: 3, activeMarginMinutes: 0 });
+  assert.equal(loadConfig({ MAX_ACTIVE_SESSIONS_PER_ORG: " " }).startGuards.maxActivePerOrg, 2, "blank is unset");
+  for (const name of ["MAX_ACTIVE_SESSIONS_PER_ORG", "MAX_STARTS_PER_ORG_PER_DAY", "START_RATE_LIMIT_PER_MINUTE"]) {
+    for (const bad of ["0", "-1", "2.5", "lots", "Infinity"]) rejects({ [name]: bad }, new RegExp(name));
+  }
+  for (const bad of ["-1", "1.5", "soon"]) rejects({ ACTIVE_MARGIN_MINUTES: bad }, /ACTIVE_MARGIN_MINUTES/);
 });
