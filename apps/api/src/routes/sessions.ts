@@ -11,7 +11,7 @@ import { HttpError, readJson, sendJson } from "../http.ts";
 import type { Log, Route } from "../router.ts";
 import { createRateLimiter } from "../rate-limit.ts";
 import { DEFAULT_START_GUARDS, type StartGuards } from "../start-guards.ts";
-import { StartLimitError } from "../db/index.ts";
+import { StartLimitError, type StartLimit } from "../db/index.ts";
 import { CreateSessionBody, toSessionListItem, toSessionView } from "./schemas.ts";
 import type { CreateSessionResponse, SessionList, SessionResponse, StartFailedResponse } from "./schemas.ts";
 
@@ -54,6 +54,14 @@ export function sessionReadRoutes(auth: Authenticator, db: Db | null): Route[] {
   ];
 }
 
+// A start limit's reply. Each says nothing was started.
+const LIMIT_REPLIES: Record<StartLimit, { code: string; message: string }> = {
+  active: { code: "active_limit_reached", message: "The organization has its maximum of sessions running. Nothing was started." },
+  daily: { code: "daily_limit_reached", message: "The organization has started its maximum of sessions for the day. Nothing was started." },
+  user_active: { code: "user_active_limit_reached", message: "You have your maximum of sessions running. Nothing was started." },
+  user_daily: { code: "user_daily_limit_reached", message: "You have started your maximum of sessions for the day. Nothing was started." },
+};
+
 export type SessionCreateDeps = {
   auth: Authenticator;
   db: Db | null;
@@ -82,8 +90,9 @@ function startResult(outcome: StartOutcome): StartResult {
  * 1. The org's active session for this meeting, if there is one, comes back with 200 and `reused: true`. The engine
  *    isn't called, so a double-click never sends two bots (D7). A session past its time limit plus a margin no longer
  *    counts as active (a stopgap until engine events).
- * 1b. Otherwise, 429 active_limit_reached or daily_limit_reached when the org is at MAX_ACTIVE_SESSIONS_PER_ORG or
- *    MAX_STARTS_PER_ORG_PER_DAY. Checked in the same transaction that creates the session, so nothing is saved.
+ * 1b. Otherwise, 429 when the org or the person is at a limit: active_limit_reached, daily_limit_reached,
+ *    user_active_limit_reached or user_daily_limit_reached. Checked in the same transaction that creates the session,
+ *    so nothing is saved.
  * 2. Otherwise the session is saved as `starting` before the engine is called, so a bot is never sent for a session
  *    the api has no record of.
  * 3. The engine is called once, never retried: a retry can send a second paid bot (ADR 0010).
@@ -121,13 +130,15 @@ export function sessionCreateRoutes(deps: SessionCreateDeps): Route[] {
         let created;
         try {
           created = await db.createSessionUnlessActive(orgId, { id: randomUUID(), createdBy: userId, meetingUrl, limits },
-            { maxActive: guards.maxActivePerOrg, maxPerDay: guards.maxStartsPerOrgPerDay, activeMarginMinutes: guards.activeMarginMinutes });
+            {
+              maxActive: guards.maxActivePerOrg, maxPerDay: guards.maxStartsPerOrgPerDay,
+              maxActivePerUser: guards.maxActivePerUser, maxPerUserPerDay: guards.maxStartsPerUserPerDay,
+              activeMarginMinutes: guards.activeMarginMinutes,
+            });
         } catch (err) {
           if (!(err instanceof StartLimitError)) throw err;
           deps.log("session.start", { org_id: orgId, outcome: `${err.limit}_limit` });
-          throw err.limit === "active"
-            ? new HttpError(429, "active_limit_reached", "The organization has its maximum of sessions running. Nothing was started.")
-            : new HttpError(429, "daily_limit_reached", "The organization has started its maximum of sessions for the day. Nothing was started.");
+          throw new HttpError(429, LIMIT_REPLIES[err.limit].code, LIMIT_REPLIES[err.limit].message);
         }
         const { session, reused } = created;
         if (reused) {

@@ -13,6 +13,8 @@ import { testDb } from "./helpers/db.ts";
 
 const MEET = "https://meet.google.com/abc-defg-hij";
 const limits = { maxUsd: 5, maxMinutes: 60 };
+// Limits that never get in the way of these tests, which are about reading.
+const roomy = { maxActive: 1000, maxPerDay: 1000, maxActivePerUser: 1000, maxPerUserPerDay: 1000, activeMarginMinutes: 10 };
 const newSession = (over: Partial<NewSession> = {}): NewSession => ({ id: randomUUID(), createdBy: "user_1", meetingUrl: MEET, limits, ...over });
 
 type Logged = { msg: string; fields?: Record<string, unknown> };
@@ -31,10 +33,10 @@ const tokenFor = (orgId: string, rol = "member") => signToken({ userId: `user_${
 /** Two orgs with sessions of their own: org_a has two (one started), org_b has one. */
 async function seeded() {
   const db = await testDb();
-  const a1 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a1` }))).session;
-  const a2 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a2` }))).session;
+  const a1 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a1` }), roomy)).session;
+  const a2 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a2` }), roomy)).session;
   await db.setSessionStart("org_a", a2.id, { kind: "ok", status: "joining", stageUrl: "https://stage.example.com/a2" });
-  const b1 = (await db.createSessionUnlessActive("org_b", newSession({ meetingUrl: `${MEET}?b1` }))).session;
+  const b1 = (await db.createSessionUnlessActive("org_b", newSession({ meetingUrl: `${MEET}?b1` }), roomy)).session;
   await db.setSessionStart("org_b", b1.id, { kind: "rejected", errorCode: "recall_rejected" });
   return { db, a1, a2, b1 };
 }
@@ -119,7 +121,6 @@ test("both admins and members may read", async () => {
 test("the list holds the org's 50 newest", async () => {
   const db = await testDb();
   const ids: string[] = [];
-  const roomy = { maxActive: 1000, maxPerDay: 1000, activeMarginMinutes: 10 };
   for (let i = 0; i < 52; i++) ids.push((await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?n=${i}` }), roomy)).session.id);
   await withApi(db, async (base) => {
     const body = SessionList.parse(await (await get(base, "/v1/sessions?limit=500", tokenFor("org_a"))).json());

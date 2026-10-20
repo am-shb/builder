@@ -45,6 +45,8 @@ describe("starting", () => {
     [e(429, "rate_limited"), "Too many starts in a short time.", "none"],
     [e(429, "active_limit_reached"), "This organization has as many sessions running as it's allowed.", "none"],
     [e(429, "daily_limit_reached"), "This organization has started as many sessions as it's allowed in 24 hours.", "none"],
+    [e(429, "user_active_limit_reached"), "You have as many sessions running as you're allowed.", "none"],
+    [e(429, "user_daily_limit_reached"), "You've started as many sessions as you're allowed in 24 hours.", "none"],
   ] as const)("no new bot: %o", (err, title, action) => {
     const x = explainError(err, "start");
     expect([x.title, x.action, x.botMayExist]).toEqual([title, action, false]);
@@ -53,8 +55,10 @@ describe("starting", () => {
   it("a start limit (429) says it's a limit, what to do, and that nothing was started", () => {
     for (const [code, detail] of [
       ["rate_limited", "Wait a minute, then try again. Nothing was started."],
-      ["active_limit_reached", "Wait for one to end before starting another. Nothing was started."],
+      ["active_limit_reached", "A session counts until its time limit has passed. Try again later. Nothing was started."],
       ["daily_limit_reached", "Try again later. Nothing was started."],
+      ["user_active_limit_reached", "A session counts until its time limit has passed. Try again later. Nothing was started."],
+      ["user_daily_limit_reached", "Try again later. Nothing was started."],
     ] as const) {
       const x = explainError(e(429, code), "start");
       expect([x.detail, x.tone, x.botMayExist], code).toEqual([detail, "error", false]);

@@ -91,11 +91,18 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
     // The api's start guards: limits on how many sessions can start, so one account can't run up the bill.
     case "rate_limited":
       return plain("Too many starts in a short time.", "none", "Wait a minute, then try again. Nothing was started.");
+    // A session holds its place until its time limit has passed (statuses don't move yet), even if its meeting ended.
     case "active_limit_reached":
       return plain("This organization has as many sessions running as it's allowed.", "none",
-        "Wait for one to end before starting another. Nothing was started.");
+        "A session counts until its time limit has passed. Try again later. Nothing was started.");
     case "daily_limit_reached":
       return plain("This organization has started as many sessions as it's allowed in 24 hours.", "none",
+        "Try again later. Nothing was started.");
+    case "user_active_limit_reached":
+      return plain("You have as many sessions running as you're allowed.", "none",
+        "A session counts until its time limit has passed. Try again later. Nothing was started.");
+    case "user_daily_limit_reached":
+      return plain("You've started as many sessions as you're allowed in 24 hours.", "none",
         "Try again later. Nothing was started.");
     case "limits_unavailable":
       return plain("Starting meetings isn't set up on this server yet.", "none", "Nothing was started.");

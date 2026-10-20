@@ -157,6 +157,8 @@ function readStartGuards(env: Env): StartGuards {
   return {
     maxActivePerOrg: count("MAX_ACTIVE_SESSIONS_PER_ORG", d.maxActivePerOrg, 1),
     maxStartsPerOrgPerDay: count("MAX_STARTS_PER_ORG_PER_DAY", d.maxStartsPerOrgPerDay, 1),
+    maxActivePerUser: count("MAX_ACTIVE_SESSIONS_PER_USER", d.maxActivePerUser, 1),
+    maxStartsPerUserPerDay: count("MAX_STARTS_PER_USER_PER_DAY", d.maxStartsPerUserPerDay, 1),
     startsPerUserPerMinute: count("START_RATE_LIMIT_PER_MINUTE", d.startsPerUserPerMinute, 1),
     activeMarginMinutes: count("ACTIVE_MARGIN_MINUTES", d.activeMarginMinutes, 0),
   };

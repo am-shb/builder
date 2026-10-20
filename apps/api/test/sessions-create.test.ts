@@ -44,7 +44,9 @@ type Logged = { msg: string; fields?: Record<string, unknown> };
 type ApiOptions = { db?: Db | null; engineUrl?: string | null; timeoutMs?: number; limits?: SessionLimits | null; guards?: StartGuards; now?: () => number };
 
 // For tests of other things: start guards that never get in the way. Their own tests below set real ones.
-const ROOMY: StartGuards = { maxActivePerOrg: 1000, maxStartsPerOrgPerDay: 1000, startsPerUserPerMinute: 1000, activeMarginMinutes: 10 };
+const ROOMY: StartGuards = {
+  maxActivePerOrg: 1000, maxStartsPerOrgPerDay: 1000, maxActivePerUser: 1000, maxStartsPerUserPerDay: 1000, startsPerUserPerMinute: 1000, activeMarginMinutes: 10,
+};
 
 /** The api with the fake engine (or none), a fresh in-memory db unless given one, and a log it collects. */
 async function withApi(opts: ApiOptions, fn: (ctx: { base: string; db: Db; logs: Logged[] }) => Promise<void>) {
@@ -392,5 +394,25 @@ test("a session past its time limit plus the margin no longer blocks its link: a
     const second = CreateSessionResponse.parse(await res.json()).session;
     assert.notEqual(second.id, first.id);
     assert.equal(engine.accepted.length, 2);
+  });
+});
+
+test("one person at their own limits gets 429 user_active_limit_reached or user_daily_limit_reached, in any org", async () => {
+  await withApi({ guards: guards({ maxActivePerUser: 1 }) }, async ({ base }) => {
+    assert.equal((await post(base, { meetingUrl: `${MEET}?1` }, tokenFor("org_a", { userId: "user_1" }))).status, 201);
+    const res = await post(base, { meetingUrl: `${MEET}?2` }, tokenFor("org_b", { userId: "user_1" }));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "user_active_limit_reached");
+    assert.equal(engine.accepted.length, 1);
+  });
+  await withApi({ guards: guards({ maxStartsPerUserPerDay: 2 }) }, async ({ base }) => {
+    // Failed starts hold no place, but they count against the day.
+    for (const org of ["org_a", "org_b"]) {
+      engine.behave({ kind: "reply", httpStatus: 422, body: JSON.stringify({ error: { code: "recall_rejected" } }) });
+      assert.equal((await post(base, { meetingUrl: `${MEET}?${org}` }, tokenFor(org, { userId: "user_1" }))).status, 502);
+    }
+    const res = await post(base, { meetingUrl: MEET }, tokenFor("org_c", { userId: "user_1" }));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "user_daily_limit_reached");
   });
 });

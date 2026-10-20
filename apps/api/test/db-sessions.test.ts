@@ -15,7 +15,8 @@ const MEET = "https://meet.google.com/abc-defg-hij";
 const limits = { maxUsd: 5, maxMinutes: 60 };
 const newSession = (over: Partial<NewSession> = {}): NewSession => ({ id: randomUUID(), createdBy: "user_1", meetingUrl: MEET, limits, ...over });
 // For tests of other things: limits that never get in the way.
-const ROOMY = { maxActive: 1000, maxPerDay: 1000, activeMarginMinutes: 10 };
+const ROOMY = { maxActive: 1000, maxPerDay: 1000, maxActivePerUser: 1000, maxPerUserPerDay: 1000, activeMarginMinutes: 10 };
+const lim = (over: Partial<typeof ROOMY>) => ({ ...ROOMY, ...over });
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 test("upsertOrg is safe to repeat and keeps the org's first created_at", async () => {
@@ -71,13 +72,13 @@ test("list is newest first and capped at 50", async () => {
 
 test("an active session for the same org and meeting is reused, not started again (D7)", async () => {
   const db = await testDb();
-  const first = (await db.createSessionUnlessActive("org_A", newSession())).session;
-  const second = await db.createSessionUnlessActive("org_A", newSession({ createdBy: "user_2" }));
+  const first = (await db.createSessionUnlessActive("org_A", newSession(), ROOMY)).session;
+  const second = await db.createSessionUnlessActive("org_A", newSession({ createdBy: "user_2" }), ROOMY);
   assert.equal(second.reused, true);
   assert.equal(second.session.id, first.id);
   assert.equal(second.session.createdBy, "user_1", "the existing session, unchanged");
-  assert.equal((await db.createSessionUnlessActive("org_B", newSession())).reused, false, "another org's session is never reused");
-  assert.equal((await db.createSessionUnlessActive("org_A", newSession({ meetingUrl: `${MEET}x` }))).reused, false, "another meeting isn't either");
+  assert.equal((await db.createSessionUnlessActive("org_B", newSession(), ROOMY)).reused, false, "another org's session is never reused");
+  assert.equal((await db.createSessionUnlessActive("org_A", newSession({ meetingUrl: `${MEET}x` }), ROOMY)).reused, false, "another meeting isn't either");
   assert.equal((await db.listSessions("org_A")).length, 2);
 });
 
@@ -154,11 +155,11 @@ test("the schema allows one active session per org and meeting, whatever the cod
 // ---- start guards (db/0002_start_guards.surql) ----
 
 const sessionId = (id: string) => new RecordId("session", id);
-const refused = (limit: "active" | "daily") => (err: unknown) => err instanceof StartLimitError && err.limit === limit;
+const refused = (limit: "active" | "daily" | "user_active" | "user_daily") => (err: unknown) => err instanceof StartLimitError && err.limit === limit;
 
 test("an org may have at most maxActive active sessions; reusing one still works at the limit, and a finished one frees a place", async () => {
   const raw = await rawDb();
-  const limits = { maxActive: 2, maxPerDay: 100, activeMarginMinutes: 10 };
+  const limits = lim({ maxActive: 2, maxPerDay: 100, activeMarginMinutes: 10 });
   const a = await createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?a` }), limits);
   await createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?b` }), limits);
   await assert.rejects(createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?c` }), limits), refused("active"));
@@ -172,7 +173,7 @@ test("an org may have at most maxActive active sessions; reusing one still works
 
 test("an org may start at most maxPerDay sessions in 24 hours, finished or not; older ones don't count", async () => {
   const raw = await rawDb();
-  const limits = { maxActive: 100, maxPerDay: 3, activeMarginMinutes: 10 };
+  const limits = lim({ maxActive: 100, maxPerDay: 3, activeMarginMinutes: 10 });
   // One from two days ago.
   await raw.query("CREATE session CONTENT $row", { row: { org: new RecordId("org", "org_A"), created_by: "u", meeting_url: `${MEET}?old`, status: "ended", max_usd: 1, max_minutes: 1, created_at: new Date(Date.now() - 2 * 86_400_000) } }).collect();
   for (const n of [1, 2, 3]) {
@@ -193,7 +194,7 @@ test("a new session is active until its time limit plus the margin", async () =>
 
 test("a session past its active_until stops blocking its meeting (statuses don't move yet) and stops counting", async () => {
   const raw = await rawDb();
-  const limits = { maxActive: 1, maxPerDay: 100, activeMarginMinutes: 10 };
+  const limits = lim({ maxActive: 1, maxPerDay: 100, activeMarginMinutes: 10 });
   const first = await createSessionUnlessActive(raw, "org_A", newSession(), limits);
   await raw.query("UPDATE $id SET status = 'joining', active_until = time::now() - 1s", { id: sessionId(first.session.id) }).collect();
   const again = await createSessionUnlessActive(raw, "org_A", newSession(), limits);
@@ -215,9 +216,69 @@ test("a session from before the stopgap (no active_until) gets one from its crea
 
 test("eight starts at once for different meetings stay within maxActive", async () => {
   const db = await testDb();
-  const limits = { maxActive: 2, maxPerDay: 100, activeMarginMinutes: 10 };
+  const limits = lim({ maxActive: 2, maxPerDay: 100, activeMarginMinutes: 10 });
   const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => db.createSessionUnlessActive("org_A", newSession({ meetingUrl: `${MEET}?p=${i}` }), limits)));
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 2);
   assert.ok(results.filter((r) => r.status === "rejected").every((r) => refused("active")((r as PromiseRejectedResult).reason)));
   assert.equal((await db.listSessions("org_A")).length, 2);
+});
+
+test("a person may have at most maxActivePerUser active sessions across every org, so making orgs gets no more", async () => {
+  const raw = await rawDb();
+  const limits = lim({ maxActivePerUser: 2 });
+  await createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?1` }), limits);
+  await createSessionUnlessActive(raw, "org_B", newSession({ meetingUrl: `${MEET}?2` }), limits);
+  await assert.rejects(createSessionUnlessActive(raw, "org_C", newSession({ meetingUrl: `${MEET}?3` }), limits), refused("user_active"));
+  assert.equal((await createSessionUnlessActive(raw, "org_C", newSession({ meetingUrl: `${MEET}?3`, createdBy: "user_2" }), limits)).reused, false,
+    "someone else in that org isn't held back");
+});
+
+test("a person may start at most maxPerUserPerDay sessions in 24 hours across every org", async () => {
+  const raw = await rawDb();
+  const limits = lim({ maxPerUserPerDay: 2 });
+  for (const org of ["org_A", "org_B"]) {
+    const { session } = await createSessionUnlessActive(raw, org, newSession({ meetingUrl: `${MEET}?${org}` }), limits);
+    await raw.query("UPDATE $id SET status = 'ended'", { id: sessionId(session.id) }).collect();
+  }
+  await assert.rejects(createSessionUnlessActive(raw, "org_C", newSession(), limits), refused("user_daily"));
+});
+
+test("an unconfirmed start (start_unknown) still holds its place until it expires: a bot may exist", async () => {
+  const raw = await rawDb();
+  const limits = lim({ maxActive: 1 });
+  const first = await createSessionUnlessActive(raw, "org_A", newSession(), limits);
+  await raw.query("UPDATE $id SET status = 'start_unknown'", { id: sessionId(first.session.id) }).collect();
+  await assert.rejects(createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?other` }), limits), refused("active"));
+  await raw.query("UPDATE $id SET active_until = time::now() - 1s", { id: sessionId(first.session.id) }).collect();
+  assert.equal((await createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?other` }), limits)).reused, false);
+});
+
+test("at the daily limit, the same meeting is still reused: nothing new starts", async () => {
+  const raw = await rawDb();
+  const limits = lim({ maxPerDay: 1, maxPerUserPerDay: 1 });
+  const first = await createSessionUnlessActive(raw, "org_A", newSession(), limits);
+  const again = await createSessionUnlessActive(raw, "org_A", newSession(), limits);
+  assert.deepEqual([again.reused, again.session.id], [true, first.session.id]);
+});
+
+test("a session that runs past its active_until on its own is freed by the next start; the others keep their updated_at", async () => {
+  const raw = await rawDb();
+  const first = await createSessionUnlessActive(raw, "org_A", newSession(), ROOMY);
+  const other = await createSessionUnlessActive(raw, "org_A", newSession({ meetingUrl: `${MEET}?other` }), ROOMY);
+  await raw.query("UPDATE $id SET status = 'joining', active_until = time::now() + 1s", { id: sessionId(first.session.id) }).collect();
+  const before = (await raw.query<[{ updated_at: { toDate(): Date } }[]]>("SELECT updated_at FROM $id", { id: sessionId(other.session.id) }).collect())[0][0]!.updated_at.toDate();
+  await new Promise((r) => setTimeout(r, 1_200));
+  // Nothing wrote the first row since it expired: the start's own rewrite drops it out of active_meeting.
+  const again = await createSessionUnlessActive(raw, "org_A", newSession(), ROOMY);
+  assert.equal(again.reused, false);
+  const after = (await raw.query<[{ updated_at: { toDate(): Date } }[]]>("SELECT updated_at FROM $id", { id: sessionId(other.session.id) }).collect())[0][0]!.updated_at.toDate();
+  assert.equal(after.getTime(), before.getTime(), "an active session that isn't expired isn't rewritten");
+});
+
+test("eight starts at once by one person in eight orgs stay within maxActivePerUser", async () => {
+  const db = await testDb();
+  const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) =>
+    db.createSessionUnlessActive(`org_${i}`, newSession({ meetingUrl: `${MEET}?p=${i}` }), lim({ maxActivePerUser: 2 }))));
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 2);
+  assert.ok(results.filter((r) => r.status === "rejected").every((r) => refused("user_active")((r as PromiseRejectedResult).reason)));
 });

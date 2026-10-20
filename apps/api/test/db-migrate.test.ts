@@ -38,7 +38,7 @@ test("the api's own migrations apply to a new database, and a second run is a no
     assert.deepEqual(await migrate(db), []);
     assert.deepEqual(await ledger(db), files, "each file is recorded once");
     const [info] = await db.query<[{ tables: Record<string, unknown> }]>("INFO FOR DB").collect();
-    assert.deepEqual(Object.keys(info.tables).sort(), ["migration", "org", "session"]);
+    assert.deepEqual(Object.keys(info.tables).sort(), ["migration", "org", "session", "starter"]);
   });
 });
 
@@ -96,19 +96,24 @@ test("a server that doesn't answer fails at startup with SURREAL_UNREACHABLE", a
     (err) => errorCode(err) === "SURREAL_UNREACHABLE");
 });
 
-test("0002 gives sessions that were already there an active_until from their time limit, and frees expired links", async () => {
+test("0002 gives sessions that may have a bot an active_until from their time limit, frees expired links, and leaves finished ones alone", async () => {
   await withDb(async (db) => {
     const first = dirWith({ "0001_init.surql": readFileSync(join(MIGRATIONS_DIR, "0001_init.surql"), "utf8") });
     await migrate(db, first);
     const row = { org: new RecordId("org", "org_a"), created_by: "u", status: "joining", max_usd: 1, max_minutes: 60 };
-    await db.query("CREATE session:old CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/old", created_at: new Date(Date.now() - 3 * 3_600_000) } }).collect();
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    await db.query("CREATE session:old CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/old", created_at: hoursAgo(3) } }).collect();
     await db.query("CREATE session:recent CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/new" } }).collect();
+    await db.query("CREATE session:unknown CONTENT $row", { row: { ...row, status: "start_unknown", meeting_url: "https://meet.google.com/unk" } }).collect();
+    await db.query("CREATE session:ended CONTENT $row", { row: { ...row, status: "ended", meeting_url: "https://meet.google.com/end", created_at: hoursAgo(5) } }).collect();
     assert.deepEqual(await migrate(db), ["0002_start_guards.surql"]);
-    const [rows] = await db.query<[{ id: RecordId; ttl: string; active_meeting?: string }[]]>(
-      "SELECT id, <string> (active_until - created_at) AS ttl, active_meeting FROM session ORDER BY id").collect();
-    assert.deepEqual(rows.map((r) => [String(r.id.id), r.ttl, r.active_meeting ?? null]), [
-      ["old", "1h10m", null],
-      ["recent", "1h10m", "https://meet.google.com/new"],
+    const [rows] = await db.query<[{ id: RecordId; ttl?: string; active_meeting?: string }[]]>(
+      "SELECT id, IF active_until != NONE { <string> (active_until - created_at) } AS ttl, active_meeting FROM session ORDER BY id").collect();
+    assert.deepEqual(rows.map((r) => [String(r.id.id), r.ttl ?? null, r.active_meeting ?? null]), [
+      ["ended", null, null],
+      ["old", "1h30m", null],
+      ["recent", "1h30m", "https://meet.google.com/new"],
+      ["unknown", "1h30m", null],
     ]);
   });
 });

@@ -7,7 +7,7 @@ import { upsertOrg } from "./orgs.ts";
 import { createSessionUnlessActive, getSession, listSessions, setSessionStart } from "./sessions.ts";
 import type { Db } from "./types.ts";
 
-export type { Db, CreateResult, NewSession, OrgStartLimits, SessionRecord, StartResult, ApiSessionStatus } from "./types.ts";
+export type { Db, CreateResult, NewSession, StartLimit, StartLimits, SessionRecord, StartResult, ApiSessionStatus } from "./types.ts";
 export { StartLimitError } from "./types.ts";
 export type { DbTarget } from "./connect.ts";
 

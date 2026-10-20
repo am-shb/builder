@@ -224,22 +224,30 @@ part of that.
    limits, createdAt, updatedAt }`. Whether `stageUrl` is included is decision D8.
 
 ### Start guards (added 2026-10-20)
-Every start can send a paid bot and sign-up is open, so one account or org can't start an unbounded number:
+Every start can send a paid bot and sign-up is open, so one org or one person can't start an unbounded number. Any
+signed-in person can make organizations, so each limit is also counted per person across every org they're in:
 - **Per user:** at most `START_RATE_LIMIT_PER_MINUTE` (default 5) `POST /v1/sessions` per user in any minute,
   counted before anything else (invalid and reused requests too). Over it: 429 `rate_limited` with `Retry-After`.
   In memory: the api runs as one instance; with more, each would count on its own.
-- **Per org, active at once:** at most `MAX_ACTIVE_SESSIONS_PER_ORG` (default 2). Over it: 429
-  `active_limit_reached`. Reusing an active session still works at the limit.
-- **Per org, per day:** at most `MAX_STARTS_PER_ORG_PER_DAY` (default 20) sessions created in any 24 hours, whatever
-  became of them. Over it: 429 `daily_limit_reached`.
-- Both org limits are checked in the transaction that creates the session. Every start writes the org's row
-  (`last_start_at`), so two starts for one org at once conflict and one is retried after the other: they can't both
-  pass a count. Nothing is saved and the engine isn't called when one is refused.
+- **Active at once:** at most `MAX_ACTIVE_SESSIONS_PER_ORG` per org and `MAX_ACTIVE_SESSIONS_PER_USER` per person
+  (default 2 each). A session holds a place while `starting`, `joining`, `in_meeting` or `start_unknown` (a bot may
+  exist), until its `active_until`. Over it: 429 `active_limit_reached` or `user_active_limit_reached`. Reusing an
+  active session still works at the limit.
+- **Per day:** at most `MAX_STARTS_PER_ORG_PER_DAY` per org and `MAX_STARTS_PER_USER_PER_DAY` per person (default 20
+  each) sessions created in any 24 hours, whatever became of them. Over it: 429 `daily_limit_reached` or
+  `user_daily_limit_reached`.
+- All four are checked in the transaction that creates the session. Every start writes the org's row
+  (`last_start_at`) and the person's `starter` row, so two starts for one org or one person at once conflict and one
+  is retried after the other: they can't both pass a count. Nothing is saved and the engine isn't called when one is
+  refused. Clerk's per-person limit on creating organizations is a second line (dashboard).
 - **Stale sessions (stopgap until engine events, A2):** statuses don't move yet, so a session would stay `joining`
   and block its meeting link for good. Each session has `active_until`: its time limit plus
-  `ACTIVE_MARGIN_MINUTES` (default 10). Past it, it no longer counts as active (for reuse or the active limit); its
-  status is left as it was. `db/0002_start_guards.surql` adds the field and backfills existing rows with a
-  10-minute margin.
+  `ACTIVE_MARGIN_MINUTES` (default 30). The engine counts the time limit from when the bot is let in, so the margin
+  covers the wait in the meeting's lobby and the leave; the engine sets no lobby timeout of its own, so keep the margin
+  above Recall's. Past it, a session no longer counts as active (for reuse or the active limits); its status is left
+  as it was. `db/0002_start_guards.surql` adds the field and backfills the sessions that may have a bot with a
+  30-minute margin. During a deploy, the old api keeps serving (with no limits) until the new one is up; rows it
+  writes get their `active_until` on the org's next start.
 - Unset variables take the defaults (`src/start-guards.ts`); a bad value stops the server with an error naming the
   variable.
 
@@ -264,7 +272,8 @@ Built in step 1:
 - `ENGINE_INTERNAL_URL`, `ENGINE_INTERNAL_TOKEN`
 - `DEFAULT_MAX_USD`, `DEFAULT_MAX_MINUTES`
 - Start guards, each optional with a default: `MAX_ACTIVE_SESSIONS_PER_ORG` (2), `MAX_STARTS_PER_ORG_PER_DAY` (20),
-  `START_RATE_LIMIT_PER_MINUTE` (5), `ACTIVE_MARGIN_MINUTES` (10). See "Start guards".
+  `MAX_ACTIVE_SESSIONS_PER_USER` (2), `MAX_STARTS_PER_USER_PER_DAY` (20), `START_RATE_LIMIT_PER_MINUTE` (5),
+  `ACTIVE_MARGIN_MINUTES` (30). See "Start guards".
 
 Step 3 adds the database variables. They're the engine's five, with the same names and rules (its
 `surrealSettings()` in `apps/engine/src/config.ts`):
