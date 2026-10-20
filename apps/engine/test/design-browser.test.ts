@@ -376,6 +376,9 @@ test("app frame", async (t) => {
           await page.eval(`window.show(${JSON.stringify(screen)})`);
           const content = await page.eval<{ scroll: number; client: number }>(`(() => { const b = document.querySelector(".b-phone .b-app-body"); return { scroll: b.scrollWidth, client: b.clientWidth }; })()`);
           assert.ok(content.scroll <= content.client, `${screen} overflows the phone: ${JSON.stringify(content)}`);
+          // A status pill in a table cell fits inside its own background (it used to spill out of a thin column).
+          const spilled = await page.eval<string[]>(`[...document.querySelectorAll(".b-phone .b-table .b-pill")].filter((p) => p.scrollWidth > p.clientWidth + 1).map((p) => p.textContent)`);
+          assert.deepEqual(spilled, [], `${screen}: table pills spill out`);
           await partOneChecks(page, `phone ${screen}`);
         }
         await page.eval(`window.show("gallery-a")`);

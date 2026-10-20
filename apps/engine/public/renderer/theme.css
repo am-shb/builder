@@ -344,6 +344,14 @@
 .b-table tr:first-child td { border-top: 0; }
 .b-table td > * + * { margin-left: 8px; }
 .b-table .is-num { text-align: right; }
+/* A pill in a cell wraps inside the cell instead of spilling out of it (and out of the content area). */
+.b-table td .b-pill { white-space: normal; }
+/* In a narrow content area (a phone, a comparison preview) equal columns are too thin for a status pill: columns
+   size to their content instead, so a pill wraps only when even that leaves no room. */
+@container b-body (width < 640px) {
+  .b-table-grid { table-layout: auto; }
+  .b-table th, .b-table td { padding-inline: 8px; }
+}
 
 .b-activity-body { display: flex; flex-direction: column; }
 .b-activity-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--b-line); min-width: 0; }
