@@ -35,6 +35,10 @@ window.draw = (p) => { window.nodes = renderTree(root, p, state); };
 window.reSnapshot = () => window.draw(JSON.parse(JSON.stringify(proto)));
 bindInteractions(root, () => proto, () => state, (s) => { state = s; window.draw(proto); });
 window.draw(proto);
+// Measure in the bundled Inter (theme.css), never in a fallback still showing while it loads.
+await document.fonts.load("18px Inter");
+document.body.getBoundingClientRect();
+await document.fonts.ready;
 window.ready = true;
 </script>`;
 
@@ -42,11 +46,12 @@ async function withPageServer(fn: (url: string) => Promise<void>) {
   const server = http.createServer((req, res) => {
     if (req.url === "/") return void res.writeHead(200, { "Content-Type": "text/html" }).end(PAGE);
     if (req.url === "/proto.json") return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(proto));
-    const m = req.url?.match(/^\/renderer\/((?:components\/)?[\w.-]+)$/);
+    const m = req.url?.match(/^\/renderer\/((?:components\/|fonts\/)?[\w.-]+)$/);
     if (m) {
       try {
         const body = readFileSync(new URL(`../public/renderer/${m[1]}`, import.meta.url));
-        return void res.writeHead(200, { "Content-Type": m[1].endsWith(".css") ? "text/css" : "text/javascript" }).end(body);
+        const type = m[1].endsWith(".css") ? "text/css" : m[1].endsWith(".woff2") ? "font/woff2" : "text/javascript";
+        return void res.writeHead(200, { "Content-Type": type }).end(body);
       } catch { /* fall through */ }
     }
     res.writeHead(404).end();

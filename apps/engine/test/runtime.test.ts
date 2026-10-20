@@ -319,6 +319,14 @@ test("renderer assets are public through the tunnel; script endpoint is not", as
   for (const bad of ["/renderer/images/..%2Fapp.ts", "/renderer/images/../app.ts", "/renderer/images/x.js", "/renderer/images/nope-1.webp"]) {
     assert.equal((await fetch(`${ctx.base}${bad}`, { headers: proxied })).status, 404, bad);
   }
+  const font = await fetch(`${ctx.base}/renderer/fonts/inter-latin-wght-normal.woff2`, { headers: proxied });
+  assert.equal(font.status, 200);
+  assert.equal(font.headers.get("content-type"), "font/woff2");
+  assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString("latin1"), "wOF2");
+  for (const bad of ["/renderer/fonts/..%2F..%2Fsrc%2Fapp.ts", "/renderer/fonts/..%2Ftheme.css", "/renderer/fonts/OFL.txt", "/renderer/fonts/x.woff",
+    "/renderer/fonts/nope.woff2", "/renderer/fonts/a/b.woff2", "/renderer/images/x.woff2", "/renderer/fonts/x.webp"]) {
+    assert.equal((await fetch(`${ctx.base}${bad}`, { headers: proxied })).status, 404, bad);
+  }
   const script = await fetch(`${ctx.base}/api/sessions/${ctx.session.id}/script`, { method: "POST", body: JSON.stringify({ steps: [] }), headers: proxied });
   assert.equal(script.status, 404);
   assert.equal((await fetch(`${ctx.base}/api/sessions/${ctx.session.id}/script`, { method: "POST", body: JSON.stringify({ steps: [] }) })).status, 200);

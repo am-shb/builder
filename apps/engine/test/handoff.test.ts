@@ -146,6 +146,10 @@ test("export is self-contained", async (t) => {
   assert.doesNotMatch(html, /href="\//);
   assert.doesNotMatch(html, /http/);
   assert.match(html, /data:text\/javascript;base64,/);
+  // The bundled font travels inside the file: a data URL, with no relative url left to miss offline.
+  const font = readFileSync(new URL("../public/renderer/fonts/inter-latin-wght-normal.woff2", import.meta.url)).toString("base64");
+  assert.ok(html.includes(`url("data:font/woff2;base64,${font}")`), "Inter inlined as a data URL");
+  assert.doesNotMatch(html, /url\("?fonts\//);
   const dir = mkdtempSync(join(tmpdir(), "handoff-"));
   try {
     const file = join(dir, "handoff.html");
@@ -153,6 +157,9 @@ test("export is self-contained", async (t) => {
     await withChrome(t, async (page) => {
       await page.goto(`file://${file}`);
       await page.waitFor(`document.querySelector('#prototype [data-node-id="home"]')`);
+      assert.ok((await page.fonts()).includes("Inter"), "Inter loads from the file");
+      assert.equal(await page.eval(`document.fonts.check("16px Inter")`), true);
+      assert.match(await page.eval<string>(`getComputedStyle(document.querySelector('#prototype [data-node-id="home"]')).fontFamily`), /^"?Inter"?,/);
       // Interactions work offline: type a task and add it.
       await page.eval(`(() => { const i = document.querySelector('[data-node-id="home.input"] input, input[data-node-id="home.input"]'); i.value = "ship it"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
       await page.eval(`document.querySelector('[data-node-id="home.add"]').click()`);
@@ -170,6 +177,7 @@ test("live handoff page renders the prototype and flags drafts", async (t) => {
       await page.waitFor(`document.querySelector('#prototype [data-node-id="home"]')`);
       assert.equal(await page.eval(`document.querySelectorAll("#not-agreed .flag").length > 0`), true);
       assert.equal(await page.eval(`!!document.querySelector('a[href*="/export?token="]')`), true);
+      assert.ok((await page.fonts()).includes("Inter"), "the live page loads Inter from /renderer/fonts/");
       if (process.env.HANDOFF_SHOT) await page.screenshot(process.env.HANDOFF_SHOT);
       assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
     }, { width: 1440, height: 900 });

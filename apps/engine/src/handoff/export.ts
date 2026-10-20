@@ -17,11 +17,18 @@ export const RENDERER_MODULES = [
   "components/feedback.js", "icons.js", "images.js",
 ] as const;
 
+/** theme.css for the inline export: its bundled fonts (url("fonts/<name>.woff2"), relative to the stylesheet) become
+ *  data URLs, since a file opened from disk has no /renderer/fonts/ to load them from. */
+function inlineFonts(css: string): string {
+  return css.replace(/url\("fonts\/([A-Za-z0-9_-]+\.woff2)"\)/g, (_m, file: string) =>
+    `url("data:font/woff2;base64,${readFileSync(new URL(`fonts/${file}`, rendererDir)).toString("base64")}")`);
+}
+
 let cache: { template: string; theme: string; modules: Record<string, string> } | undefined;
 function assets() {
   cache ??= {
     template: readFileSync(new URL("../../public/handoff.html", import.meta.url), "utf8"),
-    theme: readFileSync(new URL("theme.css", rendererDir), "utf8"),
+    theme: inlineFonts(readFileSync(new URL("theme.css", rendererDir), "utf8")), // only the inline export uses it
     modules: Object.fromEntries(RENDERER_MODULES.map((m) => [m, readFileSync(new URL(m, rendererDir), "utf8")])),
   };
   return cache;
