@@ -34,7 +34,7 @@ export function createServer(deps: Deps): Server {
     ...meRoutes(auth),
     ...sessionReadRoutes(auth, db),
     ...sessionCreateRoutes({ auth, db, engine, limits: deps.config.defaultLimits, log }),
-  ], log);
+  ], log, { allowedOrigins: deps.config.clerk?.authorizedParties ?? [] });
   return createHttpServer((req, res) => void handle(req, res));
 }
 
