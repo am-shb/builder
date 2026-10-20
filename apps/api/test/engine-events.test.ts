@@ -79,7 +79,9 @@ test("a missing or wrong token is 401, and nothing changes", async () => {
   const { db, server } = await api();
   const s = await startedSession(db);
   await withServer(server, async (base) => {
-    for (const auth of ["", "Bearer", `Bearer ${TOKEN}x`, `Bearer ${TOKEN.slice(1)}`, `Basic ${TOKEN}`, "Bearer someone-elses-token-0123456789abcdef"]) {
+    // Same length as the real one, one character off: only the comparison itself can refuse it.
+    const sameLength = `${TOKEN.slice(0, -1)}${TOKEN.endsWith("f") ? "e" : "f"}`;
+    for (const auth of ["", "Bearer", `Bearer ${TOKEN}x`, `Bearer ${TOKEN.slice(1)}`, `Basic ${TOKEN}`, `Bearer ${sameLength}`, `Bearer ${"x".repeat(TOKEN.length)}`]) {
       const res = await post(base, statusEvent(s, "in_meeting"), { authorization: auth });
       assert.equal(res.status, 401, auth);
       assert.equal(((await res.json()) as { error: { code: string } }).error.code, "unauthorized");

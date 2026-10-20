@@ -186,6 +186,30 @@ describe("the list", () => {
     expect(reads()).toBe(3);
   });
 
+  it("a background refresh that fails leaves the list as it was, with no failure notice", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    let down = false;
+    const api = fakeApi({
+      "GET /v1/sessions": async () => (down
+        ? Response.json(errorBody("db_unavailable"), { status: 503 })
+        : Response.json({ sessions: [session({ id: ID, status: "joining", createdAt: minutesAgo(2) })] })),
+    });
+    render(
+      <ApiProvider baseUrl={API} fetch={api.fetch}>
+        <MemoryRouter initialEntries={["/"]}>
+          <StartSessionProvider><Routes><Route path="/" element={<HomePage now={NOW} />} /></Routes></StartSessionProvider>
+        </MemoryRouter>
+      </ApiProvider>,
+    );
+    await screen.findByRole("link", { name: /kfp-qzwd-nre/ });
+    down = true;
+    await tick(AUTO_REFRESH_MS);
+    expect(api.requests.filter((r) => r.path === "/v1/sessions").length).toBe(2);
+    // The page keeps empty live regions; the failure notice would put "Couldn't refresh." in one.
+    expect(screen.queryByText(/Couldn't refresh/)).toBeNull();
+    expect(within(screen.getByRole("link", { name: /kfp-qzwd-nre/ })).getByText("Joining")).toBeTruthy();
+  });
+
   it("with only finished sessions, or ones too old to change, asks nothing more", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     const { reads } = home(() => [

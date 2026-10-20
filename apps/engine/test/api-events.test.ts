@@ -65,6 +65,8 @@ test("the reason for an end or a failure comes from Recall's history: the done a
   assert.equal(statusEvent(session({ bot_status: "done" }), new Date(NOW), [change("call_ended"), change("done")])!.errorCode, undefined, "no reason given");
   assert.equal(statusEvent(session({ bot_status: "fatal" }), new Date(NOW), [change("joining_call"), change("fatal", "meeting_not_found")])!.errorCode, "meeting_not_found");
   assert.equal(statusEvent(session({ bot_status: "done" }), new Date(NOW), [change("call_ended", "Bad Code")])!.errorCode, undefined, "not a plain code: left out");
+  const twice = [change("call_ended", "bot_received_leave_call"), change("call_ended", "call_ended_by_host"), change("done")];
+  assert.equal(statusEvent(session({ bot_status: "done" }), new Date(NOW), twice)!.errorCode, "call_ended_by_host", "the latest reason");
 });
 
 test("sessions the api didn't start, or without a bot, have no event", () => {
@@ -158,7 +160,7 @@ test("401, 408, 429, 5xx and network errors are retried; other 4xx are dropped",
   assert.deepEqual([network.sent.length, network.reporter.waiting()], [2, 0], "a network error is retried");
 });
 
-test("a send that hangs times out and is retried", async () => {
+test("a send that hangs times out and is retried", { timeout: 5_000 }, async () => {
   let calls = 0;
   const hanging = ((_url: string, init: RequestInit) => {
     calls += 1;
