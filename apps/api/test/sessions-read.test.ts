@@ -13,6 +13,8 @@ import { testDb } from "./helpers/db.ts";
 
 const MEET = "https://meet.google.com/abc-defg-hij";
 const limits = { maxUsd: 5, maxMinutes: 60 };
+// Limits that never get in the way of these tests, which are about reading.
+const roomy = { maxActive: 1000, maxPerDay: 1000, maxActivePerUser: 1000, maxPerUserPerDay: 1000, activeMarginMinutes: 10 };
 const newSession = (over: Partial<NewSession> = {}): NewSession => ({ id: randomUUID(), createdBy: "user_1", meetingUrl: MEET, limits, ...over });
 
 type Logged = { msg: string; fields?: Record<string, unknown> };
@@ -31,10 +33,10 @@ const tokenFor = (orgId: string, rol = "member") => signToken({ userId: `user_${
 /** Two orgs with sessions of their own: org_a has two (one started), org_b has one. */
 async function seeded() {
   const db = await testDb();
-  const a1 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a1` }))).session;
-  const a2 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a2` }))).session;
+  const a1 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a1` }), roomy)).session;
+  const a2 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a2` }), roomy)).session;
   await db.setSessionStart("org_a", a2.id, { kind: "ok", status: "joining", stageUrl: "https://stage.example.com/a2" });
-  const b1 = (await db.createSessionUnlessActive("org_b", newSession({ meetingUrl: `${MEET}?b1` }))).session;
+  const b1 = (await db.createSessionUnlessActive("org_b", newSession({ meetingUrl: `${MEET}?b1` }), roomy)).session;
   await db.setSessionStart("org_b", b1.id, { kind: "rejected", errorCode: "recall_rejected" });
   return { db, a1, a2, b1 };
 }
@@ -49,9 +51,9 @@ test("GET /v1/sessions lists the caller's org's sessions, newest first, in the S
     assert.deepEqual(body.sessions.map((s) => s.id), [a2.id, a1.id]);
     const [started, starting] = body.sessions;
     assert.equal(started.status, "joining");
-    assert.equal(started.stageUrl, "https://stage.example.com/a2", "the stage URL is shown to the owning org (D8)");
+    assert.equal("stageUrl" in started, false, "no stage URL in the list: it's a control link, sent only for one session");
     assert.equal(starting.status, "starting");
-    assert.equal("stageUrl" in starting || "errorCode" in starting, false, "absent, not null, when there's nothing to say");
+    assert.equal("errorCode" in starting, false, "absent, not null, when there's nothing to say");
     assert.deepEqual(starting.limits, limits);
   });
 });
@@ -119,7 +121,7 @@ test("both admins and members may read", async () => {
 test("the list holds the org's 50 newest", async () => {
   const db = await testDb();
   const ids: string[] = [];
-  for (let i = 0; i < 52; i++) ids.push((await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?n=${i}` }))).session.id);
+  for (let i = 0; i < 52; i++) ids.push((await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?n=${i}` }), roomy)).session.id);
   await withApi(db, async (base) => {
     const body = SessionList.parse(await (await get(base, "/v1/sessions?limit=500", tokenFor("org_a"))).json());
     assert.deepEqual(body.sessions.map((s) => s.id), ids.slice(-50).reverse());

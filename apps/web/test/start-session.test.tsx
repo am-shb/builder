@@ -205,6 +205,10 @@ describe("starting a session", () => {
     [502, "engine_rejected", "session_conflict", "Starting meetings isn't working right now (session_conflict)."],
     [503, "engine_unavailable", undefined, "Starting meetings isn't available right now."],
     [503, "limits_unavailable", undefined, "Starting meetings isn't set up on this server yet."],
+    [429, "rate_limited", undefined, "Too many starts in a short time."],
+    [429, "active_limit_reached", undefined, "This organization has as many sessions running as it's allowed."],
+    [429, "daily_limit_reached", undefined, "This organization has started as many sessions as it's allowed in 24 hours."],
+    [429, "user_active_limit_reached", undefined, "You have as many sessions running as you're allowed."],
   ])("%i %s %s: no bot was sent, in our words", async (status, code, engineCode, title) => {
     setClerk({ session: "active", orgId: "org_a" });
     page(apiWith({ status, body: errorBody(code, engineCode ? { session: { ...started, status: "start_failed", errorCode: engineCode } } : {}) }));

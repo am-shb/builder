@@ -35,6 +35,31 @@ export type NewSession = {
 /** `reused`: the org already had an active session for this meeting, returned instead of a new one. */
 export type CreateResult = { session: SessionRecord; reused: boolean };
 
+/**
+ * The limits a new session is checked against, in the same transaction that creates it: per org and per person (the
+ * person's sessions in every org, so making more orgs gets no more), each as sessions holding a place now and
+ * sessions started in any 24 hours.
+ */
+export type StartLimits = {
+  maxActive: number;
+  maxPerDay: number;
+  maxActivePerUser: number;
+  maxPerUserPerDay: number;
+  activeMarginMinutes: number;
+};
+
+/** Which limit a new session would go over. */
+export type StartLimit = "active" | "daily" | "user_active" | "user_daily";
+
+export class StartLimitError extends Error {
+  override name = "StartLimitError";
+  readonly limit: StartLimit;
+  constructor(limit: StartLimit) {
+    super(`A start limit was reached: ${limit}.`);
+    this.limit = limit;
+  }
+}
+
 /** What the engine said when asked to start the session, as step 6 records it. */
 export type StartResult =
   | { kind: "ok"; status: SessionStatus; stageUrl: string }
@@ -50,8 +75,11 @@ export const MAX_LIST = 50;
 export type Db = {
   /** Creates the org's row on its first request (D4). Safe to call on every request. */
   upsertOrg(orgId: string): Promise<void>;
-  /** The org's active session for this meeting if there is one, otherwise a new `starting` one. Atomic. */
-  createSessionUnlessActive(orgId: string, s: NewSession): Promise<CreateResult>;
+  /**
+   * The org's active session for this meeting if there is one, otherwise a new `starting` one, unless that would go
+   * over `limits` (StartLimitError). Atomic.
+   */
+  createSessionUnlessActive(orgId: string, s: NewSession, limits?: StartLimits): Promise<CreateResult>;
   /** Records the engine's answer on a `starting` session. undefined if there's no such session in this org. */
   setSessionStart(orgId: string, id: string, result: StartResult): Promise<SessionRecord | undefined>;
   getSession(orgId: string, id: string): Promise<SessionRecord | undefined>;

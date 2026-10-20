@@ -7,6 +7,7 @@ import { createServer } from "../src/server.ts";
 import { createEngineClient } from "../src/engine/client.ts";
 import type { Db } from "../src/db/index.ts";
 import type { SessionLimits } from "../src/contracts.ts";
+import type { StartGuards } from "../src/start-guards.ts";
 import { CreateSessionResponse, SessionList, StartFailedResponse } from "../src/routes/schemas.ts";
 import { signToken, testClerk } from "./helpers/clerk.ts";
 import { testConfig, withServer } from "./helpers/server.ts";
@@ -40,7 +41,12 @@ const MEET = "https://meet.google.com/abc-defg-hij";
 const LIMITS: SessionLimits = { maxUsd: 5, maxMinutes: 60 };
 type Logged = { msg: string; fields?: Record<string, unknown> };
 
-type ApiOptions = { db?: Db | null; engineUrl?: string | null; timeoutMs?: number; limits?: SessionLimits | null };
+type ApiOptions = { db?: Db | null; engineUrl?: string | null; timeoutMs?: number; limits?: SessionLimits | null; guards?: StartGuards; now?: () => number };
+
+// For tests of other things: start guards that never get in the way. Their own tests below set real ones.
+const ROOMY: StartGuards = {
+  maxActivePerOrg: 1000, maxStartsPerOrgPerDay: 1000, maxActivePerUser: 1000, maxStartsPerUserPerDay: 1000, startsPerUserPerMinute: 1000, activeMarginMinutes: 10,
+};
 
 /** The api with the fake engine (or none), a fresh in-memory db unless given one, and a log it collects. */
 async function withApi(opts: ApiOptions, fn: (ctx: { base: string; db: Db; logs: Logged[] }) => Promise<void>) {
@@ -50,8 +56,8 @@ async function withApi(opts: ApiOptions, fn: (ctx: { base: string; db: Db; logs:
   const engineUrl = opts.engineUrl === undefined ? engine.url : opts.engineUrl;
   const client = engineUrl === null ? null
     : createEngineClient({ config: { url: engineUrl, token: FAKE_ENGINE_TOKEN }, log, timeoutMs: opts.timeoutMs ?? 2_000 });
-  const config = testConfig({ clerk: testClerk, defaultLimits: opts.limits === undefined ? LIMITS : opts.limits });
-  const server = createServer({ config, db, engine: client, log });
+  const config = testConfig({ clerk: testClerk, defaultLimits: opts.limits === undefined ? LIMITS : opts.limits, startGuards: opts.guards ?? ROOMY });
+  const server = createServer({ config, db, engine: client, log, ...(opts.now ? { now: opts.now } : {}) });
   await withServer(server, (base) => fn({ base, db: db as Db, logs }));
 }
 
@@ -323,5 +329,90 @@ test("logs carry ids and outcomes, never the meeting URL, stage URL or token", a
     for (const secret of ["meet.google.com", "engine.test/stage", "stage-secret", token, FAKE_ENGINE_TOKEN]) assert.ok(!text.includes(secret), secret);
     const outcomes = logs.filter((l) => l.msg === "session.start").map((l) => l.fields?.outcome);
     assert.deepEqual(outcomes, ["ok", "reused"]);
+  });
+});
+
+// ---- start guards ----
+
+const guards = (over: Partial<StartGuards>): StartGuards => ({ ...ROOMY, ...over });
+
+test("an org at its limit of active sessions gets 429 active_limit_reached: nothing saved, the engine not called; reusing one still works", async () => {
+  await withApi({ guards: guards({ maxActivePerOrg: 2 }) }, async ({ base, db }) => {
+    for (const n of [1, 2]) assert.equal((await post(base, { meetingUrl: `${MEET}?n=${n}` }, tokenFor("org_a"))).status, 201);
+    const res = await post(base, { meetingUrl: `${MEET}?n=3` }, tokenFor("org_a"));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "active_limit_reached");
+    assert.equal(engine.accepted.length, 2);
+    assert.equal((await db.listSessions("org_a")).length, 2);
+    const again = await post(base, { meetingUrl: `${MEET}?n=1` }, tokenFor("org_a"));
+    assert.equal(again.status, 200, "the same meeting is reused, which starts nothing");
+    assert.equal((await post(base, { meetingUrl: `${MEET}?n=3` }, tokenFor("org_b"))).status, 201, "another org has its own limit");
+  });
+});
+
+test("an org at its daily limit gets 429 daily_limit_reached, even when the earlier starts failed", async () => {
+  await withApi({ guards: guards({ maxStartsPerOrgPerDay: 2 }) }, async ({ base }) => {
+    for (const n of [1, 2]) {
+      engine.behave({ kind: "reply", httpStatus: 422, body: JSON.stringify({ error: { code: "recall_rejected" } }) });
+      assert.equal((await post(base, { meetingUrl: `${MEET}?n=${n}` }, tokenFor("org_a"))).status, 502);
+    }
+    const res = await post(base, { meetingUrl: `${MEET}?n=3` }, tokenFor("org_a"));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "daily_limit_reached");
+    assert.equal(engine.accepted.length, 2);
+  });
+});
+
+test("more than START_RATE_LIMIT_PER_MINUTE requests from one user in a minute get 429 rate_limited with Retry-After", async () => {
+  let t = 1_000_000;
+  await withApi({ guards: guards({ startsPerUserPerMinute: 3 }), now: () => t }, async ({ base }) => {
+    const me = tokenFor("org_a", { userId: "user_1" });
+    // Reused and invalid requests count too: it's a limit on asking.
+    assert.equal((await post(base, { meetingUrl: MEET }, me)).status, 201);
+    assert.equal((await post(base, { meetingUrl: MEET }, me)).status, 200);
+    assert.equal((await post(base, { meetingUrl: "nope" }, me)).status, 400);
+    t += 20_000;
+    const res = await post(base, { meetingUrl: `${MEET}?other` }, me);
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "rate_limited");
+    assert.equal(res.headers.get("retry-after"), "40");
+    assert.equal(engine.accepted.length, 1);
+    assert.equal((await post(base, { meetingUrl: `${MEET}?other` }, tokenFor("org_a", { userId: "user_2" }))).status, 201, "per user");
+    t += 40_001;
+    assert.equal((await post(base, { meetingUrl: `${MEET}?later` }, me)).status, 201, "allowed again once the minute has passed");
+  });
+});
+
+test("a session past its time limit plus the margin no longer blocks its link: a new start sends a bot (statuses don't move yet)", async () => {
+  // A 0.01-minute limit and no margin: active for about a second.
+  await withApi({ limits: { maxUsd: 5, maxMinutes: 0.01 }, guards: guards({ activeMarginMinutes: 0 }) }, async ({ base }) => {
+    const first = CreateSessionResponse.parse(await (await post(base, { meetingUrl: MEET }, tokenFor("org_a"))).json()).session;
+    assert.equal((await post(base, { meetingUrl: MEET }, tokenFor("org_a"))).status, 200, "still active: reused");
+    await new Promise((r) => setTimeout(r, 1_100));
+    const res = await post(base, { meetingUrl: MEET }, tokenFor("org_a"));
+    assert.equal(res.status, 201);
+    const second = CreateSessionResponse.parse(await res.json()).session;
+    assert.notEqual(second.id, first.id);
+    assert.equal(engine.accepted.length, 2);
+  });
+});
+
+test("one person at their own limits gets 429 user_active_limit_reached or user_daily_limit_reached, in any org", async () => {
+  await withApi({ guards: guards({ maxActivePerUser: 1 }) }, async ({ base }) => {
+    assert.equal((await post(base, { meetingUrl: `${MEET}?1` }, tokenFor("org_a", { userId: "user_1" }))).status, 201);
+    const res = await post(base, { meetingUrl: `${MEET}?2` }, tokenFor("org_b", { userId: "user_1" }));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "user_active_limit_reached");
+    assert.equal(engine.accepted.length, 1);
+  });
+  await withApi({ guards: guards({ maxStartsPerUserPerDay: 2 }) }, async ({ base }) => {
+    // Failed starts hold no place, but they count against the day.
+    for (const org of ["org_a", "org_b"]) {
+      engine.behave({ kind: "reply", httpStatus: 422, body: JSON.stringify({ error: { code: "recall_rejected" } }) });
+      assert.equal((await post(base, { meetingUrl: `${MEET}?${org}` }, tokenFor(org, { userId: "user_1" }))).status, 502);
+    }
+    const res = await post(base, { meetingUrl: MEET }, tokenFor("org_c", { userId: "user_1" }));
+    assert.equal(res.status, 429);
+    assert.equal(await errorCode(res), "user_daily_limit_reached");
   });
 });

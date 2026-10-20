@@ -234,7 +234,7 @@ list.** States: loading, empty (points at the form), error (by code, below). A R
   Check the meeting for a {BOT} bot before starting another." with "Start anyway" and "Cancel".
 - **Guard for another copy of the link:** the api and engine match exact links, so `…/abc-defg-hij?authuser=0` would
   send a second bot to a meeting that already has one. If the list has a `starting`, `joining` or `in_meeting` session
-  for the same normalized meeting under a different link, still within its time limit plus 10 minutes, Start asks
+  for the same normalized meeting under a different link, still within its time limit plus 30 minutes, Start asks
   first: "This meeting already has a {BOT} session ({status}), started from another copy of the link. Starting again
   sends a second {BOT} bot." The exact same link doesn't ask: the api reuses that session. The api-side fix is the
   meeting-key ADR draft (0014, in review).
@@ -270,9 +270,8 @@ The api returns `stageUrl` to members of the owning org (api plan D8). It holds 
 - Shown **only on the detail page**, behind a "Show stage link" button, never in the list or in any URL of the web app.
 - Next to it: "This link controls the stage shown in the meeting. Anyone with it can change what's on screen and
   interrupt {BOT}'s voice. Don't share it, and don't open it while the meeting is running unless you mean to."
-- Opening it puts the token in that browser's history; the warning says so. Hiding it in the list is about not
-  showing it by accident: `GET /v1/sessions` still returns it for every row, so dropping it from the list response
-  is an api change for later (A3).
+- Opening it puts the token in that browser's history; the warning says so. `GET /v1/sessions` no longer returns it
+  (the api's start-guards change); only `GET /v1/sessions/:id` does.
 - Rendered only if it parses as a URL with protocol `https:` (or `http:` when `import.meta.env.DEV`, for the local
   engine). Anything else isn't shown, so a bad value can never become a `javascript:` link.
 - A "Copy" button, and an "Open" link with `target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"`.
@@ -332,6 +331,11 @@ The same mapping is used on every screen. "Network" codes are made by the web ap
 | 503 | `db_unavailable` | sessions routes | "Sessions aren't available right now." | Refresh |
 | 503 | `engine_unavailable` | `POST` | "Starting meetings isn't available right now." Nothing was started | none |
 | 503 | `limits_unavailable` | `POST` | "Starting meetings isn't set up on this server yet." Nothing was started | none |
+| 429 | `rate_limited` | `POST` | "Too many starts in a short time. Wait a minute, then try again. Nothing was started." | none |
+| 429 | `active_limit_reached` | `POST` | "This organization has as many sessions running as it's allowed. A session counts until its time limit has passed. Try again later. Nothing was started." | none |
+| 429 | `daily_limit_reached` | `POST` | "This organization has started as many sessions as it's allowed in 24 hours. Try again later. Nothing was started." | none |
+| 429 | `user_active_limit_reached` | `POST` | "You have as many sessions running as you're allowed. A session counts until its time limit has passed. Try again later. Nothing was started." | none |
+| 429 | `user_daily_limit_reached` | `POST` | "You've started as many sessions as you're allowed in 24 hours. Try again later. Nothing was started." | none |
 | 504 | `engine_outcome_unknown` | `POST` | **Warning:** "We couldn't confirm whether {BOT} joined. Check the meeting for a {BOT} bot before trying again." | link to the session; **no retry button**; list reloads; the WD8 guard applies |
 | (none) | `network_error` | `POST` | **The 504 warning:** "We lost the connection while starting. Check the session list and the meeting before trying again." | list reloads; no retry button |
 | (none) | `network_error` | `GET` | "Can't reach {PRODUCT}. Check your connection." | Refresh |

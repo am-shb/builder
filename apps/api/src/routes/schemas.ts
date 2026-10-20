@@ -21,8 +21,10 @@ export const SessionView = z.strictObject({
 });
 export type SessionView = z.infer<typeof SessionView>;
 
-/** GET /v1/sessions */
-export const SessionList = z.strictObject({ sessions: z.array(SessionView) });
+/** GET /v1/sessions. Without the stage URL: it's a control link, sent only for one session (GET /v1/sessions/:id). */
+export const SessionListItem = SessionView.omit({ stageUrl: true });
+export type SessionListItem = z.infer<typeof SessionListItem>;
+export const SessionList = z.strictObject({ sessions: z.array(SessionListItem) });
 export type SessionList = z.infer<typeof SessionList>;
 
 /** GET /v1/sessions/:id */
@@ -40,6 +42,11 @@ export function toSessionView(r: SessionRecord): SessionView {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+}
+
+export function toSessionListItem(r: SessionRecord): SessionListItem {
+  const { stageUrl: _stageUrl, ...item } = toSessionView(r);
+  return item;
 }
 
 // The same hosts the engine accepts (MEETING_HOSTS in apps/engine/src/app.ts): Google Meet, Zoom and Teams.

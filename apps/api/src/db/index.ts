@@ -7,7 +7,8 @@ import { upsertOrg } from "./orgs.ts";
 import { createSessionUnlessActive, getSession, listSessions, setSessionStart } from "./sessions.ts";
 import type { Db } from "./types.ts";
 
-export type { Db, CreateResult, NewSession, SessionRecord, StartResult, ApiSessionStatus } from "./types.ts";
+export type { Db, CreateResult, NewSession, StartLimit, StartLimits, SessionRecord, StartResult, ApiSessionStatus } from "./types.ts";
+export { StartLimitError } from "./types.ts";
 export type { DbTarget } from "./connect.ts";
 
 /**
@@ -28,7 +29,7 @@ export async function openDb(target: DbTarget = {}): Promise<Db> {
   let closing: Promise<void> | undefined;
   return {
     upsertOrg: (orgId) => upsertOrg(db, orgId),
-    createSessionUnlessActive: (orgId, s) => createSessionUnlessActive(db, orgId, s),
+    createSessionUnlessActive: (orgId, s, limits) => createSessionUnlessActive(db, orgId, s, limits),
     setSessionStart: (orgId, id, result) => setSessionStart(db, orgId, id, result),
     getSession: (orgId, id) => getSession(db, orgId, id),
     listSessions: (orgId, limit) => listSessions(db, orgId, limit),
