@@ -576,13 +576,15 @@ service, and it comes right after W1 (a placeholder page that calls nothing).
 - **`autoDeployTrigger: checksPass`** and `branch: main`, as for the other services.
 - **Routes:** one `rewrite`, source `/*`, destination `/index.html`. Render doesn't apply a rewrite to a path where a
   file exists, so `/assets/*` still load.
-- **Headers** for `/*`, all URL-free: the `frame-ancestors` CSP and the other headers from [Security](#security). The
+- **Headers** for `/*`, all URL-free: the `frame-ancestors` CSP and the other headers from [Security](#security), plus
+  `Cross-Origin-Opener-Policy: same-origin-allow-popups` (no other site's window can script the app; the stage still
+  opens in a new tab). The
   origin-bearing CSP is in the built `index.html` (WD11). Render keeps header and route rules made in the dashboard
   that aren't in the Blueprint, so set them only in `render.yaml`.
 - **Env:** `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_URL` (`{API_ORIGIN}`, from `builder-api`'s page), both
-  `sync: false`. Neither is secret, but `sync: false` keeps origins out of the repo. Render asks for them only when it
-  first sees the new service in the Blueprint; later changes are made in the dashboard. They're read at build time,
-  so changing either needs a new deploy of the site.
+  `sync: false`. Neither is secret, but `sync: false` keeps origins out of the repo. Render asks for `sync: false`
+  values only when a Blueprint is first created, so on this existing Blueprint they're set by hand on `builder-web`'s
+  page (runbook, "The web app"). They're read at build time, so changing either needs a new deploy of the site.
 - **Not from `fromService`:** Render's `fromService` gives a service's private `host`, `port` or `hostport`, not its
   public URL, so it can't fill `VITE_API_URL`.
 - **The api's settings** (dashboard, on `builder-api`, since both are `sync: false`): add `{WEB_ORIGIN}` to
