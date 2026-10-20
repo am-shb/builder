@@ -201,6 +201,8 @@ stage and by the clickable link. The model never writes HTML for the prototype.
 App, Screen, NavBar, Tabs, Stack (row/column), Card, Text/Heading, Button,
 Input, Select, Checkbox/Toggle, List/ListItem, Table, Badge, Modal, Image
 placeholder, Chart placeholder, EmptyState.
+(Superseded: the component set is now defined by [ADR 0014](../../adr/0014-prototype-design-system.md) and
+`apps/engine/public/renderer/catalog.js`.)
 
 **Node shape:** `{ id, type, props, children }`. ids are stable and
 human-readable, such as `today.task-list`, so patches and decisions can

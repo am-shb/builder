@@ -6,10 +6,10 @@
 - **Area:** Meeting engine (`src/ui`, `src/agent`, `public/renderer`)
 
 ## Context
-The 21-type component set renders as plain grey boxes, and the model has no way to say "make it gold" or "rounder
-corners" except by writing styles per node. The prototype should look designed, and the room should be able to agree
-on look-and-feel the same way it agrees on content. The full reasoning is in the
-[spec](../superpowers/specs/2026-10-19-prototype-design-system-design.md) (section 1); the work is split in
+The 21-type component set renders as plain grey boxes in one fixed look, and nothing the model sends can change that
+look: there is no theme input, so "make it gold" or "rounder corners" has nowhere to go. The prototype should look
+designed, and the room should be able to agree on look-and-feel the same way it agrees on content. The full reasoning
+is in the [spec](../superpowers/specs/2026-10-19-prototype-design-system-design.md) (section 1); the work is split in
 [part 1 of the plan](../superpowers/plans/2026-10-19-design-system-1-library-and-theme.md).
 
 This changes the prototype schema, which is an engine interface, so it needs a decision before code.
@@ -44,6 +44,11 @@ Option 4.
   by the model.
 - **A draft theme is shown at once** and reverted on objection to the last agreed value for that slot, or the house
   default if none. Slots with a different `decisionId` are untouched. `drop_theme` on an agreed slot is ignored.
+  The revert happens only when the decision ends the build run in draft: support in the same hand-off (pending)
+  keeps the theme up.
+- **A reverted slot remembers what it took off** (`reverted: { value, decisionId }`, validated like the value). If
+  that decision is agreed later, `theme_status agreed` puts the value back (the value it replaces becomes
+  `previous`). Any later `set_theme` on the slot forgets it. The model never re-sends a reverted look.
 - **Re-theme feedback.** A draft shows a proposal label ("Proposed: gold accent · Sara"). Agreement plays a short
   settle animation. A revert animates back to the last agreed value.
 - **Contested choices.** When the room is split, two variants are built, each one tiny op. The main prototype does not
@@ -51,23 +56,25 @@ Option 4.
 - **Model-facing nodes lose `status`**; batches gain `decisionId`, set once per batch, with a per-node override.
   Nodes and theme ops inherit it. Agreement is
   still set only from what people said (spec sections 4 and 12).
-- **Conflict variants default to `d-<conflictId>`** as their decision id.
+- **Conflict variants always use `d-<conflictId>`** as their decision id, on the batch and its `set_theme` ops; a
+  variant's own `decisionId` is ignored, because resolving the conflict agrees only `d-<conflictId>`.
 - **Old data is dropped.** The old types and stored prototypes are not migrated. A stored prototype that fails to
   parse is ignored through the existing `store.consensus_invalid` path.
 
 ## Consequences
-- The model writes less per node and cannot produce an off-design look. New components are added in one place.
-- Existing tests, fixtures and the handoff export change with the schema (plan Task 6 and the export task).
+- The model writes less per node and the prototype stays on palette. New components are added in one place.
+- Existing tests, fixtures and the handoff export change with the schema (plan Task 6, and Task 5 "Theme in the
+  renderer, comparison previews and handoff" for the export).
 - The handoff exports only the agreed theme.
 - Parts 2 and 3 (page templates and device frame, built-in images and icons) build on this catalog and theme.
 - Until part 3, `icon` props render nothing and `Image` renders a tinted block with its subject word.
 
 ## Measurements
-The mockup's Overview screen (sidebar nav, search and avatar, page header, three stat cards, a six-month bar chart
-and three recent expenses) sent as `apply_patches` batches, once in the old format and once in the new one. Both
-are in `apps/engine/test/fixtures/` (`expense-batches.old.json`, `expense-batches.new.json`); the new one is
-tested to apply cleanly with no dropped props. Run `node scripts/measure-batches.ts` in `apps/engine` to
-reproduce. Tokens are estimated as characters / 3.5.
+The mockup's Overview screen without its sidebar nav (a search box, page header, three stat cards, a six-month bar
+chart and three recent expenses; only the new fixture also has the avatar) sent as `apply_patches` batches, once in
+the old format and once in the new one. Both are in `apps/engine/test/fixtures/` (`expense-batches.old.json`,
+`expense-batches.new.json`); the new one is tested to apply cleanly with no dropped props. Run
+`node scripts/measure-batches.ts` in `apps/engine` to reproduce. Tokens are estimated as characters / 3.5.
 
 | format | batches | ops | JSON chars | est. tokens |
 |---|---|---|---|---|
