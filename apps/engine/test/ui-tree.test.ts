@@ -330,3 +330,18 @@ describe("theme", () => {
     assert.deepEqual(p, before);
   });
 });
+
+test("the new expense fixture applies cleanly", () => {
+  const batches = JSON.parse(readFileSync(new URL("./fixtures/expense-batches.new.json", import.meta.url), "utf8")) as unknown[];
+  assert.ok(batches.length > 0);
+  let proto = emptyPrototype("Ledger");
+  for (const raw of batches) {
+    const parsed = ToolPatchBatch.parse(raw);
+    const { batch: converted, dropped } = fromToolBatch(parsed, {}, proto);
+    assert.equal(dropped, 0, `no dropped props in "${parsed.label}"`);
+    const r = applyBatch(proto, converted);
+    assert.ok(r.ok, `batch "${parsed.label}" applies`);
+    proto = r.proto;
+  }
+  assert.ok(findNode(proto, "home.recent"));
+});

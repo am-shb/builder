@@ -1,0 +1,305 @@
+[
+ {
+  "label": "Added: Overview header",
+  "by": "Sara",
+  "decisionId": "d1",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.header",
+     "type": "PageHeader",
+     "props": [
+      {
+       "key": "title",
+       "value": "Overview"
+      },
+      {
+       "key": "subtitle",
+       "value": "October · Design team"
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.header",
+    "node": {
+     "id": "home.add-expense",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Add expense"
+      },
+      {
+       "key": "variant",
+       "value": "primary"
+      },
+      {
+       "key": "icon",
+       "value": "plus"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: spending stats",
+  "by": "Sara",
+  "decisionId": "d1",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.stats",
+     "type": "Grid",
+     "props": [
+      {
+       "key": "columns",
+       "value": 3
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-spent",
+     "type": "StatCard",
+     "props": [
+      {
+       "key": "label",
+       "value": "Spent"
+      },
+      {
+       "key": "value",
+       "value": "$12,480"
+      },
+      {
+       "key": "delta",
+       "value": "12% vs Sep"
+      },
+      {
+       "key": "trend",
+       "value": "up"
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-budget",
+     "type": "StatCard",
+     "props": [
+      {
+       "key": "label",
+       "value": "Budget left"
+      },
+      {
+       "key": "value",
+       "value": "$7,520"
+      },
+      {
+       "key": "delta",
+       "value": "38% left"
+      },
+      {
+       "key": "trend",
+       "value": "flat"
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-waiting",
+     "type": "StatCard",
+     "props": [
+      {
+       "key": "label",
+       "value": "Waiting approval"
+      },
+      {
+       "key": "value",
+       "value": "7"
+      },
+      {
+       "key": "delta",
+       "value": "3 overdue"
+      },
+      {
+       "key": "trend",
+       "value": "down"
+      },
+      {
+       "key": "tone",
+       "value": "warning"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: spending by month",
+  "by": "Sara",
+  "decisionId": "d1",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.chart",
+     "type": "ChartCard",
+     "props": [
+      {
+       "key": "title",
+       "value": "Spending by month"
+      },
+      {
+       "key": "kind",
+       "value": "bar"
+      },
+      {
+       "key": "data",
+       "value": [
+        8200,
+        9100,
+        7600,
+        10400,
+        11100,
+        12480
+       ]
+      },
+      {
+       "key": "labels",
+       "value": [
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct"
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: recent expenses",
+  "by": "Sara",
+  "decisionId": "d1",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.recent",
+     "type": "Table",
+     "props": [
+      {
+       "key": "columns",
+       "value": [
+        "Who",
+        "What",
+        "Amount",
+        "Status"
+       ]
+      },
+      {
+       "key": "rows",
+       "value": [
+        "@Sara K. | Figma seats | $420 | #Approved",
+        "@Dev P. | Offsite lunch | $310 | #Pending",
+        "@Mia L. | Conference pass | $950 | #Overdue"
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: navigation and search",
+  "by": "Sara",
+  "decisionId": "d1",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.nav",
+     "type": "Tabs",
+     "props": [
+      {
+       "key": "tabs",
+       "value": [
+        "Overview",
+        "Expenses",
+        "Team",
+        "Settings"
+       ]
+      },
+      {
+       "key": "active",
+       "value": 0
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.topbar",
+     "type": "Row",
+     "props": [
+      {
+       "key": "align",
+       "value": "between"
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.topbar",
+    "node": {
+     "id": "home.search",
+     "type": "Search",
+     "props": [
+      {
+       "key": "placeholder",
+       "value": "Search expenses"
+      }
+     ]
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.topbar",
+    "node": {
+     "id": "home.me",
+     "type": "Avatar",
+     "props": [
+      {
+       "key": "name",
+       "value": "Amir"
+      }
+     ]
+    }
+   }
+  ]
+ }
+]

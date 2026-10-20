@@ -63,5 +63,24 @@ Option 4.
 - Until part 3, `icon` props render nothing and `Image` renders a tinted block with its subject word.
 
 ## Measurements
-Task 9 records old against new token counts for the same screen. The first-change timing (a paid replay, run only
-with Amir's go-ahead) and the Meet text-size and hairline outcome are recorded here when run.
+The mockup's Overview screen (sidebar nav, search and avatar, page header, three stat cards, a six-month bar chart
+and three recent expenses) sent as `apply_patches` batches, once in the old format and once in the new one. Both
+are in `apps/engine/test/fixtures/` (`expense-batches.old.json`, `expense-batches.new.json`); the new one is
+tested to apply cleanly with no dropped props. Run `node scripts/measure-batches.ts` in `apps/engine` to
+reproduce. Tokens are estimated as characters / 3.5.
+
+| format | batches | ops | JSON chars | est. tokens |
+|---|---|---|---|---|
+| old (21 types, per-node status) | 5 | 28 | 5174 | 1478 |
+| new (composite components) | 5 | 12 | 2716 | 776 |
+
+The new format is about 0.53 of the old, so roughly half the output for the same screen. The old fixture can only
+approximate the screen (a chart placeholder, plain Badge text for status), so the real gap in what appears on
+screen is larger.
+
+The input side grew. The build prompt was about 11,952 characters (`build.md` at `fd93ec9`) and is about 20,091
+assembled now (`buildSystemPrompt().length`), because it carries the component table and theme options. It is
+the same on every call, so it is cached.
+
+Not yet measured: the first-change timing (a paid `--live-models` replay, which needs Amir's go-ahead) and the
+Meet text-size and hairline outcome. They are recorded here when run.
