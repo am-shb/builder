@@ -63,6 +63,10 @@ const LONG = [...LIST, ...Array.from({ length: 9 }, (_, i) =>
     i % 4 === 0 ? "failed" : "ended", 60 * 24 * (4 + i * 3)))];
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
+// Where the layout changes: a tablet in portrait (one column, a dialog to start) and the first two-column width.
+const TABLET = { width: 768, height: 1024 };
+const LAPTOP = { width: 1024, height: 768 };
+const LANDSCAPE_PHONE = { width: 844, height: 390 };
 const shots: Shot[] = [];
 for (const dark of [false, true]) {
   const mode = dark ? "dark" : "light";
@@ -105,6 +109,21 @@ shots.push(
   { name: "start-unknown-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in", api: "start-unknown", start: NEW_LINK },
   { name: "start-sheet-phone-360-dark", path: "/", width: 360, height: 780, dark: true, fullPage: false, clerk: true, state: "signed-in", api: "list", start: "" },
 );
+// The layout's edges: 768 (iPad portrait), 1024 (the first two-column width) and a phone held sideways.
+for (const dark of [false, true]) {
+  const mode = dark ? "dark" : "light";
+  const base = { path: "/", dark, fullPage: false, clerk: true, state: "signed-in" as const };
+  for (const [size, viewport] of [["768", TABLET], ["1024", LAPTOP]] as const) {
+    shots.push(
+      { name: `app-home-${size}-${mode}`, ...viewport, ...base, api: "list" },
+      { name: `start-success-${size}-${mode}`, ...viewport, ...base, api: "start-success", start: NEW_LINK },
+      { name: `start-unknown-${size}-${mode}`, ...viewport, ...base, api: "start-unknown", start: NEW_LINK },
+      { name: `list-empty-${size}-${mode}`, ...viewport, ...base, api: "empty" },
+    );
+  }
+  shots.push({ name: `start-sheet-768-${mode}`, ...TABLET, ...base, api: "list", start: "" });
+  shots.push({ name: `app-home-landscape-${mode}`, ...LANDSCAPE_PHONE, ...base, api: "list" });
+}
 for (const dark of [false, true]) {
   const mode = dark ? "dark" : "light";
   const clerk = true;
@@ -187,7 +206,7 @@ try {
     const base = shot.unconfigured ? unconfigured.base : configured.base;
     const context = await browser.newContext({
       viewport: { width: shot.width, height: shot.height }, deviceScaleFactor: 2, colorScheme: shot.dark ? "dark" : "light",
-      reducedMotion: "reduce", hasTouch: shot.width < 768, isMobile: shot.width < 768,
+      reducedMotion: "reduce", hasTouch: shot.width < 1024, isMobile: shot.width < 1024,
       ...(statePath ? { storageState: statePath } : {}),
     });
     const page = await context.newPage();
@@ -266,7 +285,8 @@ try {
     if (shot.click === "refresh") await page.getByRole("button", { name: "Refresh" }).click();
     if (shot.start !== undefined) {
       let form = page.locator("main");
-      if (shot.width < 768) {
+      // Below 1024px the start panel is hidden: New session opens a sheet (phones) or a dialog (tablets).
+      if (shot.width < 1024) {
         await page.getByRole("button", { name: "New session" }).first().click();
         form = page.getByRole("dialog", { name: "New session" });
         await form.waitFor();

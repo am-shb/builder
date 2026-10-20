@@ -8,10 +8,11 @@
 // creates one). It saves signed-in.json (a member of an org) or pending.json (no org chosen yet), then:
 //   SIGNED_IN_STATE=<folder>/signed-in.json npm run screenshots -w @builder/web
 // The files hold session cookies for the development instance: keep them out of the repo and delete them when done.
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { createServer, loadEnv } from "vite";
+import { writePrivateFile } from "./private-file.ts";
 
 const root = join(import.meta.dirname, "..");
 const [folderArg, phoneArg, orgName] = process.argv.slice(2);
@@ -23,7 +24,13 @@ if (!/^\+1\d{3}55501\d{2}$/.test(phone)) throw new Error("use a fictional test n
 if (!loadEnv("development", root, "VITE_").VITE_CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
   throw new Error("test-mode sign-in needs a Clerk development key (pk_test_) in apps/web/.env");
 }
+// The folder and the files are the owner's only, even when the folder already existed.
 mkdirSync(folder, { recursive: true, mode: 0o700 });
+chmodSync(folder, 0o700);
+const saveState = async (context: { storageState: () => Promise<unknown> }, name: string) => {
+  writePrivateFile(join(folder, name), JSON.stringify(await context.storageState()));
+  console.log(`saved ${join(folder, name)}`);
+};
 
 const chrome = [process.env.CHROME_PATH, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((p) => p && existsSync(p));
@@ -57,16 +64,14 @@ try {
   }
   await page.waitForTimeout(2500);
   if (path() === "/choose-organization" && orgName) {
-    await context.storageState({ path: join(folder, "pending.json") });
-    console.log(`saved ${join(folder, "pending.json")}`);
+    await saveState(context, "pending.json");
     await page.locator(".cl-rootBox").getByText(orgName, { exact: true }).first().click();
     await page.waitForURL(`${base}/`, { timeout: 20000 });
     await page.waitForTimeout(2000);
   }
   const file = path() === "/" ? "signed-in.json" : path() === "/choose-organization" ? "pending.json" : null;
   if (!file) throw new Error(`sign-in stopped at ${path()}`);
-  await context.storageState({ path: join(folder, file) });
-  console.log(`saved ${join(folder, file)}`);
+  await saveState(context, file);
 } finally {
   await browser.close();
   await server.close();
