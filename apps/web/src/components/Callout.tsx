@@ -24,7 +24,8 @@ export function Callout({ tone = "warning", title, children, action, role, onDis
   return (
     <div role={role} className={cn("flex gap-3.5 rounded-plate px-5 py-4", box, className)}>
       <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
-      <div className="min-w-0 flex-1">
+      {/* A code in the text (an engine's error code) may be one long word: it wraps instead of widening the page. */}
+      <div className="min-w-0 flex-1 wrap-anywhere">
         <p className="m-0 font-semibold">{title}</p>
         {children && <div className="mt-0.5 text-ink">{children}</div>}
         {/* Buttons sit on the surface color, so they read clearly on any tint. */}

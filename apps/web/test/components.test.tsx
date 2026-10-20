@@ -5,6 +5,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AppShell } from "../src/components/AppShell.tsx";
 import { Button } from "../src/components/Button.tsx";
+import { Callout } from "../src/components/Callout.tsx";
 import { ConfirmModal } from "../src/components/ConfirmModal.tsx";
 import { EmptyState } from "../src/components/EmptyState.tsx";
 import { ResponsiveModal } from "../src/components/ResponsiveModal.tsx";
@@ -242,6 +243,13 @@ describe("ConfirmModal", () => {
     const dialog = screen.getByRole("alertdialog", { name: "Start another session for this link?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Start anyway" }));
     expect(onConfirm).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Callout", () => {
+  it("lets a long code in its text wrap, so it never widens the page", () => {
+    render(<Callout tone="error" title="Starting meetings isn't working right now (engine_internal_session_conflict_while_creating_the_bot).">Detail</Callout>);
+    expect(screen.getByText(/^Starting meetings/).parentElement!.className).toContain("wrap-anywhere");
   });
 });
 

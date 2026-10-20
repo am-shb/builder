@@ -76,6 +76,9 @@ describe("the session page", () => {
     page(ok({ status: "start_failed", errorCode: "engine_internal_session_conflict_while_creating_bot" }));
     const code = await screen.findByText("engine_internal_session_conflict_while_creating_bot");
     expect(code.className).toContain("break-all");
+    // The explanation names the code too.
+    const explanation = screen.getByText(/^Starting meetings isn't working right now \(engine_internal/);
+    expect(explanation.className).toContain("wrap-anywhere");
   });
 
   it.each([

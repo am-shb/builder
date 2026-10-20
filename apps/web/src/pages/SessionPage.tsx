@@ -124,7 +124,8 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
 
       <section aria-label="Status" className="mt-6 flex flex-col items-start gap-2.5 sm:flex-row sm:items-center sm:gap-4">
         <StatusPill status={session.status} />
-        {explanation && <p className="m-0 text-ink">{explanation}</p>}
+        {/* May hold an engine's error code, one long word: it wraps instead of widening the page. */}
+        {explanation && <p className="m-0 min-w-0 text-ink wrap-anywhere">{explanation}</p>}
       </section>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-16">
