@@ -31,7 +31,8 @@ export function renderTree(container, proto, uiState, changes) {
       const wasDraft = el.classList.contains("is-draft");
       const edited = updated.has(node.id) && propsKey.get(el) !== key;
       if (edited || (wasDraft && node.status !== "draft")) {
-        previous.set(node.id, { wasDraft, clone: edited ? cloneForCrossFade(el) : null });
+        // A Screen draws nothing of its own (a template change moves its children, which glide): no cross-fade copy.
+        previous.set(node.id, { wasDraft, clone: edited && node.type !== "Screen" ? cloneForCrossFade(el) : null });
       }
     }
     propsKey.set(el, key);

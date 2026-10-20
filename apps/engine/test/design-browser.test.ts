@@ -540,6 +540,67 @@ test("page templates", async (t) => {
         assert.equal(await page.eval<number>(IDEMPOTENT), 0, "idempotent");
       });
 
+      await t.test("a region's last child leaves with an exit, also when a template change drops its region", async () => {
+        await fresh();
+        const ghosts = `[...document.querySelectorAll(".m-ghost")].filter((g) => g.dataset.type === "Text" && g.getClientRects().length > 0 && getComputedStyle(g).opacity !== "0").length`;
+        const side = { id: "td.side", type: "Text", props: { region: "side", text: "Only in side" }, status: "agreed", children: [] };
+        const withSide = `(() => { const s = window.proto.root.children.find((c) => c.id === "template-dashboard"); s.props.template = "dashboard"; s.children.push(${JSON.stringify(side)}); window.show("template-dashboard"); })()`;
+        // Removing a region's only child: the region hides on this render, the child still collapses where it was.
+        await page.eval(withSide);
+        const n = await page.eval<number>(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          s.children = s.children.filter((c) => c.id !== "td.side");
+          window.drawWith([{ kind: "removed", id: "td.side" }]);
+          return ${ghosts};
+        })()`);
+        assert.equal(n, 1, "the removed child shows as an exit ghost");
+        assert.equal(await page.eval<boolean>(`document.querySelector('[data-node-id="template-dashboard"] [data-region="side"]').hidden`), true);
+        // A template change that drops the region (form has no side) while its child is removed.
+        await fresh();
+        await page.eval(withSide);
+        const m = await page.eval<number>(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          s.children = s.children.filter((c) => c.id !== "td.side");
+          s.props.template = "form";
+          window.drawWith([{ kind: "updated", id: "template-dashboard" }, { kind: "removed", id: "td.side" }]);
+          return ${ghosts};
+        })()`);
+        assert.equal(m, 1, "the removed child of a dropped region shows as an exit ghost");
+        // A Screen draws nothing of its own: a template change glides its children, with no cross-fade copy of the page.
+        assert.equal(await page.eval<number>(`document.querySelectorAll('.m-ghost[data-type="Screen"]').length`), 0);
+        await page.waitFor(`document.querySelectorAll(".m-ghost").length === 0`, 3000);
+        assert.equal(await page.eval<number>(`document.querySelectorAll('[data-node-id="td.side"]').length`), 0);
+      });
+
+      await t.test("narrow content areas (comparison previews) do not overflow", async () => {
+        await fresh();
+        // Content area = canvas - 200px sidebar: 540..700px.
+        for (const width of [740, 780, 820, 840, 860, 900]) {
+          await page.eval(`document.getElementById("root").style.width = "${width}px"`);
+          for (const { id, template } of TEMPLATE_SCREENS) {
+            await page.eval(`window.show(${JSON.stringify(id)})`);
+            const over = await page.eval<{ root: number; regions: string[] }>(`({
+              root: document.getElementById("root").scrollWidth,
+              regions: [...document.querySelectorAll('[data-node-id="${id}"] > [data-region]')].flatMap((r) => {
+                // Anything drawn past its region's right edge (into the next column or off the canvas).
+                const edge = r.getBoundingClientRect().right + 1;
+                return [...r.querySelectorAll("*")].filter((e) => e.getClientRects().length && e.getBoundingClientRect().right > edge)
+                  .map((e) => r.dataset.region + " " + (e.closest("[data-node-id]")?.dataset.nodeId ?? "?") + "." + e.className + " " + Math.round(e.getBoundingClientRect().right - edge) + "px");
+              }) })`);
+            assert.ok(over.root <= width, `${template} at ${width}: root ${over.root}`);
+            assert.deepEqual(over.regions, [], `${template} at ${width}: regions overflow`);
+            const body = await page.eval<number>(`document.querySelector(".b-app-body").clientWidth`);
+            const cols = await page.eval<number>(`new Set([...document.querySelectorAll('[data-node-id="${id}"] > [data-region]')].filter((r) => r.getClientRects().length).map((r) => r.offsetLeft)).size`);
+            if (body < 640) assert.equal(cols, 1, `${template} at ${width} (content ${body}px): one column`);
+          }
+          if (width === 780) {
+            await page.eval(`window.show("template-feed")`);
+            await page.screenshot(path.join(dir, "template-feed-narrow.png"));
+          }
+        }
+        await page.eval(`document.getElementById("root").style.width = ""`);
+      });
+
       await t.test("every template passes the part 1 checks and is screenshotted", async () => {
         await fresh();
         for (const { id, template } of TEMPLATE_SCREENS) {

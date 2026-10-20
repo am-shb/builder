@@ -167,17 +167,27 @@
 .b-region.is-layout-grid > :is([data-span="3"], [data-span="4"]) { grid-column: 1 / -1 !important; }
 .b-region.is-layout-grid > :is(.b-field, .b-slider, .b-search, .b-segmented, .b-toggle, .b-checkbox, .b-button) { align-self: start; }
 /* Headline numbers four across: the value scales down with its card instead of breaking mid-number. */
-.b-region[data-region="stats"] > .b-stat { container-type: inline-size; }
+.b-region[data-region="stats"] > .b-stat { container-type: inline-size; padding-inline: calc(var(--b-pad) - 4px); }
 .b-region[data-region="stats"] > .b-stat .b-stat-value { font-size: max(20px, min(32px, 22cqi)); }
 .b-region[data-region="stats"] > .b-stat.is-size-sm .b-stat-value { font-size: max(18px, min(24px, 17cqi)); }
 .b-region[data-region="stats"] > .b-stat.is-size-lg .b-stat-value { font-size: max(22px, min(40px, 26cqi)); }
-/* A narrow list column: one line per title and subtitle. */
-.b-region[data-region="list"] :is(.b-listitem-text, .b-listitem-sub) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A narrow list column: titles take up to two lines (broken between words), subtitles one, the meta stays compact. */
+.b-region[data-region="list"] > .b-list { padding-inline: calc(var(--b-pad) - 4px); }
+.b-region[data-region="list"] .b-listitem { gap: 10px; }
+.b-region[data-region="list"] .b-listitem-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: break-word;
+}
+.b-region[data-region="list"] .b-listitem-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-region[data-region="list"] .b-listitem-meta { font-size: 15px; }
 /* Only a closed Drawer or Modal: no box of its own (they lay over the screen when open). */
 .b-region.is-overlays { display: contents; }
-/* One column on a phone, regions in template order. */
-.b-app .b-phone .b-screen[class*="is-template-"] { grid-template-areas: none !important; grid-template-columns: minmax(0, 1fr) !important; }
-.b-app .b-phone .b-region { grid-area: auto !important; }
+/* One column, regions in template order, when the content area is narrow: on a phone, and in a comparison preview
+   (laid out narrower than the stage). The content area is the size container. */
+.b-app-body { container: b-body / inline-size; }
+@container b-body (width < 640px) {
+  .b-screen[class*="is-template-"] { grid-template-areas: none !important; grid-template-columns: minmax(0, 1fr) !important; }
+  .b-screen[class*="is-template-"] > .b-region { grid-area: auto !important; }
+}
 .b-app .b-phone .b-region.is-layout-grid > * { grid-column: auto !important; }
 
 .b-panel {
@@ -299,7 +309,7 @@
 .b-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .b-stat-label { color: var(--b-ink-2); font-size: 15px; font-weight: 600; }
 .b-stat-value { max-width: 100%; font-size: 32px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.2; }
-.b-stat-delta { margin-top: 8px; }
+.b-stat-delta { margin-top: 8px; white-space: normal; } /* wraps inside its pill in a narrow card */
 .b-stat.is-size-sm .b-stat-value { font-size: 24px; }
 .b-stat.is-size-lg .b-stat-value { font-size: 40px; letter-spacing: -1px; }
 
@@ -488,9 +498,9 @@
 .b-avatar-sub { color: var(--b-ink-3); font-size: 15px; }
 .b-avatar.is-size-sm .b-av, .b-avgroup.is-size-sm .b-av { width: 32px; height: 32px; font-size: 14px; }
 .b-avatar.is-size-lg .b-av, .b-avgroup.is-size-lg .b-av { width: 56px; height: 56px; font-size: 20px; }
-.b-avgroup { display: flex; width: fit-content; }
-.b-avgroup .b-av { box-shadow: 0 0 0 3px var(--b-surface); }
-.b-avgroup .b-av + .b-av { margin-left: -10px; }
+/* Overlapping circles; in a narrow column they wrap, each row starting flush (the padding takes the first overlap). */
+.b-avgroup { display: flex; flex-wrap: wrap; row-gap: 6px; width: fit-content; max-width: 100%; padding-left: 10px; }
+.b-avgroup .b-av { box-shadow: 0 0 0 3px var(--b-surface); margin-left: -10px; }
 .b-av.is-more { background: var(--b-line); color: var(--b-ink-2); font-size: 14px; }
 
 .b-quote { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 24px 26px; }

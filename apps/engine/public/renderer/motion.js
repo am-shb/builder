@@ -115,9 +115,14 @@ export function motionLayer(root) {
   return layer;
 }
 
+const anchors = new WeakMap(); // element -> its nearest node ancestor when its rect was captured
+
 export function captureRects(map) {
   const rects = new Map();
-  for (const [id, el] of map) rects.set(id, el.getBoundingClientRect());
+  for (const [id, el] of map) {
+    rects.set(id, el.getBoundingClientRect());
+    anchors.set(el, el.parentElement ? el.parentElement.closest("[data-node-id]") : null);
+  }
   return rects;
 }
 
@@ -295,8 +300,21 @@ export function animateReconcile(prevRects, map, changes, { removed = new Map(),
     while (anc && !removedEls.has(anc)) anc = anc.parentElement;
     if (anc) continue; // leaves inside its removed ancestor
     const rect = prevRects.get(id);
-    if (isEmpty(rect) || !el.isConnected) el.remove();
-    else ghosts.push({ el, rect, exit: true });
+    if (isEmpty(rect)) {
+      el.remove();
+      continue;
+    }
+    if (!el.isConnected || el.parentElement.getClientRects().length === 0) {
+      // Its container went or hid on this render (a templated Screen's region that emptied, or that a template
+      // change dropped): it leaves from the nearest node it was in, if that still shows.
+      const host = anchors.get(el);
+      if (!host || !host.isConnected || removedEls.has(host) || host.getClientRects().length === 0) {
+        el.remove();
+        continue;
+      }
+      host.append(el);
+    }
+    ghosts.push({ el, rect, exit: true });
   }
 
   // 3. Cross-fade copies of updated nodes, and drafts that just became agreed.
