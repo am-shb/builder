@@ -64,6 +64,15 @@ describe("moving to another page", () => {
     expect(document.activeElement).toBe(back);
   });
 
+  it("after a key press, the page loading doesn't take focus back", async () => {
+    app();
+    await userEvent.click(await screen.findByRole("link", { name: /^kfp-qzwd-nre/ }));
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    act(() => (document.activeElement as HTMLElement).blur());
+    await loaded();
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("focus moved with no key or click (a screen reader can) counts too, even if it then falls to the page", async () => {
     app();
     await userEvent.click(await screen.findByRole("link", { name: /^kfp-qzwd-nre/ }));
