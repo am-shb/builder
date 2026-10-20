@@ -26,6 +26,8 @@ export type OrgQuery<T> = {
   error: unknown;
   // True while a refresh runs with the previous data still shown.
   refreshing: boolean;
+  // When `data` arrived, for "showing the list from 3:02 PM" after a failed refresh.
+  loadedAt: Date | undefined;
   refresh: () => void;
 };
 
@@ -36,8 +38,8 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
   const api = useApi();
   const { orgId } = useAuth();
   const [nonce, setNonce] = useState(0);
-  const [state, setState] = useState<{ scope: string; status: OrgQuery<T>["status"]; data: T | undefined; error: unknown; refreshing: boolean }>(
-    { scope: "", status: "loading", data: undefined, error: undefined, refreshing: false });
+  type State = { scope: string; status: OrgQuery<T>["status"]; data: T | undefined; error: unknown; refreshing: boolean; loadedAt: Date | undefined };
+  const [state, setState] = useState<State>({ scope: "", status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined });
   const loadRef = useRef(load);
   loadRef.current = load;
   const scope = `${orgId ?? ""}|${key}`;
@@ -47,12 +49,14 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
     const controller = new AbortController();
     setState((s) => (s.scope === scope && s.data !== undefined
       ? { ...s, refreshing: true }
-      : { scope, status: "loading", data: undefined, error: undefined, refreshing: false }));
+      : { scope, status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined }));
     loadRef.current(api, controller.signal).then(
-      (data) => { if (!controller.signal.aborted) setState({ scope, status: "ready", data, error: undefined, refreshing: false }); },
+      (data) => { if (!controller.signal.aborted) setState({ scope, status: "ready", data, error: undefined, refreshing: false, loadedAt: new Date() }); },
       (error) => {
         if (controller.signal.aborted || isAbort(error)) return;
-        setState((s) => ({ scope, status: "error", data: s.scope === scope ? s.data : undefined, error, refreshing: false }));
+        setState((s) => (s.scope === scope
+          ? { ...s, status: "error", error, refreshing: false }
+          : { scope, status: "error", data: undefined, error, refreshing: false, loadedAt: undefined }));
       },
     );
     return () => controller.abort();
@@ -60,6 +64,6 @@ export function useOrgQuery<T>(load: (api: ApiClient, signal: AbortSignal) => Pr
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
   // Never show another org's data, even for the one render before the effect runs.
-  if (state.scope !== scope) return { status: "loading", data: undefined, error: undefined, refreshing: false, refresh };
+  if (state.scope !== scope) return { status: "loading", data: undefined, error: undefined, refreshing: false, loadedAt: undefined, refresh };
   return { ...state, refresh };
 }

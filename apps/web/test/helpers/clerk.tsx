@@ -14,6 +14,7 @@ export type ClerkState = {
 export const clerk = {
   state: { loaded: true, session: "none", orgId: null } as ClerkState,
   providerProps: null as Record<string, unknown> | null,
+  signOut: vi.fn(async (_opts?: unknown) => {}),
 };
 
 export function setClerk(state: Partial<ClerkState>) {
@@ -48,6 +49,7 @@ vi.mock("@clerk/react", () => ({
     if (!loaded || session === "none") return { isLoaded: loaded, session: null };
     return { isLoaded: true, session: { status: session, currentTask: session === "pending" ? { key: "choose-organization" } : undefined } };
   },
+  useClerk: () => ({ signOut: clerk.signOut }),
   SignIn: stub("clerk-sign-in"),
   SignUp: stub("clerk-sign-up"),
   TaskChooseOrganization: stub("clerk-task-choose-organization"),

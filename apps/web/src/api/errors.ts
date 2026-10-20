@@ -73,9 +73,9 @@ export function explainError(err: unknown, context: ErrorContext): ExplainedErro
     case "internal_error":
       return plain("Something went wrong on our side. Try again in a moment.", "refresh");
     case "auth_unavailable":
-      return plain("Sign-in isn't available right now.", "refresh");
+      return plain("Sign-in isn't available right now.", "refresh", "Try again in a moment.");
     case "db_unavailable":
-      return plain("Sessions aren't available right now.", "refresh");
+      return plain("Sessions aren't available right now.", "refresh", "Try again in a moment.");
     case "engine_unavailable":
       return plain("Starting meetings isn't available right now.", "none", "Nothing was started.");
     case "limits_unavailable":

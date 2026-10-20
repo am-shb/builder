@@ -30,10 +30,29 @@ type Shot = {
   unconfigured?: boolean;
   // Clicked after the page settles (opens a menu), by accessible name.
   click?: string;
+  // The api's answers, served in the browser from fixtures (no real api, no network): see apiFixture below.
+  api?: ApiFixture;
   // Form edits made before the capture and never submitted (Clerk pre-fills the org form from the email's domain).
   prepare?: { fill?: Record<string, string>; clickText?: string[] };
 };
 const ORG_FORM = { fill: { Name: "Northwind Studio" }, clickText: ["Remove"] };
+
+// The session list's states, for the signed-in screenshots. Times are relative to now, so "12 min ago" stays true.
+type ApiFixture = "list" | "long" | "empty" | "error" | "loading" | "refresh-error";
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+function sessionFixture(id: string, meetingUrl: string, status: string, minutesAgo: number) {
+  return { id, meetingUrl, status, limits: { maxUsd: 5, maxMinutes: 60 }, createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo) };
+}
+const LIST = [
+  sessionFixture("1", "https://meet.google.com/kfp-qzwd-nre", "in_meeting", 12),
+  sessionFixture("2", "https://us02web.zoom.us/j/84213377051", "joining", 1),
+  sessionFixture("3", "https://teams.microsoft.com/l/meetup-join/19%3ameeting", "start_unknown", 25),
+  sessionFixture("4", "https://meet.google.com/xtr-mbha-qpo", "ended", 60 * 22),
+  sessionFixture("5", "https://meet.google.com/ahn-vexr-kid", "start_failed", 60 * 24 * 3),
+];
+const LONG = [...LIST, ...Array.from({ length: 9 }, (_, i) =>
+  sessionFixture(`l${i}`, `https://meet.google.com/${["bqe", "tnw", "hxa", "mze", "pof", "ruk", "cwi", "gdy", "vla"][i]}-${["xkpa", "lfmd", "qzro", "wtce", "bnyv", "kasj", "oupd", "eirh", "mgqt"][i]}-${["ysn", "kdo", "fua", "pmr", "jzt", "wbe", "hli", "cxo", "qrv"][i]}`,
+    i % 4 === 0 ? "failed" : "ended", 60 * 24 * (4 + i * 3)))];
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
 const shots: Shot[] = [];
@@ -62,8 +81,17 @@ for (const dark of [false, true]) {
     { name: `auth-sign-up-desktop-${mode}`, path: "/sign-up", ...DESKTOP, dark, fullPage: false, clerk },
     { name: `auth-choose-org-phone-${mode}`, path: "/choose-organization", ...PHONE, dark, fullPage: true, clerk, state: "pending", prepare: ORG_FORM },
     { name: `auth-choose-org-desktop-${mode}`, path: "/choose-organization", ...DESKTOP, dark, fullPage: false, clerk, state: "pending", prepare: ORG_FORM },
-    { name: `app-home-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in" },
-    { name: `app-home-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in" },
+    { name: `app-home-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", api: "list" },
+    { name: `app-home-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in", api: "list" },
+    { name: `list-empty-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", api: "empty" },
+    { name: `list-empty-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in", api: "empty" },
+    { name: `list-loading-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", api: "loading" },
+    { name: `list-loading-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in", api: "loading" },
+    { name: `list-error-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", api: "error" },
+    { name: `list-error-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in", api: "error" },
+    { name: `list-long-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: true, clerk, state: "signed-in", api: "long" },
+    { name: `list-long-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: true, clerk, state: "signed-in", api: "long" },
+    { name: `list-refresh-error-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", api: "refresh-error", click: "refresh" },
     { name: `app-session-phone-${mode}`, path: "/sessions/00000000-0000-4000-8000-000000000000", ...PHONE, dark, fullPage: false, clerk, state: "signed-in" },
     { name: `app-org-menu-desktop-${mode}`, path: "/", ...DESKTOP, dark, fullPage: false, clerk, state: "signed-in", click: "org" },
     { name: `app-user-menu-phone-${mode}`, path: "/", ...PHONE, dark, fullPage: false, clerk, state: "signed-in", click: "user" },
@@ -72,7 +100,9 @@ for (const dark of [false, true]) {
 }
 shots.push(
   { name: "auth-sign-in-phone-360-light", path: "/sign-in", width: 360, height: 780, dark: false, fullPage: false, clerk: true },
-  { name: "app-home-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in" },
+  { name: "app-home-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in", api: "list" },
+  { name: "list-empty-phone-360-light", path: "/", width: 360, height: 780, dark: false, fullPage: false, clerk: true, state: "signed-in", api: "empty" },
+  { name: "list-error-phone-360-dark", path: "/", width: 360, height: 780, dark: true, fullPage: false, clerk: true, state: "signed-in", api: "error" },
   { name: "app-signed-out-redirect-desktop-light", path: "/sessions/00000000-0000-4000-8000-000000000000", ...DESKTOP, dark: false, fullPage: false, clerk: true },
 );
 
@@ -92,6 +122,7 @@ const fapi = clerkFrontendApiHost(clerkKey);
 const devInstance = clerkKey?.startsWith("pk_test_") ?? false;
 const CLERK_HOSTS = [fapi, "img.clerk.com", "challenges.cloudflare.com"].filter((h): h is string => !!h);
 const states = { "signed-in": process.env.SIGNED_IN_STATE, pending: process.env.PENDING_STATE };
+const apiOrigin = loadEnv("development", root, "VITE_").VITE_API_URL?.replace(/\/+$/, "") ?? "";
 
 async function startServer(unconfigured: boolean): Promise<{ server: ViteDevServer; base: string }> {
   // Variables already in the environment win over .env files; an invalid key gives the "not set up" page.
@@ -126,15 +157,35 @@ try {
       ...(statePath ? { storageState: statePath } : {}),
     });
     const page = await context.newPage();
-    // Only the local dev server is reachable, plus the Clerk development instance for shots that need it.
-    await page.route("**/*", (route) => {
-      const url = route.request().url();
+    // Only the local dev server is reachable, plus the Clerk development instance for shots that need it. Requests to
+    // the api are answered here, from fixtures, and never leave the browser.
+    let sessionReads = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const url = request.url();
       const host = new URL(url).hostname;
+      if (shot.api && apiOrigin && url.startsWith(apiOrigin)) {
+        const cors = { "Access-Control-Allow-Origin": base, "Access-Control-Allow-Headers": "Authorization, Content-Type", "Access-Control-Allow-Methods": "GET, POST", Vary: "Origin" };
+        if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+        const path = new URL(url).pathname;
+        if (path === "/v1/me") return route.fulfill({ status: 200, headers: cors, json: { userId: "user_1", orgId: "org_1", role: "org:admin" } });
+        if (path === "/v1/sessions") {
+          sessionReads += 1;
+          if (shot.api === "loading") return; // never answered: the loading state stays
+          if (shot.api === "error" || (shot.api === "refresh-error" && sessionReads > 1)) {
+            return route.fulfill({ status: 503, headers: cors, json: { error: { code: "db_unavailable", message: "x" } } });
+          }
+          const sessions = shot.api === "empty" ? [] : shot.api === "long" ? LONG : LIST;
+          return route.fulfill({ status: 200, headers: cors, json: { sessions } });
+        }
+        return route.fulfill({ status: 404, headers: cors, json: { error: { code: "not_found", message: "x" } } });
+      }
       return url.startsWith(base) || (shot.clerk && CLERK_HOSTS.includes(host)) ? route.continue() : route.abort();
     });
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-    await page.goto(base + shot.path, { waitUntil: "networkidle" });
+    // A loading shot never gets its answer, so the network never goes idle.
+    await page.goto(base + shot.path, { waitUntil: shot.api === "loading" ? "load" : "networkidle" });
     await page.evaluate(() => document.fonts.ready);
     if (shot.clerk) await page.waitForSelector(".cl-rootBox, .cl-organizationSwitcher-root, .cl-userButton-root, main", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(shot.clerk ? 1200 : 400);
@@ -149,6 +200,7 @@ try {
     }
     if (shot.click === "org") await page.locator(".cl-organizationSwitcherTrigger").click();
     if (shot.click === "user") await page.locator(".cl-userButtonTrigger").click();
+    if (shot.click === "refresh") await page.getByRole("button", { name: "Refresh" }).click();
     if (shot.click) await page.waitForTimeout(800);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (overflow > 0) errors.push(`scrolls sideways by ${overflow}px`);

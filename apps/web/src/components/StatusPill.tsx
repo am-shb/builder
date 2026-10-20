@@ -27,7 +27,8 @@ const TONE: Record<string, string> = {
   joining: "bg-s-join-bg text-s-join-ink",
   start_unknown: "bg-s-warn-bg text-s-warn-ink",
   start_failed: "bg-s-fail-bg text-s-fail-ink",
-  failed: "bg-danger text-on-danger",
+  // Tinted like "Didn't start", told apart by its diamond: a past failure shouldn't outshine a live meeting.
+  failed: "bg-s-fail-bg text-s-fail-ink",
 };
 
 function Dot({ status }: { status: string }) {
@@ -55,7 +56,7 @@ export function StatusPill({ status, size = "md", className }: { status: string;
         className,
       )}
     >
-      <Dot status={status} />
+      <span aria-hidden="true" className="contents"><Dot status={status} /></span>
       {statusLabel(status)}
     </span>
   );
