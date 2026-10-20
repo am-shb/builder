@@ -26,12 +26,13 @@ export function HomePage({ now }: { now?: Date }) {
   const list = useOrgQuery((api, signal) => api.listSessions(signal));
   const starter = useStartSession();
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Until the sheet has finished closing, the rest of the page is hidden from screen readers.
+  const [sheetMounted, setSheetMounted] = useState(false);
   const sheetOpenRef = useRef(false);
   sheetOpenRef.current = sheetOpen;
   // WD8: a link waiting for "Start anyway".
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const pendingAnnouncement = useRef<Announcement | null>(null);
   const newSessionRef = useRef<HTMLButtonElement>(null);
   const linkError = linkProblemText(starter.result);
 
@@ -44,38 +45,32 @@ export function HomePage({ now }: { now?: Date }) {
     refresh();
   }, [starter.settled, refresh]);
 
-  // An outcome put away (or replaced by a new start) leaves nothing behind for a screen reader to find, including a
-  // message still waiting to be announced.
+  // One way to tell a screen reader about an outcome: a short message in a live region (focus stays where it is). It
+  // waits until the sheet has closed, and an outcome that arrived while another page was open is told on return.
+  // The region is emptied first, so the same message twice is still announced; a message put away before it was
+  // shown (Dismiss, or a new start) is dropped.
   const announceSeq = useRef(0);
+  const { result: outcome, unannounced, markAnnounced } = starter;
   useEffect(() => {
-    if (starter.result) return;
-    announceSeq.current += 1;
-    pendingAnnouncement.current = null;
-    setAnnouncement(null);
-  }, [starter.result]);
-
-  // One way to tell a screen reader about an outcome: a short message in a live region (focus stays where it is). A
-  // region updated while the sheet is open is hidden from screen readers, so on phones it waits until the sheet has
-  // closed. Emptied first, so the same message twice is still announced.
-  function announce(message: Announcement) {
+    if (!outcome) {
+      announceSeq.current += 1;
+      setAnnouncement(null);
+      return;
+    }
+    if (!unannounced || sheetMounted) return;
+    markAnnounced();
+    const message = { text: outcomeAnnouncement(outcome, BOT_NAME, statusLabel), urgent: outcome.kind === "failed" };
     const seq = ++announceSeq.current;
     setAnnouncement(null);
     requestAnimationFrame(() => {
       if (seq === announceSeq.current) setAnnouncement(message);
     });
-  }
+  }, [outcome, unannounced, sheetMounted, markAnnounced]);
 
   async function send(url: string) {
-    const outcome = await starter.start(url);
-    // A link problem is announced by the field itself, and keeps the sheet open to fix it.
-    if (!outcome || isLinkProblem(outcome)) return;
-    const message = { text: outcomeAnnouncement(outcome, BOT_NAME, statusLabel), urgent: outcome.kind === "failed" };
-    if (sheetOpenRef.current) {
-      pendingAnnouncement.current = message;
-      setSheetOpen(false);
-    } else {
-      announce(message);
-    }
+    const result = await starter.start(url);
+    // A link problem keeps the sheet open to fix it; anything else closes it.
+    if (result && !isLinkProblem(result) && sheetOpenRef.current) setSheetOpen(false);
   }
 
   function requestStart(url: string) {
@@ -94,7 +89,15 @@ export function HomePage({ now }: { now?: Date }) {
     sending: starter.sending,
     error: linkError,
   };
-  const newSession = <Button ref={newSessionRef} block onClick={() => setSheetOpen(true)}><Plus aria-hidden="true" />New session</Button>;
+  const openSheet = () => {
+    setSheetMounted(true);
+    setSheetOpen(true);
+  };
+  // Where focus goes when the element that opened a dialog can't take it back (Safari doesn't focus a clicked button):
+  // the visible Start button, or New session.
+  const visibleStart = () => [...document.querySelectorAll<HTMLElement>("form button[type=submit]")].find((b) => b.offsetParent !== null)
+    ?? newSessionRef.current;
+  const newSession = <Button ref={newSessionRef} block onClick={openSheet}><Plus aria-hidden="true" />New session</Button>;
   const empty = list.status === "ready" && (list.data ?? []).length === 0;
   const result = starter.result && !isLinkProblem(starter.result) ? starter.result : null;
 
@@ -120,11 +123,7 @@ export function HomePage({ now }: { now?: Date }) {
         title="New session"
         closeDisabled={starter.sending}
         returnFocusTo={() => newSessionRef.current}
-        onClosed={() => {
-          const message = pendingAnnouncement.current;
-          pendingAnnouncement.current = null;
-          if (message) announce(message);
-        }}
+        onClosed={() => setSheetMounted(false)}
       >
         <StartForm {...formProps} />
       </ResponsiveModal>
@@ -134,6 +133,7 @@ export function HomePage({ now }: { now?: Date }) {
         title="Start another session for this link?"
         description={`An earlier start for this link didn't confirm. Check the meeting for a ${BOT_NAME} bot before starting another.`}
         confirmLabel="Start anyway"
+        returnFocusTo={visibleStart}
         onConfirm={() => {
           const url = confirmUrl;
           setConfirmUrl(null);

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { apiOrigin, buildCsp, clerkFrontendApiHost, injectCsp } from "../build/csp.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { apiOrigin, buildCsp, clerkFrontendApiHost, cspPlugin, injectCsp } from "../build/csp.ts";
 
 // Made-up hosts under .test (reserved, never resolves), not any real instance.
 const key = (host: string, kind = "test") => `pk_${kind}_${Buffer.from(`${host}$`).toString("base64")}`;
@@ -87,5 +90,33 @@ describe("injectCsp", () => {
   it("escapes the attribute, and fails without a charset tag", () => {
     expect(injectCsp(html, 'a"<b>&')).toContain('content="a&quot;&lt;b&gt;&amp;"');
     expect(() => injectCsp("<html><head></head></html>", "x")).toThrow(/charset/);
+  });
+});
+
+describe("cspPlugin", () => {
+  // Runs the plugin's two hooks as Vite would, with settings from a throwaway env folder.
+  function build(env: string, isProduction: boolean): string {
+    const dir = mkdtempSync(join(tmpdir(), "csp-env-"));
+    // Vite lets VITE_* values already in process.env win over the file; set aside any the test run has.
+    const saved = Object.entries(process.env).filter(([k]) => k.startsWith("VITE_"));
+    for (const [k] of saved) delete process.env[k];
+    try {
+      writeFileSync(join(dir, ".env"), env);
+      const plugin = cspPlugin() as unknown as {
+        configResolved: (c: object) => void;
+        transformIndexHtml: { handler: (html: string) => string };
+      };
+      plugin.configResolved({ mode: isProduction ? "production" : "development", envDir: dir, root: dir, isProduction });
+      return plugin.transformIndexHtml.handler('<head><meta charset="UTF-8" /></head>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      for (const [k, v] of saved) process.env[k] = v;
+    }
+  }
+
+  it("a production build leaves plain http to another computer out of the policy", () => {
+    expect(build("VITE_API_URL=http://api.example.test\n", true)).not.toContain("api.example.test");
+    expect(build("VITE_API_URL=http://api.example.test\n", false)).toContain("http://api.example.test");
+    expect(build("VITE_API_URL=https://api.example.test\n", true)).toContain("https://api.example.test");
   });
 });

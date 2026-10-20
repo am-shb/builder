@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import { act } from "react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -126,6 +127,29 @@ describe("ResponsiveModal", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open" }));
+  });
+
+  it("when nothing had focus as it opened, focus goes to the fallback on close", async () => {
+    useScreen(DESKTOP_MOUSE);
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button">Fallback</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(true)}>Open without focus</button>
+          <ResponsiveModal open={open} onOpenChange={setOpen} title="New session" returnFocusTo={() => screen.getByRole("button", { name: "Fallback" })}>
+            <TextField label="Meeting link" />
+          </ResponsiveModal>
+        </>
+      );
+    }
+    render(<Harness />);
+    (document.activeElement as HTMLElement | null)?.blur();
+    act(() => screen.getByRole("button", { name: "Open without focus" }).click());
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Fallback" }));
   });
 
   it("has a labelled close button on phones and on desktop", async () => {

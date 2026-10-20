@@ -4,6 +4,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
+import { AppRoutes } from "../src/App.tsx";
 import { HomePage } from "../src/pages/HomePage.tsx";
 import { BOT_NAME } from "../src/brand.ts";
 import { StartForm } from "../src/sessions/StartForm.tsx";
@@ -431,6 +432,22 @@ describe("starting a session", () => {
     expect(screen.getAllByRole("button", { name: "New session" })).toHaveLength(1);
   });
 
+  it("when nothing had focus (Safari doesn't focus a clicked button), closing the confirm puts focus on the Start button", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const unconfirmed = session({ id: "u", meetingUrl: LINK, status: "start_unknown", createdAt: new Date(NOW.getTime() - 60_000).toISOString() });
+    page(apiWith({ status: 201, body: { session: started, reused: false } }, [unconfirmed]));
+    await screen.findByText("kfp-qzwd-nre");
+    await userEvent.type(panelField(), LINK);
+    // Submit without focusing anything, as a mouse click in Safari does.
+    panelField().blur();
+    act(() => { panelField().form!.requestSubmit(); });
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement).not.toBe(document.body);
+    expect(["Start session", "New session"]).toContain(document.activeElement?.textContent);
+  });
+
   it("has no accessibility violations: the page with a warning, and the sheet open", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     useScreen(DESKTOP_MOUSE);
@@ -442,6 +459,67 @@ describe("starting a session", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "New session" })[0]!);
     await screen.findByRole("dialog", { name: "New session" });
     expect(await axeViolations(document.body)).toEqual([]);
+  });
+});
+
+describe("the start in the real app (through RequireOrg)", () => {
+  function app(api: ReturnType<typeof fakeApi>) {
+    return render(<ApiProvider baseUrl={API} fetch={api.fetch}><MemoryRouter initialEntries={["/"]}><AppRoutes /></MemoryRouter></ApiProvider>);
+  }
+
+  it("a start keeps running across the app's own pages: its warning is shown and announced on return, and the next start asks", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const slow = pending();
+    const api = apiWith(slow.reply);
+    app(api);
+    await screen.findByText("xtr-mbha-qpo");
+    await startWith();
+    await userEvent.click(screen.getByRole("link", { name: /xtr-mbha-qpo/ }));
+    expect(await screen.findByRole("heading", { name: "Session details come next" })).toBeTruthy();
+    await act(async () => slow.finish(new Response("<html>Gateway timeout</html>", { status: 504 })));
+    await userEvent.click(screen.getByRole("link", { name: "Back to sessions" }));
+    expect((await shown()).textContent).toMatch(/couldn't confirm/);
+    expect(await announced("alert")).toMatch(/couldn't confirm/);
+    await startWith();
+    expect(await screen.findByRole("alertdialog", { name: "Start another session for this link?" })).toBeTruthy();
+    expect(posts(api)).toHaveLength(1);
+  });
+});
+
+describe("announcements", () => {
+  it("on a phone, nothing is announced while the sheet is still there (it hides the page from screen readers)", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    page(apiWith({ status: 201, body: { session: started, reused: false } }));
+    await screen.findByText("xtr-mbha-qpo");
+    const region = liveRegion("status");
+    const sheetPresentWhenAnnounced: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      if (region.textContent) sheetPresentWhenAnnounced.push(screen.queryByRole("dialog") !== null);
+    });
+    observer.observe(region, { childList: true, subtree: true, characterData: true });
+    await userEvent.click(screen.getAllByRole("button", { name: "New session" })[0]!);
+    const sheet = await screen.findByRole("dialog", { name: "New session" });
+    await userEvent.type(within(sheet).getByLabelText("Meeting link"), LINK);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Start session" }));
+    await announced("status");
+    observer.disconnect();
+    // jsdom has no exit animation, so the sheet is gone in the same render as the outcome; in a browser it stays for
+    // 250 ms, which HomePage waits out (onClosed). The screenshot script checks that in Chrome, with motion on.
+    expect(sheetPresentWhenAnnounced).toEqual([false]);
+  });
+
+  it("an outcome put away before its announcement went out is never announced", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    page(apiWith({ status: 201, body: { session: started, reused: false } }));
+    await screen.findByText("xtr-mbha-qpo");
+    await userEvent.type(panelField(), LINK);
+    await userEvent.click(startButton());
+    await userEvent.click(within(await shown()).getByRole("button", { name: "Dismiss" }));
+    await act(async () => frames.splice(0).forEach((cb) => cb(0)));
+    raf.mockRestore();
+    expect(liveRegion("status").textContent).toBe("");
   });
 });
 

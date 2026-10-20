@@ -98,6 +98,15 @@ describe("link problems", () => {
     expect(linkProblemText(odd)).toBeUndefined();
   });
 
+  it("even a link action is not a link problem when a bot may exist", () => {
+    const risky: StartResult = {
+      kind: "failed", code: "invalid_request", session: undefined, org: ORG, meetingUrl: LINK,
+      explained: { title: "Use an https link.", tone: "warning", action: "fix_link", botMayExist: true },
+    };
+    expect(isLinkProblem(risky)).toBe(false);
+    expect(linkProblemText(risky)).toBeUndefined();
+  });
+
   it("successes and other failures aren't link problems", () => {
     expect(isLinkProblem({ kind: "started", session: session(), org: ORG, meetingUrl: LINK })).toBe(false);
     expect(isLinkProblem(failed(new ApiError(503, "engine_unavailable")))).toBe(false);

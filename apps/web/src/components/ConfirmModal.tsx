@@ -9,7 +9,7 @@ import { contentClass, Grabber, overlayClass, titleClass } from "./modal-styles.
 // A question that needs an answer before anything is sent ("Start another session for this link?"). Escape and
 // Cancel close it; a tap outside doesn't, so it can't be dismissed by accident. The safe answer, Cancel, is the filled
 // button and has focus; the risky one is the outline button. On close, focus goes back to where it was.
-export function ConfirmModal({ open, onOpenChange, title, description, confirmLabel, cancelLabel = "Cancel", onConfirm }: {
+export function ConfirmModal({ open, onOpenChange, title, description, confirmLabel, cancelLabel = "Cancel", onConfirm, returnFocusTo }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -17,9 +17,11 @@ export function ConfirmModal({ open, onOpenChange, title, description, confirmLa
   confirmLabel: string;
   cancelLabel?: string;
   onConfirm: () => void;
+  // Where focus goes on close when the element that had it can't take it back.
+  returnFocusTo?: () => HTMLElement | null | undefined;
 }) {
   const desktop = useMediaQuery(DESKTOP);
-  const returnFocus = useReturnFocus(open);
+  const returnFocus = useReturnFocus(open, returnFocusTo);
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>

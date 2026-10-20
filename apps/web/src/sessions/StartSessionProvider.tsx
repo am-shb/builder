@@ -18,6 +18,9 @@ export type StartSession = {
   setDraft: (value: string) => void;
   // Counts finished starts, so the list can reload after each one.
   settled: number;
+  // The last outcome hasn't been told to a screen reader yet (it may have arrived while another page was open).
+  unannounced: boolean;
+  markAnnounced: () => void;
 };
 
 const StartContext = createContext<StartSession | null>(null);
@@ -34,6 +37,7 @@ export function StartSessionProvider({ children }: { children: ReactNode }) {
   const [result, setResult] = useState<StartResult | null>(null);
   const [draft, setDraft] = useState("");
   const [settled, setSettled] = useState(0);
+  const [unannounced, setUnannounced] = useState(false);
   const inFlight = useRef(false);
 
   // Closing or reloading the tab while a start runs would turn a known outcome into an unknown one: ask the browser to
@@ -50,6 +54,7 @@ export function StartSessionProvider({ children }: { children: ReactNode }) {
     inFlight.current = true;
     setSending(true);
     setResult(null);
+    setUnannounced(false);
     const org: StartOrg = { id: orgId, name: organization?.name };
     let outcome: StartResult;
     try {
@@ -68,6 +73,8 @@ export function StartSessionProvider({ children }: { children: ReactNode }) {
     inFlight.current = false;
     setSending(false);
     setResult(outcome);
+    // A link problem is announced by the field itself.
+    setUnannounced(!isLinkProblem(outcome));
     // A reply about the link keeps it in the field to fix; anything else empties the field, so a link whose start may
     // have sent a bot isn't one click from a second one.
     if (!isLinkProblem(outcome)) setDraft("");
@@ -75,8 +82,15 @@ export function StartSessionProvider({ children }: { children: ReactNode }) {
     return outcome;
   }, [api, orgId, organization?.name]);
 
-  const dismiss = useCallback(() => setResult(null), []);
-  const value = useMemo(() => ({ start, sending, result, dismiss, draft, setDraft, settled }), [start, sending, result, dismiss, draft, settled]);
+  const dismiss = useCallback(() => {
+    setResult(null);
+    setUnannounced(false);
+  }, []);
+  const markAnnounced = useCallback(() => setUnannounced(false), []);
+  const value = useMemo(
+    () => ({ start, sending, result, dismiss, draft, setDraft, settled, unannounced, markAnnounced }),
+    [start, sending, result, dismiss, draft, settled, unannounced, markAnnounced],
+  );
   return <StartContext.Provider value={value}>{children}</StartContext.Provider>;
 }
 
