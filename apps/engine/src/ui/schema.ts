@@ -50,13 +50,18 @@ export const UiNode: z.ZodType<UiNode> = z.strictObject({
 });
 
 export type ThemeSlotName = "accent" | "warmth" | "radius" | "density";
-export type ThemeSlot = { value: string; status: "draft" | "agreed"; decisionId?: string; previous: string };
+// `reverted`: the proposal an objection took off this slot, put back if its decision is agreed later.
+export type ThemeSlot = {
+  value: string; status: "draft" | "agreed"; decisionId?: string; previous: string;
+  reverted?: { value: string; decisionId: string };
+};
 export type Theme = Record<ThemeSlotName, ThemeSlot>;
 
 const themeSlotSchema = (slot: ThemeSlotName) => {
   const option = z.string().refine((v) => THEME_OPTIONS[slot].includes(v), { message: `unknown ${slot} value` });
   return z.strictObject({
     value: option, status: NodeStatus, decisionId: z.string().optional(), previous: option,
+    reverted: z.strictObject({ value: option, decisionId: z.string() }).optional(),
   });
 };
 

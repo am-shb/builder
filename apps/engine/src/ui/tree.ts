@@ -29,12 +29,17 @@ function defaultTheme(): Theme {
   return theme;
 }
 
-/** The op that agrees or reverts every theme slot carrying `decisionId`; null when it would change nothing. */
+/**
+ * The op that agrees or reverts every theme slot carrying `decisionId`; null when it would change
+ * nothing. Agreeing also covers slots that remember `decisionId` as their reverted proposal.
+ */
 export function themeStatusOp(proto: Prototype, decisionId: string, to: "agreed" | "revert"): PatchOp | null {
-  const slots = Object.values(proto.theme ?? {}).filter((s) => s.decisionId === decisionId);
-  if (slots.length === 0) return null;
-  if (to === "agreed" && !slots.some((s) => s.status === "draft")) return null;
-  return { op: "theme_status", decisionId, to };
+  const slots = Object.values(proto.theme ?? {});
+  const carrying = slots.filter((s) => s.decisionId === decisionId);
+  const changes = to === "agreed"
+    ? carrying.some((s) => s.status === "draft") || slots.some((s) => s.reverted?.decisionId === decisionId)
+    : carrying.length > 0;
+  return changes ? { op: "theme_status", decisionId, to } : null;
 }
 
 /** The prototype with draft theme slots shown at their last agreed value. Does not mutate the input. */
@@ -170,19 +175,29 @@ export function applyBatch(input: Prototype, batchInput: PatchBatch): ApplyResul
           cur.status = "draft";
           if (op.decisionId !== undefined) cur.decisionId = op.decisionId;
           else delete cur.decisionId;
+          delete cur.reverted;
         }
         proto.theme = theme;
         note("theme", proto.root.id);
         break;
       }
       case "theme_status": {
+        // A revert remembers the proposal it took off, so agreeing that decision later puts it back.
         let changed = false;
         for (const slot of Object.values(proto.theme ?? {})) {
-          if (slot.decisionId !== op.decisionId) continue;
-          if (op.to === "agreed") {
+          if (op.to === "agreed" && slot.reverted?.decisionId === op.decisionId) {
+            slot.previous = slot.value;
+            slot.value = slot.reverted.value;
+            slot.status = "agreed";
+            slot.decisionId = op.decisionId;
+            delete slot.reverted;
+          } else if (slot.decisionId !== op.decisionId) {
+            continue;
+          } else if (op.to === "agreed") {
             if (slot.status !== "draft") continue;
             slot.status = "agreed";
           } else {
+            slot.reverted = { value: slot.value, decisionId: op.decisionId };
             slot.value = slot.previous;
             slot.status = "agreed";
             delete slot.decisionId;
@@ -215,8 +230,9 @@ function propsToRecord(props: ToolProp[]): Record<string, unknown> {
  * names: added earlier in this batch, else in `proto`; a node of unknown type takes no props.
  * Added nodes are drafts. Adds, updates and set_theme take the op's or node's own decisionId, else
  * the batch's, else `defaults.decisionId`. drop_theme becomes a theme_status revert. An update whose
- * props were all dropped (on a known node, naming no decisionId of its own) is skipped, as is a set_theme
- * that sets no slot (counted in `dropped`).
+ * props were all dropped or empty (on a known node, naming no decisionId of its own) is skipped, as is
+ * a set_theme that sets no slot or has no decision at all, which could never be agreed or dropped
+ * (both counted in `dropped`).
  */
 export function fromToolBatch(
   t: ToolPatchBatch, defaults: { decisionId?: string } = {}, proto?: Prototype,
@@ -251,14 +267,14 @@ export function fromToolBatch(
         // decision (sending an agreed node back to draft) for a change nobody can see. Its own
         // decisionId is a deliberate retag, so that op stays, and so does an update to a node that
         // does not exist (unknown type), so the batch still fails validation.
-        if (type !== undefined && props?.length && Object.keys(kept!).length === 0 && decisionId === undefined) return [];
+        if (type !== undefined && props !== undefined && Object.keys(kept!).length === 0 && decisionId === undefined) return [];
         return [{ ...rest, ...(kept ? { props: kept } : {}), ...withDecision(decisionId) }];
       }
       case "set_theme": {
         const values: Partial<Record<ThemeSlotName, string>> = {};
         for (const slot of THEME_SLOTS as ThemeSlotName[]) if (op[slot] !== undefined) values[slot] = op[slot];
-        // No slot set: dropped, never a reason to reject the batch.
-        if (Object.keys(values).length === 0) {
+        // No slot set, or no decision to agree or drop it: dropped, never a reason to reject the batch.
+        if (Object.keys(values).length === 0 || batchDecision === undefined) {
           dropped++;
           return [];
         }

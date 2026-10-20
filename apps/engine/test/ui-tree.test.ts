@@ -225,6 +225,27 @@ describe("trimmed tool format", () => {
     assert.ok(applyBatch(emptyPrototype("X"), batch).ok);
   });
 
+  test("an update with props: [] and no decisionId of its own is skipped like the all-dropped case", () => {
+    const proto = emptyPrototype("X");
+    proto.root.children[0].children.push({ id: "t", type: "Text", props: { text: "hi" }, status: "agreed", decisionId: "d1", children: [] });
+    const { batch } = fromToolBatch({ label: "x", decisionId: "d9", ops: [
+      { op: "update", id: "t", props: [] },
+      { op: "update", id: "t", props: [], decisionId: "d3" },
+    ] }, {}, proto);
+    assert.deepEqual(batch.ops, [{ op: "update", id: "t", props: {}, decisionId: "d3" }]);
+  });
+
+  test("a set_theme with no decision id at all is dropped and counted", () => {
+    const { batch, dropped } = fromToolBatch({ label: "x", ops: [
+      { op: "set_theme", accent: "gold" },
+      { op: "add", parentId: "home", node: { id: "t", type: "Text", props: [{ key: "text", value: "hi" }] } },
+    ] });
+    assert.equal(dropped, 1);
+    assert.deepEqual(batch.ops.map((o) => o.op), ["add"]);
+    assert.deepEqual(fromToolBatch({ label: "x", ops: [{ op: "set_theme", accent: "gold" }] }, { decisionId: "d1" }).batch.ops,
+      [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }], "a default id is enough");
+  });
+
   test("drop_theme becomes a theme_status revert", () => {
     const { batch } = fromToolBatch({ label: "x", decisionId: "d2", ops: [{ op: "drop_theme", decisionId: "d1" }] });
     assert.deepEqual(batch.ops, [{ op: "theme_status", decisionId: "d1", to: "revert" }]);
@@ -283,7 +304,7 @@ describe("theme", () => {
     p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
     p = apply(p, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d2" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d2", to: "revert" }]).proto;
-    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", previous: "gold" });
+    assert.deepEqual(p.theme!.accent, { value: "gold", status: "agreed", previous: "gold", reverted: { value: "green", decisionId: "d2" } });
     assert.equal("decisionId" in p.theme!.accent, false);
   });
 
@@ -293,7 +314,7 @@ describe("theme", () => {
     p = apply(p, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d4" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d4", to: "revert" }]).proto;
     assert.deepEqual(p.theme!.radius, { value: "round", status: "agreed", decisionId: "d3", previous: "soft" });
-    assert.deepEqual(p.theme!.accent, { value: "slate", status: "agreed", previous: "slate" });
+    assert.deepEqual(p.theme!.accent, { value: "slate", status: "agreed", previous: "slate", reverted: { value: "gold", decisionId: "d4" } });
   });
 
   test("agreeing keeps previous so reverting an agreed decision restores the theme before it", () => {
@@ -302,7 +323,7 @@ describe("theme", () => {
     p = apply(p, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
     p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "revert" }]).proto;
-    assert.deepEqual(p.theme!.accent, { value: "blue", status: "agreed", previous: "blue" });
+    assert.deepEqual(p.theme!.accent, { value: "blue", status: "agreed", previous: "blue", reverted: { value: "gold", decisionId: "d1" } });
   });
 
   test("a theme_status that matches nothing is valid and records no change", () => {
@@ -319,6 +340,40 @@ describe("theme", () => {
     p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).proto;
     p.theme!.accent.decisionId = "d1";
     assert.equal(themeStatusOp(p, "d1", "agreed"), null);
+  });
+
+  test("a revert remembers the rejected proposal, and agreeing that decision later re-applies it", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { accent: "gold", radius: "round" }, decisionId: "d1" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "revert" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "slate", status: "agreed", previous: "slate", reverted: { value: "gold", decisionId: "d1" } });
+    assert.ok(Prototype.safeParse(p).success, "a remembered proposal is a valid prototype");
+    assert.deepEqual(themeStatusOp(p, "d1", "agreed"), { op: "theme_status", decisionId: "d1", to: "agreed" });
+    assert.equal(themeStatusOp(p, "d1", "revert"), null, "nothing left to revert");
+    const r = apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]);
+    assert.deepEqual(r.proto.theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+    assert.deepEqual(r.proto.theme!.radius, { value: "round", status: "agreed", decisionId: "d1", previous: "soft" });
+    assert.deepEqual(r.changes, [{ kind: "theme", id: "app", label: "test" }]);
+    assert.equal(themeStatusOp(r.proto, "d1", "agreed"), null);
+  });
+
+  test("a later set_theme on the slot forgets the reverted proposal", () => {
+    let p = apply(base(), [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }]).proto;
+    p = apply(p, [{ op: "theme_status", decisionId: "d1", to: "revert" }]).proto;
+    p = apply(p, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d2" }]).proto;
+    assert.deepEqual(p.theme!.accent, { value: "green", status: "draft", decisionId: "d2", previous: "slate" });
+    assert.equal(themeStatusOp(p, "d1", "agreed"), null);
+    assert.deepEqual(apply(p, [{ op: "theme_status", decisionId: "d1", to: "agreed" }]).changes, []);
+  });
+
+  test("a remembered proposal with an unknown value is not a valid prototype", () => {
+    const p = base();
+    p.theme = {
+      accent: { value: "slate", status: "agreed", previous: "slate", reverted: { value: "neon", decisionId: "d1" } },
+      warmth: { value: "neutral", status: "agreed", previous: "neutral" },
+      radius: { value: "soft", status: "agreed", previous: "soft" },
+      density: { value: "regular", status: "agreed", previous: "regular" },
+    };
+    assert.equal(Prototype.safeParse(p).success, false);
   });
 
   test("withAgreedTheme shows previous for draft slots", () => {

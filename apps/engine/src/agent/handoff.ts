@@ -3,8 +3,9 @@
 // unsupported attributions out, and the pure application of those ops to the doc.
 import { z } from "zod";
 import { ToolPatchBatch } from "../ui/schema.ts";
-import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
+import type { PatchBatch, PatchOp, Prototype, ThemeSlotName, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch } from "../ui/tree.ts";
+import { THEME_SLOTS, themeValues } from "../../public/renderer/theme.js";
 import { markPending, Phase, recordObjection, recordSupport } from "../consensus/doc.ts";
 import type { ConsensusDoc, Conflict } from "../consensus/doc.ts";
 
@@ -148,7 +149,9 @@ const holdsAgreed = (node: UiNode, reopened: Set<string>): boolean =>
  * prototype is dropped, unless that node's decision is in `current.reopened` (reopened by this
  * run's consensus ops). Ops on nodes that don't exist are kept, so the batch still fails validation.
  *
- * Theme: set_theme is kept (applyBatch makes it a draft). A theme_status agreed is always removed.
+ * Theme: set_theme is kept (applyBatch makes it a draft). With `current`, a slot it sets to the value
+ * the slot already has is left out (and the op dropped when no slot is left), so a re-sent proposal
+ * neither sends an agreed slot back to draft nor loses its `previous`. A theme_status agreed is always removed.
  * A theme_status revert (the model's drop_theme) is removed when a slot carrying that decision is
  * agreed and the decision is not in `current.reopened`; without `current` (conflict variants, which
  * never revert) every theme_status is removed.
@@ -178,6 +181,14 @@ export function sanitizeModelBatch(
       const { status: _status, decisionId, ...rest } = op;
       const next = decisionId !== undefined && agreed.has(decisionId) ? { ...rest, decisionId } : rest;
       if (next.props !== undefined || "decisionId" in next) ops.push(next);
+    } else if (op.op === "set_theme" && current) {
+      const shown = themeValues(current.proto.theme);
+      const values: typeof op.values = {};
+      for (const slot of THEME_SLOTS as ThemeSlotName[]) {
+        const value = op.values[slot];
+        if (value !== undefined && value !== shown[slot]) values[slot] = value;
+      }
+      if (Object.keys(values).length) ops.push({ ...op, values });
     } else if (op.op === "theme_status") {
       if (op.to !== "revert" || !current) continue;
       const holds = Object.values(current.proto.theme ?? {})
@@ -203,8 +214,9 @@ function nextQuestionId(doc: ConsensusDoc): string {
 /**
  * Applies the model's ops to the doc in order. Pure. Ops naming an unknown decision or question
  * are no-ops; an add with an id already taken is ignored, as is a conflict with repeated labels.
- * A conflict's variant batches default to the decision its resolution records (`d-<conflictId>`),
- * and their updates are checked against `proto`'s node types. `propsDropped` counts the props the
+ * A conflict's variant batches take the decision its resolution records (`d-<conflictId>`), even
+ * when a batch names its own (a pick agrees only that id), and their updates are checked against
+ * `proto`'s node types. `propsDropped` counts the props the
  * catalog dropped from the conflicts added.
  */
 export function applyConsensusOps(
@@ -240,7 +252,7 @@ export function applyConsensusOps(
         const conflict: Conflict = {
           id: op.id, topic: op.topic, status: "open", openedAt: now,
           variants: op.variants.map((v) => {
-            const { batch, dropped } = fromToolBatch(v.batch, { decisionId: `d-${op.id}` }, proto);
+            const { batch, dropped } = fromToolBatch({ ...v.batch, decisionId: `d-${op.id}` }, {}, proto);
             propsDropped += dropped;
             return { label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(batch, doc) };
           }),

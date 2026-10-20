@@ -211,9 +211,11 @@ export function createBuildLoop(deps: {
     if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ops.length });
   }
 
-  // Puts the theme slots a decision set back to their last agreed value, in their own batch.
+  // Puts the theme slots a decision set back to their last agreed value, in their own batch. Only a
+  // decision left in draft: one backed again in the same run (pending) keeps its theme up. The slot
+  // remembers what was taken off, so agreeing the decision later puts it back.
   function revertTheme(sessionId: string, rt: SessionRuntime, d: Decision | undefined) {
-    if (!d || d.status === "agreed") return;
+    if (!d || d.status !== "draft") return;
     const op = themeStatusOp(view(rt).proto, d.id, "revert");
     if (!op) return;
     const r = rt.applyBatch({ label: batchLabel("Reverted", d.text), ops: [op] });
@@ -465,7 +467,8 @@ export function createBuildLoop(deps: {
         log("build.reopened", { session_id: sessionId, decision_id: d.id });
       }
       // An objection takes a theme back to its last agreed value, whether the decision was a draft or
-      // agreed (spec 4.4). The system does this from the stored value, not the model.
+      // agreed (spec 4.4), unless the same run backed it again. The system does this from the stored
+      // value, not the model.
       for (const id of new Set(grounded.ops.flatMap((op) => (op.op === "object" ? [op.decisionId] : [])))) {
         revertTheme(sessionId, rt, doc.decisions.find((d) => d.id === id));
       }
