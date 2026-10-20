@@ -331,6 +331,17 @@ onFrame((now) => {
 
 let commands = Promise.resolve(); // voice commands run in order, each after its pointer cue
 
+// Where a voice command's pointer goes: a Screen's nav item in the app frame when it shows one (a hidden
+// Screen has no box to point at), else the target node itself.
+function pointerTarget(nodeId) {
+  const el = nodes.get(nodeId);
+  if (el && el.dataset.type === "Screen") {
+    const item = protoEl.querySelector(`[data-nav-screen="${CSS.escape(nodeId)}"]`);
+    if (shown(item)) return item;
+  }
+  return el;
+}
+
 // ---------- Builder's voice: streamed PCM, played here; its loudness drives the mouth ----------
 const voice = createAudioPlayer();
 let voiceId = null; // the utterance playing; audio for any other is dropped (e.g. after a stop)
@@ -533,7 +544,7 @@ function onEvent(ev) {
       break;
     case "command":
       commands = commands
-        .then(() => animatePointer(nodes.get(ev.nodeId)))
+        .then(() => animatePointer(pointerTarget(ev.nodeId)))
         .then(() => {
           if (proto && ui) { ui = reduceInteraction(ui, ev.interaction, proto); draw([]); }
         })

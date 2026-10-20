@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { initialUiState, reduceInteraction } from "../public/renderer/interact.js";
+import { initialUiState, reduceInteraction, frameNav } from "../public/renderer/interact.js";
 import type { Prototype } from "../src/ui/schema.ts";
 
 const proto: Prototype = JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
@@ -60,4 +60,24 @@ test("append moves the input value into the list and clears the input", () => {
   s = reduceInteraction(s, { kind: "setValue", target: "home.input", value: "walk dog" }, proto);
   s = reduceInteraction(s, { kind: "append", list: "home.list", fromInput: "home.input" }, proto);
   assert.deepEqual(s.lists["home.list"], ["buy milk", "walk dog"]);
+});
+
+test("frameNav: one item per Screen in tree order, titled, at most five on a phone", () => {
+  const screen = (id: string, props: Record<string, unknown> = {}) => ({ id, type: "Screen", props, status: "agreed", children: [] });
+  const app = (props: Record<string, unknown>, n = 3) => ({
+    id: "app", type: "App", props, status: "agreed",
+    children: [screen("home", { title: "Home", icon: "home" }), screen("team"), ...Array.from({ length: n - 2 }, (_, i) => screen(`s${i}`, { title: `S${i}` }))],
+  });
+  assert.deepEqual(frameNav(app({})), { kind: "sidebar", items: [
+    { screen: "home", title: "Home", icon: "home" }, { screen: "team", title: "team", icon: "" }, { screen: "s0", title: "S0", icon: "" },
+  ] });
+  assert.equal(frameNav(app({ nav: "top" })).kind, "top");
+  assert.equal(frameNav(app({ nav: "bottom" })).kind, "sidebar", "an unknown nav is the default");
+  assert.deepEqual(frameNav(app({ nav: "none" })), { kind: "none", items: [] });
+  const phone = frameNav(app({ device: "phone", nav: "none" }, 7)); // nav is ignored on a phone
+  assert.equal(phone.kind, "phone");
+  assert.deepEqual(phone.items.map((i) => i.screen), ["home", "team", "s0", "s1", "s2"]);
+  // Only Screens are listed; a blank title falls back to the id.
+  const mixed = { ...app({}), children: [screen("a", { title: "  " }), { id: "x", type: "Text", props: {}, status: "agreed", children: [] }] };
+  assert.deepEqual(frameNav(mixed).items, [{ screen: "a", title: "a", icon: "" }]);
 });

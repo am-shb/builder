@@ -16,6 +16,31 @@ export function findNode(proto, id) {
   return undefined;
 }
 
+export const PHONE_TABS = 5;
+
+/**
+ * The app frame, derived from the App's own props and its Screens (never from model output): `kind` is
+ * sidebar, top or none on a desktop, phone on a phone (whose bottom tabs ignore `nav`), and `items` holds one
+ * nav item per Screen in tree order, at most PHONE_TABS on a phone. A Screen with no title is listed by its id.
+ * @returns {{ kind: "sidebar" | "top" | "none" | "phone", items: { screen: string, title: string, icon: string }[] }}
+ */
+export function frameNav(app) {
+  const props = app.props ?? {};
+  const kind = props.device === "phone" ? "phone" : props.nav === "top" || props.nav === "none" ? props.nav : "sidebar";
+  if (kind === "none") return { kind, items: [] };
+  const screens = app.children.filter((c) => c.type === "Screen");
+  const items = (kind === "phone" ? screens.slice(0, PHONE_TABS) : screens).map((s) => ({
+    screen: s.id, title: screenTitle(s), icon: typeof s.props.icon === "string" ? s.props.icon : "",
+  }));
+  return { kind, items };
+}
+
+/** A Screen's name in the frame: its title, else its id. */
+export function screenTitle(screen) {
+  const t = screen.props?.title;
+  return typeof t === "string" && t.trim() ? t : screen.id;
+}
+
 /** Returns a new state; never mutates the input. */
 export function reduceInteraction(state, interaction, proto) {
   switch (interaction.kind) {
@@ -54,13 +79,20 @@ function runAll(state, interactions, proto) {
   return interactions.reduce((s, i) => reduceInteraction(s, i, proto), state);
 }
 
-// Clicks run the nearest ancestor's on.click; typing updates the input's value and runs on.change.
+// A click on a frame nav item ([data-nav-screen]) navigates. Other clicks run the nearest ancestor's on.click; typing updates the input's value and runs on.change.
 // Toggle and Checkbox also flip their own state on click.
 export function bindInteractions(container, getProto, getState, setState) {
   const owner = (el) => (el && el.closest ? el.closest("[data-node-id]") : null);
 
   container.addEventListener("click", (e) => {
     const proto = getProto();
+    // A frame nav item is not a prototype node: it navigates to its Screen, before any node gets the click.
+    const item = e.target && e.target.closest ? e.target.closest("[data-nav-screen]") : null;
+    if (item && container.contains(item)) {
+      const screen = item.dataset.navScreen;
+      if (findNode(proto, screen)) setState(reduceInteraction(getState(), { kind: "navigate", screen }, proto));
+      return;
+    }
     let el = owner(e.target);
     while (el && container.contains(el)) {
       const node = findNode(proto, el.dataset.nodeId);

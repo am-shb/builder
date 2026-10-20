@@ -157,6 +157,24 @@ test("voice command: pointer glides and presses before the action runs", async (
   });
 });
 
+test("a voice navigate points at the nav item", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Screens", ops: [
+      add("home", text("home.t", "Home")),
+      add("app", { id: "about", type: "Screen", props: { title: "About" }, status: "agreed", children: [text("about.t", "About")] }),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-nav-screen="about"]')`);
+    // The command targets the Screen itself (no control on Home navigates there): the pointer goes to its nav item.
+    await page.eval(`window.stageEvent({ type: "command", nodeId: "about", interaction: { kind: "navigate", screen: "about" } })`);
+    await page.waitFor(`document.querySelector('[data-node-id="about"]').getClientRects().length > 0`, 3000);
+    const r = await page.eval<{ pointer: string; x: number; y: number }>(`(() => {
+      const r = document.querySelector('[data-nav-screen="about"]').getBoundingClientRect();
+      return { pointer: document.querySelector(".m-pointer").style.transform, x: Math.round(r.left + Math.min(r.width / 2, 48)), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    assert.equal(r.pointer, `translate(${r.x}px, ${r.y}px)`);
+  });
+});
+
 test("pending region shows a shimmer placeholder and clears it", async (t) => {
   await withStage(t, async ({ page }) => {
     await page.eval(`window.stageEvent({ type: "pending_region", parentId: "home" })`);

@@ -70,13 +70,76 @@
 .b-grid.is-cols-2 > [data-span="3"], .b-grid.is-cols-2 > [data-span="4"], .b-grid.is-cols-3 > [data-span="4"] { grid-column: 1 / -1 !important; }
 
 /* ---------- frames ---------- */
-.b-app-bar {
-  flex: none; height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 26px;
-  background: var(--b-surface); border-bottom: 1px solid var(--b-line); font-size: 19px; font-weight: 800; letter-spacing: -0.2px;
-}
-.b-app-logo { width: 28px; height: 28px; border-radius: calc(var(--b-radius-sm) + 2px); background: var(--b-accent); flex: none; }
+/* The app frame (frames.js App), derived from the Screens. The rail sticks while the canvas scrolls, so the
+   sidebar and top bar stay put and the content area scrolls beside or under them. */
+.b-app-frame { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.b-app-chrome { flex: none; background: var(--b-surface); }
+.b-app-rail { position: sticky; top: 0; display: flex; min-width: 0; }
+.b-app-brand { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.2px; line-height: 1.2; }
+.b-app-logo { width: 30px; height: 30px; border-radius: calc(var(--b-radius-sm) + 3px); background: var(--b-accent); flex: none; }
 .b-app-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-app-nav { display: flex; min-width: 0; }
+.b-app-navitem {
+  display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--b-ink-2); font-size: 17px; font-weight: 600;
+  line-height: 1.25; text-decoration: none; cursor: pointer; user-select: none;
+}
+.b-app-navicon { flex: none; display: inline-flex; width: 22px; height: 22px; color: var(--b-ink-3); }
+.b-app-navicon:empty { display: none; } /* until the item's Screen has an icon */
+.b-app-navitem.is-active .b-app-navicon { color: var(--b-accent); }
+.b-app-navlabel { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-app-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.b-app-screentitle { display: none; }
 .b-app-body { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* Sidebar: a 200px column on the left. */
+.b-app.is-frame-sidebar .b-app-frame { flex-direction: row; }
+.is-frame-sidebar .b-app-chrome { width: 200px; border-right: 1px solid var(--b-line); }
+.is-frame-sidebar .b-app-rail { flex-direction: column; gap: 18px; padding: 22px 14px; }
+.is-frame-sidebar .b-app-brand { padding: 0 8px; }
+.is-frame-sidebar .b-app-nav { flex-direction: column; gap: 4px; }
+.is-frame-sidebar .b-app-navitem { padding: 10px; border-radius: calc(var(--b-radius-sm) + 4px); }
+.is-frame-sidebar .b-app-navitem.is-active { background: var(--b-accent-soft); color: var(--b-ink); }
+
+/* Top: a 64px bar, the screens to the right of the name, the shown one underlined. */
+.is-frame-top .b-app-chrome { position: sticky; top: 0; z-index: 3; height: 64px; border-bottom: 1px solid var(--b-line); }
+.is-frame-top .b-app-rail { position: static; height: 100%; align-items: center; gap: 32px; padding: 0 26px; }
+.is-frame-top .b-app-brand { flex: none; max-width: 260px; }
+.is-frame-top .b-app-nav { align-self: stretch; gap: 6px; }
+.is-frame-top .b-app-navitem { flex: 0 1 auto; padding: 2px 12px 0; border-bottom: 2px solid transparent; }
+.is-frame-top .b-app-navitem.is-active { color: var(--b-ink); border-bottom-color: var(--b-accent); }
+
+/* None: no frame at all (a landing page, say). */
+.is-frame-none .b-app-chrome { display: none; }
+
+/* Phone: a 380x700 phone body centred on the canvas, a title bar naming the shown screen, the content
+   scrolling inside, and the first five screens as bottom tabs (icon over label). */
+.b-app.is-frame-phone { align-items: center; justify-content: center; background: var(--b-line); }
+.b-phone {
+  flex: none; position: relative; width: 380px; height: 700px; overflow: hidden;
+  border: 10px solid var(--b-ink); border-radius: 44px; background: var(--b-bg); box-shadow: var(--b-shadow-lg);
+}
+.b-phone .b-app-chrome { order: 2; border-top: 1px solid var(--b-line); }
+.b-phone .b-app-rail { position: static; padding: 8px 8px 14px; }
+.b-phone .b-app-brand { display: none; }
+.b-phone .b-app-nav { flex: 1; gap: 2px; }
+.b-phone .b-app-navitem {
+  flex: 1 1 0; flex-direction: column; justify-content: center; gap: 3px; min-height: 52px; padding: 4px 0; border-radius: 14px;
+  font-size: 14px; font-weight: 600; text-align: center;
+}
+.b-phone .b-app-navlabel { max-width: 100%; }
+.b-phone .b-app-navitem.is-active { background: var(--b-accent-soft); color: var(--b-ink); }
+.b-phone .b-app-main { min-height: 0; }
+.b-phone .b-app-screentitle {
+  flex: none; display: flex; align-items: center; justify-content: center; height: 56px; padding: 0 20px;
+  background: var(--b-surface); border-bottom: 1px solid var(--b-line); font-size: 18px; font-weight: 750;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.b-phone .b-app-body { overflow-y: auto; scrollbar-width: none; }
+.b-phone .b-screen { padding: 20px 16px 24px; gap: var(--b-gap); }
+/* One column on a phone. */
+.b-app .b-phone :is(.b-grid, .b-split) { grid-template-columns: minmax(0, 1fr); }
+.b-app .b-phone .b-grid > * { grid-column: auto !important; }
+
 .b-screen {
   display: flex; flex-direction: column; gap: calc(var(--b-gap) + 4px); min-width: 0;
   padding: calc(var(--b-pad) + 4px) calc(var(--b-pad) + 8px) calc(var(--b-pad) + 10px);

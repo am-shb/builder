@@ -1,8 +1,8 @@
 {
   "currentScreen": "gallery-a",
   "root": {
-    "id": "app", "type": "App", "props": { "title": "Ledger" }, "status": "agreed", "children": [
-      { "id": "gallery-a", "type": "Screen", "props": { "title": "Frames" }, "status": "agreed", "children": [
+    "id": "app", "type": "App", "props": { "title": "Ledger", "nav": "sidebar" }, "status": "agreed", "children": [
+      { "id": "gallery-a", "type": "Screen", "props": { "title": "Frames", "icon": "layout-dashboard" }, "status": "agreed", "children": [
         { "id": "a.header", "type": "PageHeader", "props": { "title": "Overview", "subtitle": "October · Design team" }, "status": "agreed", "children": [
           { "id": "a.header.export", "type": "Button", "props": { "label": "Export", "variant": "secondary" }, "status": "agreed", "children": [] },
           { "id": "a.header.add", "type": "Button", "props": { "label": "Add expense" }, "status": "agreed",
@@ -52,7 +52,7 @@
         ] }
       ] },
 
-      { "id": "gallery-b", "type": "Screen", "props": { "title": "Data" }, "status": "agreed", "children": [
+      { "id": "gallery-b", "type": "Screen", "props": { "title": "Data", "icon": "bar-chart-3" }, "status": "agreed", "children": [
         { "id": "b.stats", "type": "Grid", "props": { "columns": "3" }, "status": "agreed", "children": [
           { "id": "b.stat1", "type": "StatCard", "props": { "label": "Spent", "value": "$12,480", "delta": "12% vs Sep", "trend": "up", "tone": "danger", "icon": "wallet" }, "status": "agreed", "children": [] },
           { "id": "b.stat2", "type": "StatCard", "props": { "label": "Budget left", "value": "$7,520", "delta": "38% left", "trend": "flat", "tone": "success" }, "status": "agreed", "children": [] },
@@ -107,7 +107,7 @@
         ] }
       ] },
 
-      { "id": "gallery-c", "type": "Screen", "props": { "title": "Content" }, "status": "agreed", "children": [
+      { "id": "gallery-c", "type": "Screen", "props": { "title": "Content", "icon": "file-text" }, "status": "agreed", "children": [
         { "id": "c.hero", "type": "Hero", "props": { "title": "Expenses without the spreadsheet", "subtitle": "Snap a receipt, get approved, get paid.", "image": "workspace-2" }, "status": "agreed", "children": [
           { "id": "c.hero.cta", "type": "Button", "props": { "label": "Start free", "size": "lg" }, "status": "agreed", "children": [] },
           { "id": "c.hero.more", "type": "Button", "props": { "label": "See pricing", "variant": "secondary", "size": "lg" }, "status": "agreed", "children": [] }
@@ -154,7 +154,7 @@
         { "id": "c.quote", "type": "Quote", "props": { "text": "We stopped chasing receipts. Month-end is a non-event now.", "author": "Sara Kim", "role": "Finance lead, Northwind" }, "status": "agreed", "children": [] }
       ] },
 
-      { "id": "gallery-d", "type": "Screen", "props": { "title": "Input" }, "status": "agreed", "children": [
+      { "id": "gallery-d", "type": "Screen", "props": { "title": "Input", "icon": "edit-3" }, "status": "agreed", "children": [
         { "id": "d.steps", "type": "Steps", "props": { "steps": ["Details", "Receipt", "Approver", "Review"], "current": 1 }, "status": "agreed", "children": [] },
         { "id": "d.form", "type": "Grid", "props": { "columns": "2" }, "status": "agreed", "children": [
           { "id": "d.amount", "type": "Input", "props": { "label": "Amount", "placeholder": "$0.00", "icon": "dollar" }, "status": "agreed", "children": [] },
@@ -180,7 +180,7 @@
         ] }
       ] },
 
-      { "id": "gallery-e", "type": "Screen", "props": { "title": "Feedback" }, "status": "agreed", "children": [
+      { "id": "gallery-e", "type": "Screen", "props": { "title": "Feedback", "icon": "bell" }, "status": "agreed", "children": [
         { "id": "e.banner", "type": "Banner", "props": { "title": "Card sync paused", "text": "Reconnect your bank to keep importing transactions.", "tone": "warning" }, "status": "agreed", "children": [] },
         { "id": "e.banner2", "type": "Banner", "props": { "text": "Your October report is ready." }, "status": "agreed", "children": [] },
         { "id": "e.split", "type": "Split", "props": { "ratio": "1:1" }, "status": "agreed", "children": [

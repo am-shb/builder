@@ -1,5 +1,6 @@
 // Frames: the containers a screen is laid out with.
-import { h, str, arr, clampInt, setText, setHidden, setOptional, setAttr, setVariant, withParts, syncTexts } from "@renderer/components/dom.js";
+import { h, str, arr, clampInt, setText, setHidden, setOptional, setAttr, setClass, setVariant, withParts, syncTexts, changed } from "@renderer/components/dom.js";
+import { frameNav, screenTitle } from "@renderer/interact.js";
 
 /** Title + subtitle block used by Section and Card. */
 function head(cls) {
@@ -39,21 +40,55 @@ function overlay(cls) {
 }
 
 export const FRAMES = {
+  // The app frame is derived from what exists: the App's title and one nav item per Screen. Nav items carry
+  // data-nav-screen, not data-node-id: they are not prototype nodes (interact.js makes them navigate).
+  //   .b-app.is-frame-<sidebar|top|none|phone>
+  //     .b-app-frame (.b-phone on a phone)
+  //       .b-app-chrome > .b-app-rail > .b-app-brand (logo, title) + .b-app-nav (items)
+  //       .b-app-main > .b-app-screentitle (phone) + .b-app-body (the Screens)
   App: {
     create() {
       const el = h("div", "b-app");
-      const bar = h("div", "b-app-bar");
+      const frame = h("div", "b-app-frame");
+      const chrome = h("div", "b-app-chrome");
+      const rail = h("div", "b-app-rail");
+      const brand = h("div", "b-app-brand");
       const logo = h("span", "b-app-logo");
       const title = h("span", "b-app-title");
-      bar.append(logo, title);
+      brand.append(logo, title);
+      const nav = h("nav", "b-app-nav");
+      rail.append(brand, nav);
+      chrome.append(rail);
+      const main = h("div", "b-app-main");
+      const screenTitle = h("div", "b-app-screentitle");
       const body = h("div", "b-app-body");
-      el.append(bar, body);
-      return withParts(el, { bar, title, body });
+      main.append(screenTitle, body);
+      frame.append(chrome, main);
+      el.append(frame);
+      return withParts(el, { frame, chrome, title, nav, screenTitle, body });
     },
-    update(el, node) {
-      const title = str(node.props.title);
-      setText(el.parts.title, title);
-      setHidden(el.parts.bar, !title);
+    update(el, node, ui) {
+      const { kind, items } = frameNav(node);
+      setVariant(el, "is-frame-", kind);
+      setClass(el.parts.frame, "b-phone", kind === "phone");
+      setOptional(el.parts.title, str(node.props.title));
+      // Items are rebuilt only when the screen list (ids, titles, icons) changes; the active one follows ui.screen.
+      const nav = el.parts.nav;
+      if (changed(nav, JSON.stringify(items))) {
+        nav.replaceChildren(...items.map((it) => {
+          const item = h("a", "b-app-navitem");
+          item.dataset.navScreen = it.screen;
+          item.append(h("span", "b-app-navicon"), h("span", "b-app-navlabel", it.title));
+          return item;
+        }));
+      }
+      for (const item of nav.children) {
+        const on = item.dataset.navScreen === ui.screen;
+        setClass(item, "is-active", on);
+        setAttr(item, "aria-current", on ? "page" : null);
+      }
+      const shown = node.children.find((c) => c.type === "Screen" && c.id === ui.screen);
+      setText(el.parts.screenTitle, kind === "phone" && shown ? screenTitle(shown) : "");
     },
     slot: (el) => el.parts.body,
   },
