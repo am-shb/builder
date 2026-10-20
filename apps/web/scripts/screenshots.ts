@@ -206,7 +206,8 @@ try {
     const base = shot.unconfigured ? unconfigured.base : configured.base;
     const context = await browser.newContext({
       viewport: { width: shot.width, height: shot.height }, deviceScaleFactor: 2, colorScheme: shot.dark ? "dark" : "light",
-      reducedMotion: "reduce", hasTouch: shot.width < 1024, isMobile: shot.width < 1024,
+      // Start shots keep motion on, so the sheet's exit animation is real for the announcement check below.
+      reducedMotion: shot.start ? "no-preference" : "reduce", hasTouch: shot.width < 1024, isMobile: shot.width < 1024,
       ...(statePath ? { storageState: statePath } : {}),
     });
     const page = await context.newPage();
@@ -292,10 +293,25 @@ try {
         await form.waitFor();
       }
       if (shot.start) {
+        // Screen readers can't hear the page while the sheet or dialog is open, so an outcome must not be announced
+        // until it has gone (jsdom can't check this: it has no exit animation).
+        await page.evaluate(() => {
+          const w = window as unknown as { earlyAnnouncements: number };
+          w.earlyAnnouncements = 0;
+          for (const region of document.querySelectorAll(".sr-only[role=status], .sr-only[role=alert]")) {
+            new MutationObserver(() => {
+              if (region.textContent && document.querySelector("[role=dialog]")) w.earlyAnnouncements += 1;
+            }).observe(region, { childList: true, subtree: true, characterData: true });
+          }
+        });
         await form.getByLabel("Meeting link").first().fill(shot.start);
         await form.getByRole("button", { name: "Start session" }).first().click();
       }
       await page.waitForTimeout(900);
+      if (shot.start) {
+        const early = await page.evaluate(() => (window as unknown as { earlyAnnouncements?: number }).earlyAnnouncements ?? 0);
+        if (early) errors.push(`announced the outcome ${early} time(s) while a dialog was still open`);
+      }
     }
     if (shot.click) await page.waitForTimeout(800);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
