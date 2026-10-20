@@ -1,8 +1,7 @@
 // Headless Chrome driven over CDP, for browser tests. Skips the test when Chrome is not installed.
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import net from "node:net";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -30,43 +29,54 @@ export function chromePath(): string | undefined {
   return candidates.find((p) => existsSync(p));
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.once("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// A cold Chrome on a busy CI runner (every test file starting at once, fontconfig building its cache) can take
+// several seconds to come up; 10 s was not always enough there.
+const START_TIMEOUT_MS = 30_000;
+
+/** Waits for Chrome's first page target. Chrome picks its own debugging port (--remote-debugging-port=0) and writes it
+ *  to DevToolsActivePort in the profile dir, so parallel test files never race for a port. */
+async function pageTarget(proc: ChildProcess, dir: string, stderr: () => string): Promise<{ webSocketDebuggerUrl: string }> {
+  const end = Date.now() + START_TIMEOUT_MS;
+  let port: number | undefined;
+  while (Date.now() < end) {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      throw new Error(`Chrome exited before exposing a debugging target (${proc.exitCode ?? proc.signalCode}): ${stderr()}`);
+    }
+    try {
+      port ??= Number(readFileSync(path.join(dir, "DevToolsActivePort"), "utf8").split("\n")[0]) || undefined;
+    } catch { /* not written yet */ }
+    if (port) {
+      try {
+        const list = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as any[];
+        const target = list.find((x) => x.type === "page");
+        if (target) return target;
+      } catch { /* not up yet */ }
+    }
+    await sleep(50);
+  }
+  throw new Error(`Chrome did not expose a debugging target within ${START_TIMEOUT_MS} ms (port ${port ?? "not written"}): ${stderr()}`);
+}
 
 export async function withChrome(t: TestCtx, fn: (page: Page) => Promise<void>, opts: ChromeOpts = {}): Promise<void> {
   const bin = chromePath();
   if (!bin) return void t.skip("Chrome not found (set CHROME_PATH)");
   const width = opts.width ?? 1280;
   const height = opts.height ?? 720;
-  const port = await freePort();
   const dir = mkdtempSync(path.join(tmpdir(), "chrome-test-"));
   const proc: ChildProcess = spawn(bin, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     // The bot's browser plays page audio without a gesture; so does this one.
     "--autoplay-policy=no-user-gesture-required",
-    `--user-data-dir=${dir}`, `--window-size=${width},${height}`, `--remote-debugging-port=${port}`, "about:blank",
-  ], { stdio: "ignore" });
+    `--user-data-dir=${dir}`, `--window-size=${width},${height}`, "--remote-debugging-port=0", "about:blank",
+  ], { stdio: ["ignore", "ignore", "pipe"] });
+  // The last of Chrome's stderr, for the error if it never comes up. Chrome's own logs, not page content.
+  let errTail = "";
+  proc.stderr?.on("data", (d: Buffer) => { errTail = (errTail + d.toString()).slice(-2000); });
   let ws: WebSocket | undefined;
   try {
-    let target: { webSocketDebuggerUrl: string } | undefined;
-    for (let i = 0; i < 100 && !target; i++) {
-      try {
-        const list = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as any[];
-        target = list.find((x) => x.type === "page");
-      } catch { /* not up yet */ }
-      if (!target) await sleep(100);
-    }
-    if (!target) throw new Error("Chrome did not expose a debugging target");
+    const target = await pageTarget(proc, dir, () => errTail.trim());
 
     const socket = new WebSocket(target.webSocketDebuggerUrl);
     ws = socket;

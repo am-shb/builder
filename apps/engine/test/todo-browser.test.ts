@@ -77,7 +77,8 @@ test("before anything is built, only now rows show under the robot", async (t) =
 test("the snapshot restores the list on reconnect", async (t) => {
   await withStage(t, async ({ page, runtime, sessionId }) => {
     runtime(sessionId).setTasks([task("a", "Alpha", "now"), task("b", "Beta", "queued")]);
-    await page.eval(`location.reload()`);
+    // A navigation that waits for the new page's load, so the wait below never reads the old page's rows.
+    await page.goto(await page.eval<string>(`location.href`));
     await page.waitFor(`document.querySelectorAll("#todo li").length === 2`, 5000);
     assert.deepEqual((await page.eval<Row[]>(rows)).map((r) => r.text), ["Alpha", "Beta"]);
   });
