@@ -28,6 +28,7 @@ const proto = await (await fetch("/proto.json")).json();
 window.proto = proto;
 let state = initialUiState(proto);
 window.draw = () => { window.nodes = renderTree(root, proto, state); };
+window.drawWith = (changes) => { window.nodes = renderTree(root, proto, state, changes); };
 window.show = (screen, open = {}) => { state = { ...state, screen, open }; window.draw(); window.scrollTo(0, 0); };
 bindInteractions(root, () => proto, () => state, (s) => { state = s; window.draw(); });
 window.draw();
@@ -287,9 +288,8 @@ test("app frame", async (t) => {
           window.draw();
         })()`);
         let items = await page.eval<NavItem[]>(NAV);
-        assert.deepEqual(items.map((i) => [i.screen, i.text]), [
-          ["gallery-a", "Frames"], ["gallery-b", "Numbers"], ["gallery-d", "Input"], ["gallery-e", "Feedback"], ["gallery-f", "Reports"],
-        ]);
+        const want = proto.root.children.filter((s: any) => s.id !== "gallery-c").map((s: any) => [s.id, s.id === "gallery-b" ? "Numbers" : s.props.title]);
+        assert.deepEqual(items.map((i) => [i.screen, i.text]), [...want, ["gallery-f", "Reports"]]);
         await page.eval(`window.show("gallery-f")`);
         items = await page.eval<NavItem[]>(NAV);
         assert.deepEqual(items.filter((i) => i.active).map((i) => i.screen), ["gallery-f"]);
@@ -344,7 +344,7 @@ test("app frame", async (t) => {
         assert.equal(await title(), "Input");
         // The tabs sit at the bottom of the phone, inside it.
         const tabs = await page.eval<{ top: number; bottom: number }[]>(`[...document.querySelectorAll("[data-nav-screen]")].map((e) => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; })`);
-        assert.equal(tabs.length, SCREENS.length);
+        assert.equal(tabs.length, Math.min(5, SCREENS.length));
         assert.ok(tabs.every((r) => r.bottom <= box.y + box.h && r.top > box.y + box.h - 120), `tabs at the bottom: ${JSON.stringify(tabs)}`);
         for (const screen of SCREENS) {
           await page.eval(`window.show(${JSON.stringify(screen)})`);
@@ -376,6 +376,206 @@ test("app frame", async (t) => {
 
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
       t.diagnostic(`frame screenshots: ${dir}`);
+    });
+  }, { width: WIDTH, height: HEIGHT });
+});
+
+// ---------- page templates: a templated Screen places its children in regions ----------
+
+const TEMPLATE_SCREENS: { id: string; template: string }[] = proto.root.children
+  .filter((s: any) => s.props.template)
+  .map((s: any) => ({ id: s.id, template: s.props.template }));
+
+// Per child of a Screen (in tree order): its id, the region it asked for, the region it sits in, and how often it is in the DOM.
+const PLACED = (screen: string) => `(() => {
+  const s = window.proto.root.children.find((c) => c.id === ${JSON.stringify(screen)});
+  return s.children.map((c) => {
+    const els = document.querySelectorAll('[data-node-id="' + c.id + '"]');
+    const el = els[0];
+    const region = el && el.parentElement ? el.parentElement.closest("[data-region]") : null;
+    return { id: c.id, asked: c.props.region ?? null, region: region ? region.dataset.region : null, count: els.length,
+      inScreen: !!el && el.closest('[data-type="Screen"]')?.dataset.nodeId === ${JSON.stringify(screen)}, parentIsScreen: !!el && el.parentElement?.dataset.nodeId === ${JSON.stringify(screen)} };
+  });
+})()`;
+type Placed = { id: string; asked: string | null; region: string | null; count: number; inScreen: boolean; parentIsScreen: boolean };
+// The regions drawn in a Screen: name, whether shown, height, and how many node elements it holds.
+const REGIONS_OF = (screen: string) => `[...document.querySelector('[data-node-id="${screen}"]').querySelectorAll(":scope > [data-region]")].map((r) => ({
+  name: r.dataset.region, shown: r.getClientRects().length > 0 && getComputedStyle(r).display !== "none", h: r.offsetHeight,
+  nodes: [...r.children].filter((c) => c.dataset.nodeId).map((c) => c.dataset.nodeId) }))`;
+type Region = { name: string; shown: boolean; h: number; nodes: string[] };
+
+test("page templates", async (t) => {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), "design-")), "screens");
+  mkdirSync(dir, { recursive: true });
+  const { TEMPLATES } = await import("../public/renderer/catalog.js");
+  await withChrome(t, async (page) => {
+    await withGalleryServer(async (url) => {
+      const fresh = async () => {
+        await page.goto(url);
+        await page.waitFor("window.ready === true");
+      };
+
+      await t.test("each template places children in their regions", async () => {
+        await fresh();
+        assert.deepEqual(TEMPLATE_SCREENS.map((s) => s.template).sort(), Object.keys(TEMPLATES).sort(), "one gallery screen per template");
+        for (const { id, template } of TEMPLATE_SCREENS) {
+          await page.eval(`window.show(${JSON.stringify(id)})`);
+          const placed = await page.eval<Placed[]>(PLACED(id));
+          for (const p of placed) {
+            assert.equal(p.count, 1, `${p.id} in the DOM once`);
+            assert.equal(p.region, p.asked, `${template}: ${p.id} sits in its region`);
+          }
+          // Regions come in the template's order.
+          const names = (await page.eval<Region[]>(REGIONS_OF(id))).map((r) => r.name);
+          assert.deepEqual(names, Object.keys(TEMPLATES[template].regions), `${template}: region order`);
+        }
+      });
+
+      await t.test("empty regions are not drawn", async () => {
+        await fresh();
+        let empties = 0;
+        for (const { id, template } of TEMPLATE_SCREENS) {
+          await page.eval(`window.show(${JSON.stringify(id)})`);
+          const asked = new Set((await page.eval<Placed[]>(PLACED(id))).map((p) => p.asked));
+          for (const r of await page.eval<Region[]>(REGIONS_OF(id))) {
+            if (asked.has(r.name)) {
+              assert.equal(r.shown, true, `${template}.${r.name} has children and shows`);
+              assert.ok(r.h > 0, `${template}.${r.name} has height`);
+            } else {
+              empties++;
+              assert.equal(r.shown, false, `${template}.${r.name} is empty and hidden`);
+              assert.equal(r.h, 0, `${template}.${r.name} takes no height`);
+            }
+          }
+        }
+        assert.ok(empties >= 2, "the gallery leaves some regions empty");
+        // An empty side column collapses: the dashboard's main region takes the full width.
+        await page.eval(`window.show("template-dashboard")`);
+        const widths = await page.eval<{ main: number; stats: number }>(`(() => {
+          const s = document.querySelector('[data-node-id="template-dashboard"]');
+          return { main: s.querySelector('[data-region="main"]').offsetWidth, stats: s.querySelector('[data-region="stats"]').offsetWidth }; })()`);
+        assert.equal(widths.main, widths.stats, `main spans the empty side column: ${JSON.stringify(widths)}`);
+      });
+
+      await t.test("unknown region falls back to main", async () => {
+        await fresh();
+        await page.eval(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          s.children.find((c) => c.id === "td.chart").props.region = "nope";
+          delete s.children.find((c) => c.id === "td.table").props.region;
+          // A region on a child of a Screen with no template is ignored.
+          window.proto.root.children.find((c) => c.id === "gallery-b").children[0].props.region = "side";
+          window.show("template-dashboard");
+        })()`);
+        const placed = await page.eval<Placed[]>(PLACED("template-dashboard"));
+        assert.equal(placed.find((p) => p.id === "td.chart")!.region, "main");
+        assert.equal(placed.find((p) => p.id === "td.table")!.region, "main");
+        await page.eval(`window.show("gallery-b")`);
+        const plain = await page.eval<Placed[]>(PLACED("gallery-b"));
+        assert.ok(plain.every((p) => p.count === 1 && p.parentIsScreen && p.region === null), "rendered in the Screen as before");
+        assert.equal(await page.eval<number>(`document.querySelector('[data-node-id="gallery-b"]').querySelectorAll("[data-region]").length`), 0);
+        assert.equal(await page.eval<boolean>(`document.querySelector('[data-node-id="${proto.root.children[1].children[0].id}"]').getClientRects().length > 0`), true);
+      });
+
+      await t.test("template change keeps every child", async () => {
+        await fresh();
+        await page.eval(`window.show("template-dashboard")`);
+        const before = await page.eval<string[]>(`[...document.querySelectorAll('[data-node-id="template-dashboard"] [data-node-id]')].map((e) => e.dataset.nodeId).sort()`);
+        const elsBefore = await page.eval<number>(`(() => { window.keep = [...document.querySelectorAll('[data-node-id="template-dashboard"] [data-node-id]')]; return window.keep.length; })()`);
+        for (const template of ["feed", "chat", "landing", null, "dashboard"]) {
+          // With motion (a patch's changes), as the stage renders a patch.
+          await page.eval(`(() => {
+            const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+            if (${JSON.stringify(template)}) s.props.template = ${JSON.stringify(template)}; else delete s.props.template;
+            window.drawWith([{ kind: "updated", id: "template-dashboard" }]);
+          })()`);
+          const placed = await page.eval<Placed[]>(PLACED("template-dashboard"));
+          for (const p of placed) {
+            assert.equal(p.count, 1, `${template}: ${p.id} in the DOM once`);
+            if (template) {
+              const want = Object.hasOwn(TEMPLATES[template].regions, p.asked ?? "") ? p.asked : TEMPLATES[template].main;
+              assert.equal(p.region, want, `${template}: ${p.id} re-placed`);
+            } else {
+              assert.equal(p.parentIsScreen, true, `no template: ${p.id} back in the Screen`);
+            }
+          }
+          const after = await page.eval<string[]>(`[...document.querySelectorAll('[data-node-id="template-dashboard"] [data-node-id]')].map((e) => e.dataset.nodeId).sort()`);
+          assert.deepEqual(after, before, `${template}: same nodes`);
+          // Same elements (moved, not rebuilt), so motion and the spotlight find them by id.
+          assert.equal(await page.eval<boolean>(`window.keep.every((e) => e.isConnected && window.nodes.get(e.dataset.nodeId) === e)`), true, `${template}: elements kept`);
+          if (!template) assert.equal(await page.eval<number>(`document.querySelector('[data-node-id="template-dashboard"]').querySelectorAll("[data-region]").length`), 0);
+        }
+        assert.equal(elsBefore, before.length);
+        assert.equal(await page.eval<number>(IDEMPOTENT), 0, "idempotent after template changes");
+      });
+
+      await t.test("reconcile order within a region", async () => {
+        await fresh();
+        await page.eval(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          // Before the first main child (index 5 of the Screen, index 0 of main) and at index 0 of the Screen.
+          s.children.splice(s.children.findIndex((c) => c.id === "td.chart"), 0, { id: "td.first", type: "Text", props: { region: "main", text: "First in main" }, status: "agreed", children: [] });
+          s.children.unshift({ id: "td.side", type: "Text", props: { region: "side", text: "Only in side" }, status: "agreed", children: [] });
+          window.show("template-dashboard");
+        })()`);
+        const regions = await page.eval<Region[]>(REGIONS_OF("template-dashboard"));
+        const by = Object.fromEntries(regions.map((r) => [r.name, r]));
+        assert.deepEqual(by.main.nodes, ["td.first", "td.chart", "td.table"]);
+        assert.deepEqual(by.side.nodes, ["td.side"]);
+        assert.equal(by.side.shown, true, "a region that gains a child shows");
+        assert.deepEqual(by.header.nodes, ["td.header"]);
+        assert.deepEqual(by.stats.nodes, ["td.spent", "td.left", "td.waiting", "td.receipts"]);
+        // Moving a child within its region reorders it there.
+        await page.eval(`(() => {
+          const s = window.proto.root.children.find((c) => c.id === "template-dashboard");
+          const i = s.children.findIndex((c) => c.id === "td.table");
+          const [table] = s.children.splice(i, 1);
+          s.children.splice(s.children.findIndex((c) => c.id === "td.first"), 0, table);
+          s.children = s.children.filter((c) => c.id !== "td.side");
+          window.draw();
+        })()`);
+        const after = Object.fromEntries((await page.eval<Region[]>(REGIONS_OF("template-dashboard"))).map((r) => [r.name, r]));
+        assert.deepEqual(after.main.nodes, ["td.table", "td.first", "td.chart"]);
+        assert.equal(after.side.shown, false, "a region that loses its last child hides");
+        assert.equal(await page.eval<number>(IDEMPOTENT), 0, "idempotent");
+      });
+
+      await t.test("every template passes the part 1 checks and is screenshotted", async () => {
+        await fresh();
+        for (const { id, template } of TEMPLATE_SCREENS) {
+          await page.eval(`window.show(${JSON.stringify(id)})`);
+          await partOneChecks(page, `template ${template}`);
+          const height = await page.eval<number>(`document.documentElement.scrollHeight`);
+          for (let y = 0, i = 1; y < height; y += HEIGHT, i++) {
+            await page.eval(`window.scrollTo(0, ${y})`);
+            await page.screenshot(path.join(dir, `template-${template}${i > 1 ? `-${i}` : ""}.png`));
+          }
+          await page.eval(`window.scrollTo(0, 0)`);
+        }
+      });
+
+      await t.test("on a phone every template is one column in region order", async () => {
+        await fresh();
+        await page.eval(`(() => { window.proto.root.props.device = "phone"; window.draw(); })()`);
+        for (const { id, template } of TEMPLATE_SCREENS) {
+          await page.eval(`window.show(${JSON.stringify(id)})`);
+          const shown = (await page.eval<(Region & { x: number; y: number; w: number })[]>(`[...document.querySelector('[data-node-id="${id}"]').querySelectorAll(":scope > [data-region]")]
+            .filter((r) => r.getClientRects().length > 0).map((r) => ({ name: r.dataset.region, x: r.offsetLeft, y: r.offsetTop, w: r.offsetWidth }))`));
+          assert.ok(shown.length > 0);
+          assert.equal(new Set(shown.map((r) => r.x)).size, 1, `${template}: one column ${JSON.stringify(shown)}`);
+          assert.equal(new Set(shown.map((r) => r.w)).size, 1, `${template}: same width`);
+          const ys = shown.map((r) => r.y);
+          assert.deepEqual(ys, [...ys].sort((a, b) => a - b), `${template}: region order`);
+          assert.deepEqual(shown.map((r) => r.name), Object.keys(TEMPLATES[template].regions).filter((n) => shown.some((r) => r.name === n)));
+          const content = await page.eval<{ scroll: number; client: number }>(`(() => { const b = document.querySelector(".b-phone .b-app-body"); return { scroll: b.scrollWidth, client: b.clientWidth }; })()`);
+          assert.ok(content.scroll <= content.client, `${template} overflows the phone: ${JSON.stringify(content)}`);
+          await partOneChecks(page, `phone template ${template}`);
+          if (template === "dashboard") await page.screenshot(path.join(dir, "template-dashboard-phone.png"));
+        }
+      });
+
+      assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
+      t.diagnostic(`template screenshots: ${dir}`);
     });
   }, { width: WIDTH, height: HEIGHT });
 });

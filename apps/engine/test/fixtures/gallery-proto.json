@@ -202,6 +202,130 @@
           { "id": "e.comment", "type": "Comment", "props": { "author": "Jo Lee", "text": "Is the taxi under the travel policy?", "time": "2h ago" }, "status": "agreed", "children": [] },
           { "id": "e.skeleton", "type": "Skeleton", "props": { "lines": 4 }, "status": "agreed", "children": [] }
         ] }
+      ] },
+      { "id": "template-dashboard", "type": "Screen", "props": { "title": "Dashboard", "icon": "layout-dashboard", "template": "dashboard" }, "status": "agreed", "children": [
+        { "id": "td.header", "type": "PageHeader", "props": { "region": "header", "title": "October overview", "subtitle": "Design team · 12 people" }, "status": "agreed", "children": [
+          { "id": "td.header.export", "type": "Button", "props": { "label": "Export", "variant": "secondary" }, "status": "agreed", "children": [] },
+          { "id": "td.header.add", "type": "Button", "props": { "label": "Add expense", "icon": "plus" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "td.spent", "type": "StatCard", "props": { "region": "stats", "label": "Spent", "value": "$12,480", "delta": "12% vs Sep", "trend": "up", "tone": "danger", "icon": "wallet" }, "status": "agreed", "children": [] },
+        { "id": "td.left", "type": "StatCard", "props": { "region": "stats", "label": "Budget left", "value": "$7,520", "delta": "38% left", "trend": "flat", "tone": "success" }, "status": "agreed", "children": [] },
+        { "id": "td.waiting", "type": "StatCard", "props": { "region": "stats", "label": "Waiting", "value": "7", "delta": "3 overdue", "trend": "down" }, "status": "agreed", "children": [] },
+        { "id": "td.receipts", "type": "StatCard", "props": { "region": "stats", "label": "Receipts", "value": "214", "delta": "18 this week", "trend": "up" }, "status": "agreed", "children": [] },
+        { "id": "td.chart", "type": "ChartCard", "props": { "region": "main", "title": "Spending by month", "kind": "bar", "data": [45,62,50,78,58,92], "labels": ["May", "Jun", "Jul", "Aug", "Sep", "Oct"] }, "status": "agreed", "children": [] },
+        { "id": "td.table", "type": "Table", "props": { "region": "main", "columns": ["Who", "Item", "Amount", "Status"], "rows": ["@Sara K. | Figma seats | $420 | #Paid", "@Amir S. | Offsite venue | $1,150 | #Pending", "@Jo L. | Taxi | $38 | #Paid", "@Max R. | Team lunch | $212 | #Pending"] }, "status": "agreed", "children": [] }
+      ] },
+      { "id": "template-list-detail", "type": "Screen", "props": { "title": "Approvals", "icon": "check-circle", "template": "list-detail" }, "status": "agreed", "children": [
+        { "id": "tl.list", "type": "List", "props": { "region": "list" }, "status": "agreed", "children": [
+          { "id": "tl.list.1", "type": "ListItem", "props": { "text": "Offsite venue", "subtitle": "Travel · Amir S.", "meta": "$1,150", "avatar": "Amir S.", "tone": "accent" }, "status": "agreed", "children": [] },
+          { "id": "tl.list.2", "type": "ListItem", "props": { "text": "Figma seats", "subtitle": "Software · Sara K.", "meta": "$420", "avatar": "Sara K." }, "status": "agreed", "children": [] },
+          { "id": "tl.list.3", "type": "ListItem", "props": { "text": "Team lunch", "subtitle": "Food · Max R.", "meta": "$212", "avatar": "Max R." }, "status": "agreed", "children": [] },
+          { "id": "tl.list.4", "type": "ListItem", "props": { "text": "Taxi to client", "subtitle": "Travel · Jo L.", "meta": "$38", "avatar": "Jo L." }, "status": "agreed", "children": [] },
+          { "id": "tl.list.5", "type": "ListItem", "props": { "text": "Desk stand", "subtitle": "Office · Ana B.", "meta": "$49", "avatar": "Ana B." }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tl.detail", "type": "Card", "props": { "region": "detail", "title": "Offsite venue", "subtitle": "Travel · submitted by Amir S. on Oct 14" }, "status": "agreed", "children": [
+          { "id": "tl.detail.amount", "type": "Heading", "props": { "text": "$1,150.00", "level": 2 }, "status": "agreed", "children": [] },
+          { "id": "tl.detail.text", "type": "Text", "props": { "text": "Two nights at Casa Lisboa for the design team offsite, 12 people." }, "status": "agreed", "children": [] },
+          { "id": "tl.detail.actions", "type": "Row", "props": { "align": "end" }, "status": "agreed", "children": [
+            { "id": "tl.detail.reject", "type": "Button", "props": { "label": "Reject", "variant": "secondary" }, "status": "agreed", "children": [] },
+            { "id": "tl.detail.approve", "type": "Button", "props": { "label": "Approve", "icon": "check" }, "status": "agreed", "children": [] }
+          ] }
+        ] },
+        { "id": "tl.history", "type": "Card", "props": { "region": "detail", "title": "History" }, "status": "agreed", "children": [
+          { "id": "tl.history.timeline", "type": "Timeline", "props": { "items": ["Oct 14 | Submitted | Amir attached the invoice", "Oct 15 | In review | #Pending with Sara K."] }, "status": "agreed", "children": [] }
+        ] }
+      ] },
+      { "id": "template-form", "type": "Screen", "props": { "title": "New expense", "icon": "edit-3", "template": "form" }, "status": "agreed", "children": [
+        { "id": "tf.header", "type": "PageHeader", "props": { "region": "header", "title": "New expense", "subtitle": "Fill in the details and attach the receipt" }, "status": "agreed", "children": [] },
+        { "id": "tf.details", "type": "Card", "props": { "region": "main", "title": "Details" }, "status": "agreed", "children": [
+          { "id": "tf.grid", "type": "Grid", "props": { "columns": "2" }, "status": "agreed", "children": [
+            { "id": "tf.amount", "type": "Input", "props": { "label": "Amount", "placeholder": "$0.00" }, "status": "agreed", "children": [] },
+            { "id": "tf.merchant", "type": "Input", "props": { "label": "Merchant", "value": "Figma" }, "status": "agreed", "children": [] },
+            { "id": "tf.category", "type": "Select", "props": { "label": "Category", "options": ["Software", "Travel", "Food"], "value": "Software" }, "status": "agreed", "children": [] },
+            { "id": "tf.date", "type": "DatePicker", "props": { "label": "Date", "value": "Oct 14, 2026" }, "status": "agreed", "children": [] }
+          ] },
+          { "id": "tf.upload", "type": "FileUpload", "props": { "label": "Attach receipt", "hint": "PDF or photo, up to 10 MB" }, "status": "agreed", "children": [] },
+          { "id": "tf.reimburse", "type": "Toggle", "props": { "label": "Reimbursable", "on": true }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tf.buttons", "type": "Row", "props": { "region": "main", "align": "end" }, "status": "agreed", "children": [
+          { "id": "tf.draft", "type": "Button", "props": { "label": "Save draft", "variant": "secondary" }, "status": "agreed", "children": [] },
+          { "id": "tf.submit", "type": "Button", "props": { "label": "Submit", "icon": "send" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tf.policy", "type": "Card", "props": { "region": "aside", "title": "Policy", "emphasis": "filled", "tone": "accent" }, "status": "agreed", "children": [
+          { "id": "tf.policy.text", "type": "Text", "props": { "text": "Expenses over $500 need a second approver." }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tf.help", "type": "Card", "props": { "region": "aside", "title": "Need help?" }, "status": "agreed", "children": [
+          { "id": "tf.help.text", "type": "Text", "props": { "text": "Ask Sara in Finance about anything unusual.", "tone": "muted" }, "status": "agreed", "children": [] }
+        ] }
+      ] },
+      { "id": "template-feed", "type": "Screen", "props": { "title": "Updates", "icon": "users", "template": "feed" }, "status": "agreed", "children": [
+        { "id": "tfe.header", "type": "PageHeader", "props": { "region": "header", "title": "Team updates", "subtitle": "What the design team shared this week" }, "status": "agreed", "children": [
+          { "id": "tfe.header.post", "type": "Button", "props": { "label": "New post", "icon": "plus" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tfe.post1", "type": "MediaCard", "props": { "region": "main", "title": "Closing the month in a day", "text": "How we cut month-end from a week to an afternoon.", "image": "workspaces", "meta": "Sara K. · 2h ago" }, "status": "agreed", "children": [] },
+        { "id": "tfe.comment1", "type": "Comment", "props": { "region": "main", "author": "Jo Lee", "text": "Could we try this for the Q4 close too?", "time": "1h ago" }, "status": "agreed", "children": [] },
+        { "id": "tfe.post2", "type": "MediaCard", "props": { "region": "main", "title": "Offsite lunch spots", "text": "Five places near the venue that take groups of twelve.", "image": "food", "meta": "Max R. · Yesterday" }, "status": "agreed", "children": [] },
+        { "id": "tfe.team", "type": "Card", "props": { "region": "side", "title": "Team", "subtitle": "12 people" }, "status": "agreed", "children": [
+          { "id": "tfe.team.group", "type": "AvatarGroup", "props": { "names": ["Sara Kim", "Amir S.", "Jo Lee", "Max R.", "Ana B.", "Tom R."] }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tfe.events", "type": "Card", "props": { "region": "side", "title": "Coming up" }, "status": "agreed", "children": [
+          { "id": "tfe.events.text", "type": "Text", "props": { "text": "Design offsite, Nov 3", "tone": "muted" }, "status": "agreed", "children": [] }
+        ] }
+      ] },
+      { "id": "template-landing", "type": "Screen", "props": { "title": "Home", "icon": "home", "template": "landing" }, "status": "agreed", "children": [
+        { "id": "tla.hero", "type": "Hero", "props": { "region": "hero", "title": "Expenses without the spreadsheet", "subtitle": "Snap a receipt, get approved, get paid." }, "status": "agreed", "children": [
+          { "id": "tla.hero.cta", "type": "Button", "props": { "label": "Start free", "size": "lg" }, "status": "agreed", "children": [] },
+          { "id": "tla.hero.more", "type": "Button", "props": { "label": "See pricing", "variant": "secondary", "size": "lg" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tla.features", "type": "FeatureGrid", "props": { "region": "features", "items": ["camera | Snap receipts | Take a photo, we read the total", "check | One-tap approvals | Managers approve from their phone", "zap | Fast payouts | Money back within two days"] }, "status": "agreed", "children": [] },
+        { "id": "tla.tier1", "type": "PricingTier", "props": { "region": "pricing", "name": "Starter", "price": "$0", "period": "/month", "features": ["Up to 5 people", "Receipt scanning"] }, "status": "agreed", "children": [
+          { "id": "tla.tier1.cta", "type": "Button", "props": { "label": "Start free", "variant": "secondary" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tla.tier2", "type": "PricingTier", "props": { "region": "pricing", "name": "Team", "price": "$8", "period": "/person/month", "features": ["Unlimited people", "Approvals", "Card sync"], "highlighted": true }, "status": "agreed", "children": [
+          { "id": "tla.tier2.cta", "type": "Button", "props": { "label": "Choose Team" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tla.tier3", "type": "PricingTier", "props": { "region": "pricing", "name": "Business", "price": "$14", "period": "/person/month", "features": ["Everything in Team", "SSO", "Audit log"] }, "status": "agreed", "children": [
+          { "id": "tla.tier3.cta", "type": "Button", "props": { "label": "Talk to us", "variant": "secondary" }, "status": "agreed", "children": [] }
+        ] }
+      ] },
+      { "id": "template-chat", "type": "Screen", "props": { "title": "Messages", "icon": "message-circle", "template": "chat" }, "status": "agreed", "children": [
+        { "id": "tc.list", "type": "List", "props": { "region": "list" }, "status": "agreed", "children": [
+          { "id": "tc.list.1", "type": "ListItem", "props": { "text": "Sara Kim", "subtitle": "Thanks!", "meta": "2m", "avatar": "Sara Kim", "tone": "accent" }, "status": "agreed", "children": [] },
+          { "id": "tc.list.2", "type": "ListItem", "props": { "text": "Jo Lee", "subtitle": "Taxi receipt is attached", "meta": "1h", "avatar": "Jo Lee" }, "status": "agreed", "children": [] },
+          { "id": "tc.list.3", "type": "ListItem", "props": { "text": "Finance", "subtitle": "Month-end is on Friday", "meta": "Mon", "avatar": "Finance" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tc.thread", "type": "ChatThread", "props": { "region": "main", "messages": ["Sara | Can you approve the Figma seats?", "me | Done, approved just now.", "Sara | Thanks! The offsite venue is next.", "me | On it this afternoon."] }, "status": "agreed", "children": [] },
+        { "id": "tc.compose", "type": "Row", "props": { "region": "main" }, "status": "agreed", "children": [
+          { "id": "tc.compose.input", "type": "Input", "props": { "placeholder": "Write a message" }, "status": "agreed", "children": [] },
+          { "id": "tc.compose.send", "type": "Button", "props": { "label": "Send", "icon": "send" }, "status": "agreed", "children": [] }
+        ] }
+      ] },
+      { "id": "template-checkout", "type": "Screen", "props": { "title": "Checkout", "icon": "credit-card", "template": "checkout" }, "status": "agreed", "children": [
+        { "id": "tco.steps", "type": "Steps", "props": { "region": "header", "steps": ["Plan", "Details", "Payment", "Done"], "current": 2 }, "status": "agreed", "children": [] },
+        { "id": "tco.payment", "type": "Card", "props": { "region": "main", "title": "Payment", "subtitle": "You won't be charged until the trial ends" }, "status": "agreed", "children": [
+          { "id": "tco.name", "type": "Input", "props": { "label": "Name on card", "value": "Sara Kim" }, "status": "agreed", "children": [] },
+          { "id": "tco.number", "type": "Input", "props": { "label": "Card number", "placeholder": "1234 5678 9012 3456", "icon": "credit-card" }, "status": "agreed", "children": [] },
+          { "id": "tco.grid", "type": "Grid", "props": { "columns": "2" }, "status": "agreed", "children": [
+            { "id": "tco.expiry", "type": "Input", "props": { "label": "Expiry", "placeholder": "MM / YY" }, "status": "agreed", "children": [] },
+            { "id": "tco.cvc", "type": "Input", "props": { "label": "CVC", "placeholder": "123" }, "status": "agreed", "children": [] }
+          ] },
+          { "id": "tco.save", "type": "Checkbox", "props": { "label": "Save card for next time", "checked": true }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tco.summary", "type": "Card", "props": { "region": "summary", "title": "Order summary" }, "status": "agreed", "children": [
+          { "id": "tco.line1", "type": "Row", "props": { "align": "between" }, "status": "agreed", "children": [
+          { "id": "tco.line1.what", "type": "Text", "props": { "text": "Team plan × 12" }, "status": "agreed", "children": [] },
+          { "id": "tco.line1.cost", "type": "Text", "props": { "text": "$96.00" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tco.line2", "type": "Row", "props": { "align": "between" }, "status": "agreed", "children": [
+          { "id": "tco.line2.what", "type": "Text", "props": { "text": "Tax", "tone": "muted" }, "status": "agreed", "children": [] },
+          { "id": "tco.line2.cost", "type": "Text", "props": { "text": "$9.60", "tone": "muted" }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tco.line3", "type": "Row", "props": { "align": "between" }, "status": "agreed", "children": [
+          { "id": "tco.line3.what", "type": "Heading", "props": { "text": "Total", "level": 3 }, "status": "agreed", "children": [] },
+          { "id": "tco.line3.cost", "type": "Heading", "props": { "text": "$105.60", "level": 3 }, "status": "agreed", "children": [] }
+        ] },
+        { "id": "tco.pay", "type": "Button", "props": { "label": "Pay $105.60" }, "status": "agreed", "children": [] }
+        ] }
       ] }
     ]
   }

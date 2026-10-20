@@ -135,6 +135,29 @@ test("a removal is spotlit on the parent it left, with its label", async (t) => 
   });
 });
 
+test("a template change mid-meeting glides the same elements into the new regions", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const region = (id: string, r: string) => ({ ...text(id, `Text ${id}`), props: { text: `Text ${id}`, region: r } });
+    await script([{ batch: { label: "Dashboard", ops: [
+      { op: "update", id: "home", props: { template: "dashboard" } },
+      add("home", region("h", "header")), add("home", region("s1", "stats")), add("home", region("m", "main")), add("home", region("side", "side")),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="side"]')`);
+    await sleep(1700);
+    const where = `(() => Object.fromEntries(["h", "s1", "m", "side"].map((id) => [id, document.querySelector('[data-node-id="' + id + '"]').parentElement.dataset.region])))()`;
+    assert.deepEqual(await page.eval(where), { h: "header", s1: "stats", m: "main", side: "side" });
+    await page.eval(`(() => { window.__motionLog = []; window.__kept = ["h", "s1", "m", "side"].map((id) => document.querySelector('[data-node-id="' + id + '"]')); })()`);
+    await script([{ batch: { label: "Chat layout", by: "Ada", ops: [{ op: "update", id: "home", props: { template: "chat" } }] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus")`, 3000);
+    // chat has list and main: header, stats and side fall back to main.
+    assert.deepEqual(await page.eval(where), { h: "main", s1: "main", m: "main", side: "main" });
+    assert.equal(await page.eval<boolean>(`window.__kept.every((e) => e.isConnected && e === document.querySelector('[data-node-id="' + e.dataset.nodeId + '"]'))`), true, "same elements, moved");
+    const log = await page.eval<{ fn: string; glides?: number; id?: string }[]>(`window.__motionLog`);
+    assert.ok(log.some((e) => e.fn === "animateReconcile" && (e.glides ?? 0) > 0), `children glide: ${JSON.stringify(log)}`);
+    assert.equal(log.find((e) => e.fn === "playFocus")!.id, "home");
+  });
+});
+
 test("voice command: pointer glides and presses before the action runs", async (t) => {
   await withStage(t, async ({ page, script }) => {
     await script([{ batch: { label: "Nav", ops: [

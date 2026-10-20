@@ -1,6 +1,7 @@
 // Frames: the containers a screen is laid out with.
 import { h, str, arr, clampInt, setText, setHidden, setOptional, setAttr, setClass, setVariant, withParts, syncTexts, changed } from "@renderer/components/dom.js";
 import { frameNav, screenTitle } from "@renderer/interact.js";
+import { TEMPLATES, templateRegion } from "@renderer/catalog.js";
 
 /** Title + subtitle block used by Section and Card. */
 function head(cls) {
@@ -9,6 +10,75 @@ function head(cls) {
   const subtitle = h("div", `${cls}-subtitle`);
   el.append(title, subtitle);
   return { el, title, subtitle };
+}
+
+// ---------- page templates ----------
+// A templated Screen holds one container per region ([data-region], in the template's order) and is a CSS grid
+// laid out from the template's areas and columns. Only regions with children are drawn: an empty one is hidden and
+// left out of the areas, its cells going to the filled region beside it in the same row (a row with nothing filled
+// goes), so an empty side column or footer takes no room. Emptiness comes from the node's children, which the
+// reconcile places right after this update, so the layout is settled in one pass and a second render changes nothing.
+
+// Out-of-flow children: they never take room in a region, so a region holding only these is drawn without a box.
+const OVERLAYS = new Set(["Drawer", "Modal"]);
+
+function templateOf(node) {
+  const t = str(node.props.template);
+  return Object.hasOwn(TEMPLATES, t) ? t : "";
+}
+
+/** grid-template-areas for `template` with only the regions in `filled`; "none" when nothing is filled. */
+export function templateAreas(template, filled) {
+  const rows = [...TEMPLATES[template].areas.matchAll(/"([^"]*)"/g)].map((m) => m[1].trim().split(/\s+/));
+  const out = [];
+  for (const row of rows) {
+    const cells = row.map((c) => (filled.has(c) ? c : ""));
+    if (!cells.some(Boolean)) continue;
+    for (let i = 0; i < cells.length; i++) {
+      if (!cells[i]) cells[i] = cells.slice(0, i).reverse().find(Boolean) ?? cells.slice(i + 1).find(Boolean);
+    }
+    out.push(`"${cells.join(" ")}"`);
+  }
+  return out.length ? out.join(" ") : "none";
+}
+
+// Builds the region containers when the template changes, reusing a container whose name the new template keeps.
+// Children of a dropped container are detached here and re-placed by the reconcile on the same pass.
+function syncRegions(el, template) {
+  const regions = new Map();
+  if (template) {
+    for (const [name, r] of Object.entries(TEMPLATES[template].regions)) {
+      const div = el.parts.regions.get(name) ?? h("div", "b-region");
+      div.dataset.region = name;
+      setVariant(div, "is-layout-", r.layout);
+      div.style.gridArea = name;
+      regions.set(name, div);
+    }
+  }
+  for (const [name, div] of el.parts.regions) if (regions.get(name) !== div) div.remove();
+  for (const div of regions.values()) el.append(div);
+  el.parts.regions = regions;
+  el.parts.template = template;
+  el.style.gridTemplateColumns = template ? TEMPLATES[template].columns.split(/\s+/).map((c) => `minmax(0, ${c})`).join(" ") : "";
+  el.parts.areas = "";
+  el.style.gridTemplateAreas = "";
+}
+
+function syncEmptyRegions(el, node) {
+  const template = el.parts.template;
+  if (!template) return;
+  const flow = new Set();
+  const overlays = new Set();
+  for (const c of node.children) (OVERLAYS.has(c.type) ? overlays : flow).add(templateRegion(template, c.props?.region));
+  for (const [name, div] of el.parts.regions) {
+    setHidden(div, !flow.has(name) && !overlays.has(name));
+    setClass(div, "is-overlays", !flow.has(name) && overlays.has(name));
+  }
+  const areas = templateAreas(template, flow);
+  if (el.parts.areas !== areas) {
+    el.parts.areas = areas;
+    el.style.gridTemplateAreas = areas;
+  }
 }
 
 function syncHead(parts, node) {
@@ -93,12 +163,22 @@ export const FRAMES = {
     slot: (el) => el.parts.body,
   },
 
+  // With a template: .b-screen.is-template-<name> > .b-region[data-region] (the children). Without: the children.
   Screen: {
-    create: () => h("section", "b-screen"),
+    create: () => withParts(h("section", "b-screen"), { template: "", regions: new Map(), areas: "" }),
     update(el, node, ui) {
       setHidden(el, ui.screen !== node.id);
+      const template = templateOf(node);
+      setVariant(el, "is-template-", template);
+      if (el.parts.template !== template) syncRegions(el, template);
+      syncEmptyRegions(el, node);
     },
     slot: (el) => el,
+    // A child goes to its region (an unknown or missing region to the template's main); without a template, to the Screen.
+    slotFor(el, node, child) {
+      const region = el.parts.template ? templateRegion(el.parts.template, child.props?.region) : null;
+      return (region && el.parts.regions.get(region)) || el;
+    },
   },
 
   PageHeader: {

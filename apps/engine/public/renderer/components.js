@@ -2,6 +2,8 @@
 //   create(node)          -> element (static structure only)
 //   update(el, node, ui)  -> sync props/ui state into the element; idempotent, touches the DOM only on change
 //   slot(el)              -> element that holds child nodes (omitted for leaf components)
+//   slotFor(el, node, child) -> optional: the element that holds this one child (a templated Screen's regions);
+//                            used for every child when present, else slot(el)
 // Every element carries data-node-id, data-type and the b-node class. Parts live on el.parts.
 // The catalog's builders live in components/<group>.js; the style options a type declares (tone, size, pad,
 // emphasis, span) are applied here, the same way for every type.
@@ -61,4 +63,10 @@ export function updateElement(el, node, ui) {
 export function slotOf(el, node) {
   const s = BUILDERS[node.type].slot;
   return s ? s(el) : null;
+}
+
+/** Where one child of `node` goes: the builder's slotFor when it has one, else its slot. */
+export function slotFor(el, node, child) {
+  const b = BUILDERS[node.type];
+  return b.slotFor ? b.slotFor(el, node, child) : slotOf(el, node);
 }

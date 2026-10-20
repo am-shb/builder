@@ -104,7 +104,8 @@
 .is-frame-top .b-app-chrome { position: sticky; top: 0; z-index: 3; height: 64px; border-bottom: 1px solid var(--b-line); }
 .is-frame-top .b-app-rail { position: static; height: 100%; align-items: center; gap: 32px; padding: 0 26px; }
 .is-frame-top .b-app-brand { flex: none; max-width: 260px; }
-.is-frame-top .b-app-nav { align-self: stretch; gap: 6px; }
+/* The nav takes the room left of the brand and never widens the bar: with many screens the items shrink (ellipsis). */
+.is-frame-top .b-app-nav { flex: 1 1 0; width: 0; overflow: hidden; align-self: stretch; gap: 6px; }
 .is-frame-top .b-app-navitem { flex: 0 1 auto; padding: 2px 12px 0; border-bottom: 2px solid transparent; }
 .is-frame-top .b-app-navitem.is-active { color: var(--b-ink); border-bottom-color: var(--b-accent); }
 
@@ -144,6 +145,40 @@
   display: flex; flex-direction: column; gap: calc(var(--b-gap) + 4px); min-width: 0;
   padding: calc(var(--b-pad) + 4px) calc(var(--b-pad) + 8px) calc(var(--b-pad) + 10px);
 }
+
+/* Page templates (frames.js Screen): a grid of regions. The areas and columns are set on the element from the template,
+   with empty regions left out (they are hidden). Regions never clip or scroll: the phone's screen area is the scroller. */
+.b-screen[class*="is-template-"] {
+  display: grid; align-content: start; align-items: start; gap: calc(var(--b-gap) + 6px) calc(var(--b-gap) + 8px);
+}
+.b-region { min-width: 0; }
+.b-region.is-layout-stack { display: flex; flex-direction: column; gap: var(--b-gap); }
+/* A row: the first child takes the room (a PageHeader, Steps), the rest keep their size at the end. */
+.b-region.is-layout-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--b-gap); }
+.b-region.is-layout-row > * { flex: 0 1 auto; min-width: 0; }
+.b-region.is-layout-row > :first-child { flex: 1 1 auto; }
+.b-region.is-layout-row > .b-panel { flex: 1 1 220px; }
+/* A grid: as many equal columns as fit, up to --cols (4 headline numbers, 3 plans); span still works. */
+.b-region.is-layout-grid {
+  --cols: 3; --min: 200px; display: grid; gap: var(--b-gap);
+  grid-template-columns: repeat(auto-fit, minmax(max(var(--min), (100% - (var(--cols) - 1) * var(--b-gap)) / var(--cols)), 1fr));
+}
+.b-region.is-layout-grid[data-region="stats"] { --cols: 4; --min: 140px; }
+.b-region.is-layout-grid > :is([data-span="3"], [data-span="4"]) { grid-column: 1 / -1 !important; }
+.b-region.is-layout-grid > :is(.b-field, .b-slider, .b-search, .b-segmented, .b-toggle, .b-checkbox, .b-button) { align-self: start; }
+/* Headline numbers four across: the value scales down with its card instead of breaking mid-number. */
+.b-region[data-region="stats"] > .b-stat { container-type: inline-size; }
+.b-region[data-region="stats"] > .b-stat .b-stat-value { font-size: max(20px, min(32px, 22cqi)); }
+.b-region[data-region="stats"] > .b-stat.is-size-sm .b-stat-value { font-size: max(18px, min(24px, 17cqi)); }
+.b-region[data-region="stats"] > .b-stat.is-size-lg .b-stat-value { font-size: max(22px, min(40px, 26cqi)); }
+/* A narrow list column: one line per title and subtitle. */
+.b-region[data-region="list"] :is(.b-listitem-text, .b-listitem-sub) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Only a closed Drawer or Modal: no box of its own (they lay over the screen when open). */
+.b-region.is-overlays { display: contents; }
+/* One column on a phone, regions in template order. */
+.b-app .b-phone .b-screen[class*="is-template-"] { grid-template-areas: none !important; grid-template-columns: minmax(0, 1fr) !important; }
+.b-app .b-phone .b-region { grid-area: auto !important; }
+.b-app .b-phone .b-region.is-layout-grid > * { grid-column: auto !important; }
 
 .b-panel {
   min-width: 0; background: var(--b-surface); border: 1px solid var(--b-line); border-radius: var(--b-radius);
@@ -188,6 +223,7 @@
 .b-row.is-align-end { justify-content: flex-end; }
 .b-row.is-align-between { justify-content: space-between; }
 .b-row > .b-panel { flex: 1 1 220px; }
+.b-row > :is(.b-input, .b-search) { flex: 1 1 200px; } /* a field in a row (a compose bar, a toolbar search) takes the room */
 
 .b-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: var(--b-gap); min-width: 0; }
 .b-split.is-ratio-wide-left { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
