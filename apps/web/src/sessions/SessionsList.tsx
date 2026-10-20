@@ -1,6 +1,7 @@
 import { CircleAlert, RotateCw } from "lucide-react";
 import { Link } from "react-router";
-import { useOrgQuery } from "../api/ApiProvider.tsx";
+import type { ReactNode } from "react";
+import type { OrgQuery } from "../api/ApiProvider.tsx";
 import { explainError } from "../api/errors.ts";
 import type { SessionView } from "../api/schemas.ts";
 import { BOT_NAME } from "../brand.ts";
@@ -20,8 +21,12 @@ export const LIST_LIMIT = 50;
 // The org's sessions, newest first, as the api returns them. Reloaded with Refresh, which is always in the header,
 // and when the org changes; statuses don't change on their own yet (plan WD6). No stage link here: it's a control link,
 // shown only on a session's own page.
-export function SessionsList({ now }: { now?: Date }) {
-  const list = useOrgQuery((api, signal) => api.listSessions(signal));
+export function SessionsList({ list, now, emptyAction }: {
+  list: OrgQuery<SessionView[]>;
+  now?: Date;
+  // The empty state's own way to start (phones; on desktop the start panel is beside it).
+  emptyAction?: ReactNode;
+}) {
   const header = (
     <SectionHeader id="recent" title="Recent" action={
       <Button variant="quiet" size="sm" onClick={list.refresh} busy={list.refreshing} busyLabel="Refreshing…" disabled={list.status === "loading"}>
@@ -63,6 +68,7 @@ export function SessionsList({ now }: { now?: Date }) {
           title="Start your first session"
           description={`Bring ${BOT_NAME} into a meeting. It listens while you decide, and builds the prototype on the shared screen.`}
           steps={EMPTY_STEPS}
+          action={emptyAction}
         />
       ) : (
         <>

@@ -38,6 +38,7 @@ describe("starting", () => {
     [e(413, "payload_too_large"), "Something went wrong (payload_too_large).", "none"],
     [e(502, "engine_rejected", "recall_rejected"), `${BOT_NAME} couldn't join this meeting.`, "fix_link"],
     [e(502, "engine_rejected", "meeting_in_use"), `${BOT_NAME} already has a session in this meeting.`, "back_to_list"],
+    [e(503, "db_unavailable"), "Sessions aren't available right now.", "refresh"],
     [e(502, "engine_rejected", "session_conflict"), "Starting meetings isn't working right now (session_conflict).", "none"],
     [e(503, "engine_unavailable"), "Starting meetings isn't available right now.", "none"],
     [e(503, "limits_unavailable"), "Starting meetings isn't set up on this server yet.", "none"],
@@ -52,6 +53,8 @@ describe("starting", () => {
     e(0, "network_error"),
     e(200, "bad_response"),
     e(599, "something_new"),
+    e(502, "http_502"),
+    e(503, "http_503"),
   ])("a bot may exist: %o shows the warning, with no retry", (err) => {
     const x = explainError(err, "start");
     expect(x.botMayExist).toBe(true);

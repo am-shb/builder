@@ -10,11 +10,13 @@ const CLOSE_DISTANCE = 96;
 
 // A bottom sheet on phones, a centered dialog on desktop. Radix traps and restores focus, locks scroll, and closes on
 // Escape and on a tap outside. On phones the grabber and title can also be dragged down to close the sheet.
-export function ResponsiveModal({ open, onOpenChange, title, description, children }: {
+export function ResponsiveModal({ open, onOpenChange, title, description, closeDisabled = false, children }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  // While something inside can't be interrupted (a start running): no closing by button, Escape, tap or drag.
+  closeDisabled?: boolean;
   children: ReactNode;
 }) {
   const desktop = useMediaQuery(DESKTOP);
@@ -22,7 +24,7 @@ export function ResponsiveModal({ open, onOpenChange, title, description, childr
   const drag = useRef<{ start: number; distance: number } | null>(null);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (desktop || (e.target as HTMLElement).closest("button")) return;
+    if (desktop || closeDisabled || (e.target as HTMLElement).closest("button")) return;
     drag.current = { start: e.clientY, distance: 0 };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
@@ -42,7 +44,7 @@ export function ResponsiveModal({ open, onOpenChange, title, description, childr
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={(next) => (closeDisabled && !next ? undefined : onOpenChange(next))}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content
@@ -68,7 +70,7 @@ export function ResponsiveModal({ open, onOpenChange, title, description, childr
             {!desktop && <Grabber />}
             <div className={cn("flex items-center justify-between gap-4", desktop ? "mb-4" : "mb-3")}>
               <Dialog.Title className={titleClass}>{title}</Dialog.Title>
-              <Dialog.Close className="grid size-11 shrink-0 place-items-center rounded-full bg-sunk text-ink transition-colors hover:bg-plate">
+              <Dialog.Close disabled={closeDisabled} className="grid size-11 shrink-0 place-items-center rounded-full bg-sunk text-ink transition-colors hover:bg-plate disabled:cursor-not-allowed disabled:opacity-40">
                 <X aria-hidden="true" className="size-[18px]" strokeWidth={1.75} />
                 <span className="sr-only">Close</span>
               </Dialog.Close>

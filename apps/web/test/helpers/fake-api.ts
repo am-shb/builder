@@ -6,7 +6,7 @@ import { SessionView } from "../../src/api/schemas.ts";
 export const API = "http://api.test";
 
 export type Recorded = { method: string; url: string; path: string; headers: Record<string, string>; body: unknown; credentials: string | undefined };
-type Reply = { status: number; body?: unknown; raw?: string } | "network_error" | ((req: Recorded, signal?: AbortSignal) => Promise<Response>);
+export type Reply = { status: number; body?: unknown; raw?: string } | "network_error" | ((req: Recorded, signal?: AbortSignal) => Promise<Response>);
 
 export function session(over: Partial<SessionView> = {}): SessionView {
   return SessionView.parse({

@@ -6,7 +6,8 @@ import { buttonVariants } from "./Button.tsx";
 import { contentClass, Grabber, overlayClass, titleClass } from "./modal-styles.tsx";
 
 // A question that needs an answer before anything is sent ("Start another session for this link?"). Escape and
-// Cancel close it; a tap outside doesn't, so it can't be dismissed by accident.
+// Cancel close it; a tap outside doesn't, so it can't be dismissed by accident. The safe answer, Cancel, is the filled
+// button and has focus; the risky one is the outline button.
 export function ConfirmModal({ open, onOpenChange, title, description, confirmLabel, cancelLabel = "Cancel", onConfirm }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -29,8 +30,8 @@ export function ConfirmModal({ open, onOpenChange, title, description, confirmLa
           <AlertDialog.Title className={titleClass}>{title}</AlertDialog.Title>
           <AlertDialog.Description className="mt-2 mb-6 text-ink-2">{description}</AlertDialog.Description>
           <div className={cn("flex gap-3", desktop ? "justify-end" : "flex-col-reverse")}>
-            <AlertDialog.Cancel className={buttonVariants({ variant: "secondary", block: !desktop })}>{cancelLabel}</AlertDialog.Cancel>
-            <AlertDialog.Action className={buttonVariants({ variant: "primary", block: !desktop })} onClick={onConfirm}>
+            <AlertDialog.Cancel className={buttonVariants({ variant: "primary", block: !desktop })}>{cancelLabel}</AlertDialog.Cancel>
+            <AlertDialog.Action className={buttonVariants({ variant: "secondary", block: !desktop })} onClick={onConfirm}>
               {confirmLabel}
             </AlertDialog.Action>
           </div>
