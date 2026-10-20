@@ -9,6 +9,7 @@ import { readConfig } from "../src/config.ts";
 import { buildCsp, clerkFrontendApiHost } from "../build/csp.ts";
 import { safeReturnPath } from "../src/auth/guards.tsx";
 import { axeViolations } from "./helpers/axe.ts";
+import { setColorMode } from "../src/lib/color-mode.ts";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
 import { API, errorBody, fakeApi, session } from "./helpers/fake-api.ts";
 
@@ -259,6 +260,29 @@ describe("the Clerk wiring", () => {
     expect(elements.organizationPreviewMainIdentifier).toMatch(/\btruncate\b/);
     expect(elements.organizationPreviewMainIdentifier).toMatch(/\bmax-w-/);
     expect(elements.organizationSwitcherTrigger).toMatch(/\bmin-w-0\b/);
+  });
+
+  it("tells Clerk's bot check the color mode: auto for System, else the chosen one", () => {
+    setClerk({ session: "none" });
+    render(<App config={config} />);
+    const captcha = () => (clerk.providerProps?.appearance as { captcha?: { theme?: string } }).captcha?.theme;
+    expect(captcha()).toBe("auto");
+    act(() => setColorMode("dark"));
+    expect(captcha()).toBe("dark");
+    act(() => setColorMode("light"));
+    expect(captcha()).toBe("light");
+    // Our tokens and classes are still there beside it.
+    expect((clerk.providerProps?.appearance as { cssLayerName?: string }).cssLayerName).toBe("clerk");
+  });
+
+  it("the org switcher can shrink in the header, so the buttons beside it stay on a 320px phone", () => {
+    setClerk({ session: "none" });
+    render(<App config={config} />);
+    const elements = (clerk.providerProps?.appearance as { elements: Record<string, string> }).elements;
+    expect(elements.organizationPreviewMainIdentifier).toMatch(/\bmin-w-0\b/);
+    expect(elements.organizationPreviewAvatarContainer__organizationSwitcherTrigger).toMatch(/max-\[400px\]:hidden/);
+    // Only the header's: the switcher's list keeps its avatars.
+    expect(elements.organizationPreviewAvatarBox).not.toMatch(/hidden/);
   });
 
   it("when Clerk's script fails to load, says so and offers a retry", () => {

@@ -51,7 +51,35 @@ borders on surfaces, no grey card stacks, no gradient washes.
 
 ### Color
 Semantic tokens in `apps/web/src/styles/globals.css`, with a light and a dark value each; the mode follows the system
-(`prefers-color-scheme`). Components use tokens only; a test fails on a raw color anywhere else.
+(`prefers-color-scheme`) unless the person chooses otherwise (below). Components use tokens only; a test fails on a raw
+color anywhere else.
+
+### Color mode
+A button in the header (a 44px icon button between the org switcher and the account menu, and on the sign-in, sign-up
+and organization pages) opens a small menu: **System** (the default), **Light** and **Dark**, the current one checked.
+Its icon shows the choice (sun and moon, sun, moon) and its label says it ("Color mode: Dark").
+- **A menu, not a button that cycles.** With three choices, a cycle hides what the next press does and walks through a
+  mode the person didn't want (Light to System passes through Dark). The menu shows all three and the current one, and
+  each is one step away. Radix's DropdownMenu gives it the keyboard (Enter, Space or the arrows open it; the arrows
+  move; Escape closes it and focus goes back to the button) and the menu and radio roles. It isn't portalled, so it
+  stays inside the header's landmark.
+- **Applied as `data-theme` on `<html>`**, which the tokens already honor, so the whole app flips and so do Clerk's
+  components (their appearance variables are our tokens). System removes the attribute and the OS decides again,
+  live. The phone's address bar color (`theme-color`) follows the choice, and Clerk's bot check in sign-up (Cloudflare
+  Turnstile, drawn in its own frame) is told the mode through `appearance.captcha.theme`.
+- **It fits a 320px phone.** The org switcher shrinks and cuts a long name short, and below 400px the header button
+  drops the org's small avatar (the switcher's list keeps them), so "Northwind Studio" still shows in full at 360px and
+  every control stays inside the margins.
+- **Kept in `localStorage`, the one exception to ADR 0012's no-storage rule.** One key, `builder.color-mode`, holding
+  `light` or `dark` (System removes it): a display preference with nothing private in it. Only
+  `src/lib/color-mode.ts` and `public/color-mode.js` may touch storage; a test fails on storage anywhere else, or on
+  another key. Every read and write is in try/catch: with storage blocked or full, the menu still works for the page
+  and the next visit starts at System. Another tab's choice is followed through the `storage` event.
+- **No flash of the wrong mode, with no inline script.** `index.html` loads `/color-mode.js`, a small file from our
+  own origin, as an ordinary blocking script in `<head>`, so `script-src 'self'` allows it and the CSP is unchanged.
+  It sets `data-theme` before the first paint; the app applies the same setting again at startup in case it didn't
+  run. A test runs the shipped file and checks it leaves the page exactly as the app's code would, and the build check
+  fails on any inline script in `dist/index.html`.
 
 | Token | Light | Dark | Used for |
 |---|---|---|---|
@@ -167,7 +195,8 @@ and in a real browser by the screenshot script (contrast included).
 ### Clerk
 `ClerkProvider`'s `appearance.variables` point at the same CSS variables (primary, background, foreground, muted,
 input, danger, success, warning, the font and the radius), so sign-in, sign-up, the org switcher and the user menu
-follow the theme in light and dark. Clerk's `cssLayerName` puts its styles in a `clerk` layer that `globals.css`
+follow the theme in light and dark, and the mode chosen in the header (they read the tokens, which `data-theme`
+switches). Clerk's `cssLayerName` puts its styles in a `clerk` layer that `globals.css`
 orders before Tailwind's utilities.
 
 ### How the look stays consistent
@@ -184,5 +213,4 @@ orders before Tailwind's utilities.
 - All new dependencies arrive in W1's one lockfile change, which redeploys the engine and the api (ADR 0012).
 - The palette and the mark are placeholders for a brand that isn't decided; a rebrand edits the tokens, the mark and
   `src/brand.ts`, not the screens.
-- Follow-ups: a bottom tab bar and a sidebar once there are three to five top-level pages; an in-app theme toggle if
-  a place to store the choice is agreed; a PWA manifest and icons once the name is chosen.
+- Follow-ups: a bottom tab bar and a sidebar once there are three to five top-level pages; a PWA manifest and icons once the name is chosen.

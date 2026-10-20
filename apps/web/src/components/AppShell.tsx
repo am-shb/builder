@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { PRODUCT_NAME } from "../brand.ts";
 import { cn } from "../lib/cn.ts";
+import { ColorModeMenu } from "./ColorModeMenu.tsx";
 import { Mark } from "./Mark.tsx";
 
-// The frame of every signed-in page: the top bar (the mark and wordmark, then the org switcher and account slots),
+// The frame of every signed-in page: the top bar (the mark and wordmark, then the org switcher, the color mode and the
+// account slots),
 // the faint dot texture, the content, and on phones an optional sticky action bar above the safe area.
 export function AppShell({ org, account, actionBar, homeLink = plainHomeLink, children }: {
   org?: ReactNode;
@@ -32,7 +34,7 @@ export function AppShell({ org, account, actionBar, homeLink = plainHomeLink, ch
               </>
             ),
           })}
-          {(org || account) && <div className="flex items-center gap-1">{org}{account}</div>}
+          <div className="flex min-w-0 items-center gap-1">{org}<ColorModeMenu />{account}</div>
         </div>
       </header>
       <main id="main" className="mx-auto max-w-[1180px] px-5 pt-4 md:px-10 md:pt-9">

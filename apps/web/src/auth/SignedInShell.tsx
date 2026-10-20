@@ -9,7 +9,7 @@ import { RoleLabel } from "./RoleLabel.tsx";
 export function SignedInShell({ actionBar, children }: { actionBar?: ReactNode; children: ReactNode }) {
   return (
     <AppShell
-      org={<><LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" /></LabelInName><RoleLabel /></>}
+      org={<><LabelInName><OrganizationSwitcher hidePersonal afterCreateOrganizationUrl="/" appearance={SWITCHER_APPEARANCE} /></LabelInName><RoleLabel /></>}
       account={<UserButton />}
       actionBar={actionBar}
       homeLink={({ className, children: mark }) => <Link to="/" className={className}>{mark}</Link>}
@@ -18,6 +18,11 @@ export function SignedInShell({ actionBar, children }: { actionBar?: ReactNode; 
     </AppShell>
   );
 }
+
+// The switcher's root box has min-width: auto, which would stop it shrinking in the header; for this component only, so
+// Clerk's sign-in and sign-up cards keep their width. The real-browser header check (fit at 320 to 1280px, equal
+// margins) is what catches a Clerk update that moves this.
+const SWITCHER_APPEARANCE = { elements: { rootBox: "min-w-0" } };
 
 // Clerk's org switcher shows the org's name but labels its button "Open organization switcher", so a voice-control user
 // who says the name they see can't reach it (WCAG 2.5.3, label in name). Clerk's appearance options can't set ARIA, so
@@ -39,5 +44,7 @@ function LabelInName({ children }: { children: ReactNode }) {
     observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-label"] });
     return () => observer.disconnect();
   }, []);
-  return <span ref={box} className="contents">{children}</span>;
+  // A flex item that may shrink (and Clerk's root box inside it: SWITCHER_APPEARANCE), so on a narrow phone the org name
+  // is cut short with an ellipsis instead of pushing the color mode and account buttons off screen.
+  return <span ref={box} className="flex min-w-0">{children}</span>;
 }

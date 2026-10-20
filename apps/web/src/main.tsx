@@ -5,8 +5,10 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { PRODUCT_NAME } from "./brand.ts";
+import { initColorMode } from "./lib/color-mode.ts";
 
 document.title = PRODUCT_NAME;
+initColorMode();
 
 // /_design shows the design system, in the dev server only. In a production build `import.meta.env.DEV` is false, so
 // this branch and the page's code are left out (scripts/check-dist.ts checks that).

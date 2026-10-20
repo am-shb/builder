@@ -16,12 +16,14 @@ import { SessionList, SessionRow, SessionRowSkeleton } from "../components/Sessi
 import { STATUS_LABELS, StatusPill } from "../components/StatusPill.tsx";
 import { TextField } from "../components/TextField.tsx";
 import { Toaster, toast } from "../components/Toaster.tsx";
+import { setColorMode } from "../lib/color-mode.ts";
 import { AccountPlaceholder, OrgPlaceholder, StartFormPreview } from "./DesignChrome.tsx";
 
 const q = new URLSearchParams(location.search);
 // Set before the first paint, so the forced mode never flashes the other one.
+// Through the color mode store, so the header's menu shows it too; not remembered for the app.
 const forced = q.get("theme");
-if (forced === "light" || forced === "dark") document.documentElement.dataset.theme = forced;
+if (forced === "light" || forced === "dark") setColorMode(forced, { remember: false });
 
 const SESSIONS = [
   { code: "kfp-qzwd-nre", status: "in_meeting", platform: "meet", platformLabel: "Google Meet", when: "12 min ago" },
