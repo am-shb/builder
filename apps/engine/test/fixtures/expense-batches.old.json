@@ -1,0 +1,495 @@
+[
+ {
+  "label": "Added: Overview header",
+  "by": "Sara",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.title",
+     "type": "Heading",
+     "props": [
+      {
+       "key": "text",
+       "value": "Overview"
+      },
+      {
+       "key": "level",
+       "value": 1
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.sub",
+     "type": "Text",
+     "props": [
+      {
+       "key": "text",
+       "value": "October · Design team"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.add-expense",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Add expense"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: spending stats",
+  "by": "Sara",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.stats",
+     "type": "Stack",
+     "props": [
+      {
+       "key": "direction",
+       "value": "row"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-spent",
+     "type": "Card",
+     "props": [
+      {
+       "key": "title",
+       "value": "Spent"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-spent",
+    "node": {
+     "id": "home.stat-spent-value",
+     "type": "Text",
+     "props": [
+      {
+       "key": "text",
+       "value": "$12,480"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-spent",
+    "node": {
+     "id": "home.stat-spent-delta",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "▲ 12% vs Sep"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-budget",
+     "type": "Card",
+     "props": [
+      {
+       "key": "title",
+       "value": "Budget left"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-budget",
+    "node": {
+     "id": "home.stat-budget-value",
+     "type": "Text",
+     "props": [
+      {
+       "key": "text",
+       "value": "$7,520"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-budget",
+    "node": {
+     "id": "home.stat-budget-delta",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "38% left"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stats",
+    "node": {
+     "id": "home.stat-waiting",
+     "type": "Card",
+     "props": [
+      {
+       "key": "title",
+       "value": "Waiting approval"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-waiting",
+    "node": {
+     "id": "home.stat-waiting-value",
+     "type": "Text",
+     "props": [
+      {
+       "key": "text",
+       "value": "7"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.stat-waiting",
+    "node": {
+     "id": "home.stat-waiting-delta",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "3 overdue"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: spending by month",
+  "by": "Sara",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.chart",
+     "type": "ChartPlaceholder",
+     "props": [
+      {
+       "key": "label",
+       "value": "Spending by month: May to Oct, bars rising to $12,480"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: recent expenses",
+  "by": "Sara",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.recent",
+     "type": "Card",
+     "props": [
+      {
+       "key": "title",
+       "value": "Recent"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent",
+    "node": {
+     "id": "home.recent-list",
+     "type": "List",
+     "props": [],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-list",
+    "node": {
+     "id": "home.recent-1",
+     "type": "ListItem",
+     "props": [
+      {
+       "key": "text",
+       "value": "Sara K. · Figma seats · $420"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-1",
+    "node": {
+     "id": "home.recent-1-status",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "Approved"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-list",
+    "node": {
+     "id": "home.recent-2",
+     "type": "ListItem",
+     "props": [
+      {
+       "key": "text",
+       "value": "Dev P. · Offsite lunch · $310"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-2",
+    "node": {
+     "id": "home.recent-2-status",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "Pending"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-list",
+    "node": {
+     "id": "home.recent-3",
+     "type": "ListItem",
+     "props": [
+      {
+       "key": "text",
+       "value": "Mia L. · Conference pass · $950"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.recent-3",
+    "node": {
+     "id": "home.recent-3-status",
+     "type": "Badge",
+     "props": [
+      {
+       "key": "text",
+       "value": "Overdue"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   }
+  ]
+ },
+ {
+  "label": "Added: navigation and search",
+  "by": "Sara",
+  "ops": [
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.nav",
+     "type": "NavBar",
+     "props": [
+      {
+       "key": "title",
+       "value": "Ledger"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.nav",
+    "node": {
+     "id": "home.nav-overview",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Overview"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.nav",
+    "node": {
+     "id": "home.nav-expenses",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Expenses"
+      },
+      {
+       "key": "variant",
+       "value": "secondary"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.nav",
+    "node": {
+     "id": "home.nav-team",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Team"
+      },
+      {
+       "key": "variant",
+       "value": "secondary"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home.nav",
+    "node": {
+     "id": "home.nav-settings",
+     "type": "Button",
+     "props": [
+      {
+       "key": "label",
+       "value": "Settings"
+      },
+      {
+       "key": "variant",
+       "value": "secondary"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   },
+   {
+    "op": "add",
+    "parentId": "home",
+    "node": {
+     "id": "home.search",
+     "type": "Input",
+     "props": [
+      {
+       "key": "label",
+       "value": "Search"
+      },
+      {
+       "key": "placeholder",
+       "value": "Search expenses"
+      }
+     ],
+     "status": "draft",
+     "decisionId": "d1"
+    }
+   }
+  ]
+ }
+]

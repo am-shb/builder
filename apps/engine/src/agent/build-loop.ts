@@ -5,15 +5,15 @@
 // Also promotes pending decisions after 30 s without objection. When the call ends,
 // end() stops all of it, so the consensus and the handoff are final (spec §14).
 // Logs ids, counts and durations only: never transcript text, prompts or model output.
-import { readFileSync } from "node:fs";
 import { withCostRecording } from "./cost.ts";
+import { buildSystemPrompt } from "./prompt-catalog.ts";
 import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
-import type { PatchBatch, Prototype, UiNode } from "../ui/schema.ts";
-import { findNode, fromToolBatch } from "../ui/tree.ts";
+import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
+import { findNode, fromToolBatch, themeStatusOp } from "../ui/tree.ts";
 import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
 import { buildComparisonView } from "../session/runtime.ts";
@@ -21,6 +21,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 import { errorCode } from "../error-code.ts";
+import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
 
 export const RUN_FLOOR_MS = 3_000;
 export const TICK_MS = 1_000;
@@ -29,7 +30,8 @@ export const TASK_DONE_MS = 3_000;
 const TASK_MAX = 40;
 const LABEL_MAX = 60;
 
-const SYSTEM = readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8");
+// Built once at module load, so the text is identical on every call and the prompt cache hits.
+const SYSTEM = buildSystemPrompt();
 
 export type Timers = {
   setTimeout(fn: () => void, ms: number): unknown;
@@ -119,6 +121,16 @@ function mergeHandoffs(a: Handoff, b: Handoff): Handoff {
   return merged;
 }
 
+// The theme as one line: each slot's value, status and decision, or the house default.
+function themeLine(proto: Prototype): string {
+  if (!proto.theme) return `theme: house default (${THEME_SLOTS.map((s) => `${s}=${DEFAULT_THEME_VALUES[s]}`).join(", ")}), all agreed`;
+  const theme = proto.theme;
+  return `theme: ${THEME_SLOTS.map((s) => {
+    const slot = theme[s];
+    return `${s}=${slot.value} (${[slot.status, ...(slot.decisionId ? [slot.decisionId] : [])].join(", ")})`;
+  }).join("; ")}`;
+}
+
 function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto: Prototype): string {
   const lines = grounding.map((e) => `[${e.id}] ${e.speaker ?? "Unknown"}: ${e.text ?? ""}`).join("\n");
   return [
@@ -126,7 +138,7 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
     `<handoff>\n${JSON.stringify(h)}\n</handoff>`,
     `<grounding_lines>\n${lines}\n</grounding_lines>`,
     `<consensus_doc>\n${JSON.stringify(doc)}\n</consensus_doc>`,
-    `<prototype current_screen="${proto.currentScreen}">\n${JSON.stringify(proto.root)}\n</prototype>`,
+    `<prototype current_screen="${proto.currentScreen}">\n${themeLine(proto)}\n${JSON.stringify(proto.root)}\n</prototype>`,
   ].join("\n\n");
 }
 
@@ -140,7 +152,7 @@ function touchedIds(batch: PatchBatch): string[] {
   return [...new Set(ids)];
 }
 
-const batchLabel = (prefix: "Agreed" | "Reopened", text: string) => {
+const batchLabel = (prefix: "Agreed" | "Reopened" | "Reverted", text: string) => {
   const full = `${prefix}: ${text}`;
   return full.length <= LABEL_MAX ? full : `${full.slice(0, LABEL_MAX - 1)}…`;
 };
@@ -187,8 +199,9 @@ export function createBuildLoop(deps: {
 
   // Sets a decision's nodes (those it affects, then those drawn with its id) to one status in one
   // batch, skipping ids that no longer exist and nodes already in that state. Reopening leaves a
-  // node that another decision has agreed since. The only code path that marks nodes agreed:
-  // model batches are sanitised to draft.
+  // node that another decision has agreed since. Agreeing also agrees the theme slots it set, in the
+  // same batch. The only code path that marks nodes or theme slots agreed: model batches are
+  // sanitised to draft.
   function flipNodes(sessionId: string, rt: SessionRuntime, d: Decision, status: "agreed" | "draft") {
     const proto = view(rt).proto;
     const drawn: string[] = [];
@@ -201,12 +214,24 @@ export function createBuildLoop(deps: {
       ? n.status !== "agreed" || n.decisionId !== d.id
       : n.status === "agreed" && (n.decisionId === undefined || n.decisionId === d.id));
     const ids = [...new Set([...d.affects, ...drawn])].filter((id) => flips(findNode(proto, id)));
-    if (!ids.length) return;
-    const r = rt.applyBatch({
-      label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text),
-      ops: ids.map((id) => ({ op: "update", id, status, decisionId: d.id })),
-    });
-    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ids.length });
+    const ops: PatchOp[] = ids.map((id) => ({ op: "update", id, status, decisionId: d.id }));
+    const theme = status === "agreed" ? themeStatusOp(proto, d.id, "agreed") : null;
+    if (theme) ops.push(theme);
+    if (!ops.length) return;
+    const r = rt.applyBatch({ label: batchLabel(status === "agreed" ? "Agreed" : "Reopened", d.text), ops });
+    if (!r.ok) log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status, ops: ops.length });
+  }
+
+  // Puts the theme slots a decision set back to their last agreed value, in their own batch. Only a
+  // decision left in draft: one backed again in the same run (pending) keeps its theme up. The slot
+  // remembers what was taken off, so agreeing the decision later puts it back.
+  function revertTheme(sessionId: string, rt: SessionRuntime, d: Decision | undefined) {
+    if (!d || d.status !== "draft") return;
+    const op = themeStatusOp(view(rt).proto, d.id, "revert");
+    if (!op) return;
+    const r = rt.applyBatch({ label: batchLabel("Reverted", d.text), ops: [op] });
+    if (r.ok) log("build.theme_reverted", { session_id: sessionId, decision_id: d.id });
+    else log("build.flip_rejected", { session_id: sessionId, decision_id: d.id, status: "revert", ops: 1 });
   }
 
   function promote(sessionId: string, rt: SessionRuntime, ids: string[], via: "support" | "timeout" | "conflict") {
@@ -369,10 +394,17 @@ export function createBuildLoop(deps: {
 
   // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
   // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
+  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses).
   function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
     const credit = groundCredit(input, speakers);
     const snap = view(rt);
-    return { batch: sanitizeModelBatch(fromToolBatch(credit.batch), snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped };
+    const { batch, dropped } = fromToolBatch(credit.batch, {}, snap.proto);
+    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped };
+  }
+
+  // Ids and counts only: never the props themselves.
+  function logPropsDropped(sessionId: string, count: number, source?: "conflict") {
+    if (count > 0) log("build.props_dropped", { session_id: sessionId, count, ...(source ? { source } : {}) });
   }
 
   type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number };
@@ -410,15 +442,16 @@ export function createBuildLoop(deps: {
     const grounded = enforceGrounding(ops, speakers);
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
-    const planned = applyConsensusOps(current, grounded.ops, clock()).doc;
+    const planned = applyConsensusOps(current, grounded.ops, clock(), view(rt).proto).doc;
     const reopening = new Set(current.decisions
       .filter((d) => d.status === "agreed" && planned.decisions.find((p) => p.id === d.id)?.status !== "agreed")
       .map((d) => d.id));
 
     // Deferred patches before the ops, so decisions and conflicts can reference the nodes they add.
     for (const input of deferred) {
-      const { batch, creditDropped } = prepareBatch(input, rt, speakers, reopening);
+      const { batch, creditDropped, propsDropped } = prepareBatch(input, rt, speakers, reopening);
       patchCounts.creditDropped += creditDropped;
+      logPropsDropped(sessionId, propsDropped);
       applyPrepared(sessionId, rt, batch, input.ops.length, patchCounts);
     }
     const counts = {
@@ -430,8 +463,9 @@ export function createBuildLoop(deps: {
     if (grounded.ops.length) {
       // Applied to the doc as it is now, so a promotion made during the run is kept.
       const before = view(rt).doc;
-      const { doc, addedConflicts } = applyConsensusOps(before, grounded.ops, clock());
+      const { doc, addedConflicts, propsDropped } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
       rt.setDoc(doc);
+      logPropsDropped(sessionId, propsDropped, "conflict");
       const wasAgreed = (id: string) => before.decisions.find((b) => b.id === id)?.status === "agreed";
       const promoted = doc.decisions.filter((d) => d.status === "agreed" && !wasAgreed(d.id)).map((d) => d.id);
       counts.promoted = promoted.length;
@@ -442,6 +476,12 @@ export function createBuildLoop(deps: {
       for (const d of reopened) {
         flipNodes(sessionId, rt, d, "draft");
         log("build.reopened", { session_id: sessionId, decision_id: d.id });
+      }
+      // An objection takes a theme back to its last agreed value, whether the decision was a draft or
+      // agreed (spec 4.4), unless the same run backed it again. The system does this from the stored
+      // value, not the model.
+      for (const id of new Set(grounded.ops.flatMap((op) => (op.op === "object" ? [op.decisionId] : [])))) {
+        revertTheme(sessionId, rt, doc.decisions.find((d) => d.id === id));
       }
       // One comparison on screen at a time (known issue M1): a new conflict shows only when none is
       // shown. The others wait in the doc, and the runtime shows the next when the one shown resolves.
@@ -526,12 +566,13 @@ export function createBuildLoop(deps: {
           }
           // A batch this run's reopenings could change (it removes an agreed node) waits for them.
           const agreedIds = new Set(view(live).doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
-          const { batch, creditDropped } = prepareBatch(parsed.data, live, speakers, new Set());
+          const { batch, creditDropped, propsDropped } = prepareBatch(parsed.data, live, speakers, new Set());
           if (batch.ops.length !== prepareBatch(parsed.data, live, speakers, agreedIds).batch.ops.length) {
             deferred.push(parsed.data);
             return;
           }
           patchCounts.creditDropped += creditDropped;
+          logPropsDropped(sessionId, propsDropped);
           if (!applyPrepared(sessionId, live, batch, parsed.data.ops.length, patchCounts)) return;
           lastPatchMs = clock() - startedAt;
           firstPatchMs ??= lastPatchMs;

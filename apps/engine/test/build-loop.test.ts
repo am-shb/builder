@@ -7,9 +7,10 @@ import { createFakePort } from "../src/agent/llm.ts";
 import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../src/agent/llm.ts";
 import { createBuildLoop, taskText, TASK_DONE_MS } from "../src/agent/build-loop.ts";
 import { toolJsonSchema } from "../src/agent/tool-schema.ts";
-import { enforceGrounding, HandoffSchema } from "../src/agent/handoff.ts";
+import { enforceGrounding, HandoffSchema, sanitizeModelBatch } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
-import { findNode } from "../src/ui/tree.ts";
+import { applyBatch, emptyPrototype, findNode, fromToolBatch } from "../src/ui/tree.ts";
+import { emptyDoc } from "../src/consensus/doc.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
@@ -100,7 +101,7 @@ const patches = (label: string, ops: unknown[], by?: string): ToolCall => ({ nam
 const consensus = (ops: unknown[]): ToolCall => ({ name: "update_consensus", input: { ops } });
 const addNode = (parentId: string, id: string, type: string, props: [string, unknown][] = [], decisionId?: string) => ({
   op: "add", parentId,
-  node: { id, type, props: props.map(([key, value]) => ({ key, value })), status: "draft", ...(decisionId ? { decisionId } : {}) },
+  node: { id, type, props: props.map(([key, value]) => ({ key, value })), ...(decisionId ? { decisionId } : {}) },
 });
 
 const QUICK_ADD = [
@@ -468,38 +469,312 @@ test("ungrounded resolvedChoice is ignored", async () => {
 
 test("model batch cannot mark nodes agreed", async () => {
   const s = await setup([[
+    // The tool format has no status: a batch or a variant that sends one is rejected whole.
     patches("Added: quick-add", [
       { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Input", props: [], status: "agreed", decisionId: "d-quick-add" } },
-      { op: "add", parentId: "home", node: { id: "home.title", type: "Heading", props: [{ key: "text", value: "Tasks" }], status: "agreed" } },
     ]),
     patches("Settled: title", [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
+    consensus([{ op: "add_conflict", id: "c-y", topic: "Toggle", variants: [
+      conflictVariant("A", "Toggle", ["Amir"], [{ op: "add", parentId: "home", node: { id: "home.show-done", type: "Toggle", props: [], status: "agreed" } }]),
+      conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]),
+    ] }]),
+    patches("Added: title", [addNode("home", "home.title", "Heading", [["text", "Tasks"]], "d-quick-add")]),
     consensus([
-      { op: "add_decision", id: "d-quick-add", text: "Quick-add", proposedBy: "Amir", affects: ["home.quick-add"] },
+      { op: "add_decision", id: "d-quick-add", text: "Quick-add", proposedBy: "Amir", affects: ["home.title"] },
       { op: "add_conflict", id: "c-x", topic: "Where done tasks go", variants: [
-        conflictVariant("A", "Toggle", ["Amir"], [
-          { op: "add", parentId: "home", node: { id: "home.show-done", type: "Toggle", props: [], status: "agreed" } },
-        ]),
-        conflictVariant("B", "Agree the heading", ["Sara"], [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
+        conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]),
+        conflictVariant("B", "Rename the heading", ["Sara"], [{ op: "update", id: "home.title", props: [{ key: "text", value: "Today" }] }]),
       ] },
     ]),
   ]]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "quick add"), await s.say("Sara", "tabs")]));
   await flush();
-  assert.equal(findNode(s.proto(), "home.quick-add")!.status, "draft", "add is forced to draft");
-  assert.equal(findNode(s.proto(), "home.quick-add")!.decisionId, "d-quick-add", "a draft keeps its decision id");
+  assert.equal(findNode(s.proto(), "home.quick-add"), undefined, "a batch with a status is rejected");
   const title = findNode(s.proto(), "home.title")!;
-  assert.equal(title.status, "draft", "update to agreed is dropped");
-  assert.equal(title.decisionId, undefined, "decisionId of a non-agreed decision is dropped with it");
+  assert.deepEqual([title.status, title.decisionId], ["draft", "d-quick-add"], "added nodes are drafts and keep their decision id");
   assert.equal(s.doc().decisions[0].status, "draft");
+  const run = s.logs.find((l) => l.msg === "build.run")!;
+  assert.equal(run.fields?.patches_rejected, 2);
+  assert.equal(run.fields?.consensus_invalid, 1, "the call whose variant sent a status is rejected");
 
+  assert.deepEqual(s.doc().conflicts.map((c) => c.id), ["c-x"]);
   const variants = s.doc().conflicts[0].variants;
   const addOp = variants[0].batch.ops[0] as { op: "add"; node: { status: string } };
   assert.equal(addOp.node.status, "draft", "stored variant adds are draft");
   assert.equal(variants[1].batch.ops.some((o) => o.op === "update" && o.status === "agreed"), false, "stored variant updates cannot agree");
   const view = s.sent.find((e): e is Extract<StageEvent, { type: "comparison" }> => e.type === "comparison");
-  for (const v of view?.view?.variants ?? []) {
+  assert.ok(view?.view);
+  for (const v of view.view.variants) {
     assert.equal(JSON.stringify(v.proto).includes('"agreed"'), false, "no agreed node in any preview");
   }
+});
+
+// ---- theme ops in model batches (Review Focus 3) ----
+
+function agreedGold() {
+  const r1 = applyBatch(emptyPrototype("X"), { label: "t", ops: [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }] });
+  assert.ok(r1.ok);
+  const r2 = applyBatch(r1.proto, { label: "t", ops: [{ op: "theme_status", decisionId: "d1", to: "agreed" }] });
+  assert.ok(r2.ok);
+  return r2.proto;
+}
+
+test("drop_theme on an agreed slot is dropped unless reopened", () => {
+  const proto = agreedGold();
+  const doc = emptyDoc();
+  const batch = { label: "Dropped: gold", ops: [{ op: "theme_status" as const, decisionId: "d1", to: "revert" as const }] };
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto, reopened: new Set() }).ops, [], "an agreed theme stays");
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto, reopened: new Set(["d1"]) }).ops, batch.ops, "kept when the run reopens it");
+
+  const draft = applyBatch(emptyPrototype("X"), { label: "t", ops: [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }] });
+  assert.ok(draft.ok);
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto: draft.proto, reopened: new Set() }).ops, batch.ops, "a draft theme may be dropped");
+  assert.deepEqual(sanitizeModelBatch(batch, doc).ops, [], "variants never revert");
+});
+
+test("a model batch cannot send theme_status agreed", () => {
+  const draft = applyBatch(emptyPrototype("X"), { label: "t", ops: [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d1" }] });
+  assert.ok(draft.ok);
+  const doc = emptyDoc();
+  const setTheme = { op: "set_theme" as const, values: { accent: "green" }, decisionId: "d2" };
+  const batch = { label: "x", ops: [{ op: "theme_status" as const, decisionId: "d1", to: "agreed" as const }, setTheme] };
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto: draft.proto, reopened: new Set(["d1"]) }).ops, [setTheme]);
+  assert.deepEqual(sanitizeModelBatch(batch, doc).ops, [setTheme]);
+});
+
+test("a set_theme slot already at its current value is dropped, so previous stays right", () => {
+  const proto = agreedGold();
+  const doc = emptyDoc();
+  const same = { label: "x", ops: [{ op: "set_theme" as const, values: { accent: "gold" }, decisionId: "d1" }] };
+  assert.deepEqual(sanitizeModelBatch(same, doc, { proto, reopened: new Set() }).ops, [], "nothing left to set");
+  const mixed = { label: "x", ops: [{ op: "set_theme" as const, values: { accent: "gold", radius: "round" }, decisionId: "d1" }] };
+  assert.deepEqual(sanitizeModelBatch(mixed, doc, { proto, reopened: new Set() }).ops,
+    [{ op: "set_theme", values: { radius: "round" }, decisionId: "d1" }]);
+  const r = applyBatch(proto, sanitizeModelBatch(mixed, doc, { proto, reopened: new Set() }));
+  assert.ok(r.ok);
+  assert.deepEqual(r.proto.theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+  assert.deepEqual(sanitizeModelBatch(same, doc).ops, same.ops, "variants are not compared with the current theme");
+});
+
+test("an update whose props all drop leaves an agreed node alone (known issue I2)", () => {
+  const added = applyBatch(emptyPrototype("X"), { label: "t", ops: [
+    { op: "add", parentId: "home", node: { id: "b", type: "Button", props: { label: "Go" }, status: "agreed", decisionId: "d1", children: [] } },
+  ] });
+  assert.ok(added.ok);
+  const { batch, dropped } = fromToolBatch({ label: "x", decisionId: "d9", ops: [
+    { op: "update", id: "b", props: [{ key: "color", value: "#f00" }] },
+  ] }, {}, added.proto);
+  assert.equal(dropped, 1);
+  const doc = { ...emptyDoc(), decisions: [{ id: "d1", text: "Go button", status: "agreed" as const, proposedBy: "Amir", agreedBy: ["Sara"], affects: ["b"], rejectedOptions: [] }] };
+  assert.deepEqual(sanitizeModelBatch(batch, doc, { proto: added.proto, reopened: new Set() }).ops, []);
+});
+
+test("a variant update whose props all drop does not retag the node", async () => {
+  const s = await setup([[
+    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    consensus([{ op: "add_conflict", id: "c1", topic: "Heading", variants: [
+      conflictVariant("A", "Red", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "color", value: "red" }] }]),
+      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Toggle")]),
+    ] }]),
+  ]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "red"), await s.say("Sara", "toggle")]));
+  await flush();
+  const [a, b] = s.doc().conflicts[0].variants;
+  assert.deepEqual(a.batch.ops, [], "nothing left to do, so nothing to retag");
+  assert.equal(b.batch.ops.length, 1);
+});
+
+test("conflict variants default to d-<conflictId>", async () => {
+  const s = await setup([[consensus([{
+    op: "add_conflict", id: "c1", topic: "Accent",
+    variants: [
+      conflictVariant("A", "Gold", ["Amir"], [{ op: "set_theme", accent: "gold" }]),
+      { ...conflictVariant("B", "Green", ["Sara"], [{ op: "set_theme", accent: "green" }]), batch: { label: "Option B", decisionId: "d-own", ops: [{ op: "set_theme", accent: "green" }] } },
+    ],
+  }])]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "gold"), await s.say("Sara", "green")]));
+  await flush();
+  const [a, b] = s.doc().conflicts[0].variants;
+  assert.deepEqual(a.batch.ops, [{ op: "set_theme", values: { accent: "gold" }, decisionId: "d-c1" }]);
+  assert.deepEqual(b.batch.ops, [{ op: "set_theme", values: { accent: "green" }, decisionId: "d-c1" }], "a variant's own decisionId is ignored");
+});
+
+test("resolving a theme conflict agrees the slot under d-<conflictId>", async () => {
+  const s = await setup([[consensus([{
+    op: "add_conflict", id: "c1", topic: "Accent",
+    variants: [
+      conflictVariant("A", "Gold", ["Amir"], [{ op: "set_theme", accent: "gold" }]),
+      { ...conflictVariant("B", "Green", ["Sara"], []), batch: { label: "Option B", decisionId: "d-own", ops: [{ op: "set_theme", accent: "green" }] } },
+    ],
+  }])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "gold"), await s.say("Sara", "green")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "fine, green")], {
+    topics: [{ title: "Accent", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }],
+  }));
+  await flush();
+  assert.equal(s.doc().decisions.find((d) => d.id === "d-c1")!.status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "green", status: "agreed", decisionId: "d-c1", previous: "slate" });
+});
+
+test("props the catalog does not know are dropped and counted, never logged", async () => {
+  const s = await setup([[
+    patches("Added: button", [addNode("home", "home.go", "Button", [["label", "Go"], ["color", "#f00"], ["variant", "neon"]])]),
+    consensus([{ op: "add_conflict", id: "c1", topic: "Button", variants: [
+      conflictVariant("A", "Big", ["Amir"], [addNode("home", "home.big", "Button", [["label", "Big"], ["px", 40]])]),
+      conflictVariant("B", "Small", ["Sara"], [addNode("home", "home.small", "Button", [["label", "Small"]])]),
+    ] }]),
+  ]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a button"), await s.say("Sara", "small")]));
+  await flush();
+  assert.deepEqual(findNode(s.proto(), "home.go")!.props, { label: "Go" });
+  const dropped = s.logs.filter((l) => l.msg === "build.props_dropped");
+  assert.deepEqual(dropped.map((l) => l.fields), [
+    { session_id: s.sessionId, count: 2 },
+    { session_id: s.sessionId, count: 1, source: "conflict" },
+  ]);
+});
+
+// A theme proposal as the model sends it: one set_theme op under the batch's decisionId.
+const themeBatch = (decisionId: string, accent: string, by = "Amir"): ToolCall =>
+  ({ name: "apply_patches", input: { label: `Proposed: ${accent} accent`, by, decisionId, ops: [{ op: "set_theme", accent }] } });
+const themeDecision = (id: string, accent: string, ...more: unknown[]) => consensus([
+  { op: "add_decision", id, text: `${accent[0].toUpperCase()}${accent.slice(1)} accent`, proposedBy: "Amir", affects: [] },
+  { op: "mark_pending", decisionId: id },
+  ...more,
+]);
+
+test("agreeing a theme decision flips its slots", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold", { op: "support", decisionId: "d1", speaker: "Sara" })]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold"), await s.say("Sara", "yes, gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+  const flips = s.patches().filter((p) => p.changes[0]?.label === "Agreed: Gold accent");
+  assert.equal(flips.length, 1, "one batch");
+  assert.deepEqual(flips[0].changes.map((c) => [c.kind, c.id]), [["theme", "app"]]);
+});
+
+test("the 30 s timeout agrees a pending theme", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold")]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.equal(s.proto().theme!.accent.status, "draft");
+  await s.timers.advance(30_000);
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+});
+
+test("an objection reverts a draft theme", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.equal(s.proto().theme!.accent.value, "gold");
+  await s.timers.advance(10_000);
+  const before = s.patches().length;
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "no, not gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "draft");
+  assert.deepEqual(s.proto().theme!.accent, { value: "slate", status: "agreed", previous: "slate", reverted: { value: "gold", decisionId: "d1" } });
+  const reverts = s.patches().slice(before).filter((p) => p.changes.some((c) => c.kind === "theme"));
+  assert.equal(reverts.length, 1);
+  assert.equal(reverts[0].changes[0].label, "Reverted: Gold accent");
+  assert.ok(s.logs.some((l) => l.msg === "build.theme_reverted" && l.fields?.decision_id === "d1" && l.fields?.session_id === s.sessionId));
+  await s.timers.advance(30_000);
+  assert.equal(s.proto().theme!.accent.value, "slate", "the timeout does not bring it back");
+});
+
+test("an objection to an agreed theme reverts to the theme before it", async () => {
+  const s = await setup([
+    [themeBatch("d0", "blue"), themeDecision("d0", "blue", { op: "support", decisionId: "d0", speaker: "Sara" })],
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold", { op: "support", decisionId: "d1", speaker: "Sara" })],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "blue"), await s.say("Sara", "yes")]));
+  await flush();
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "actually gold"), await s.say("Sara", "yes")]));
+  await flush();
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "blue" });
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "I preferred blue")]));
+  await flush();
+  assert.equal(s.doc().decisions.find((d) => d.id === "d1")!.status, "draft");
+  assert.deepEqual(s.proto().theme!.accent, { value: "blue", status: "agreed", previous: "blue", reverted: { value: "gold", decisionId: "d1" } });
+});
+
+test("an objection and renewed support in one hand-off leave the theme up; once agreed it stays gold", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [themeBatch("d1", "gold"), consensus([
+      { op: "object", decisionId: "d1", speaker: "Lee" },
+      { op: "support", decisionId: "d1", speaker: "Sara" },
+    ])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "not gold"), await s.say("Sara", "I like gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "draft", decisionId: "d1", previous: "slate" });
+  assert.ok(!s.logs.some((l) => l.msg === "build.theme_reverted"));
+  await s.timers.advance(30_000);
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+});
+
+test("a theme reverted by an objection comes back when its decision is agreed in a later turn", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+    [consensus([{ op: "support", decisionId: "d1", speaker: "Sara" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "not gold")]));
+  await flush();
+  assert.equal(s.proto().theme!.accent.value, "slate");
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Sara", "I'd still go gold")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  assert.equal(s.proto().theme!.accent.value, "slate", "not shown again until agreed");
+  await s.timers.advance(30_000);
+  assert.equal(s.doc().decisions[0].status, "agreed");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "agreed", decisionId: "d1", previous: "slate" });
+});
+
+test("the model sees the theme in the prototype block", async () => {
+  const s = await setup([[themeBatch("d1", "gold"), themeDecision("d1", "gold")], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  assert.match(s.userText(0), /theme: house default/);
+  await s.timers.advance(5_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "and add tasks")]));
+  await flush();
+  const text = s.userText(1);
+  const block = text.slice(text.indexOf("<prototype"), text.indexOf("</prototype>"));
+  assert.ok(block.includes("theme: accent=gold (draft, d1); warmth=neutral (agreed); radius=soft (agreed); density=regular (agreed)"));
+});
+
+test("an ungrounded objection does not revert", async () => {
+  const s = await setup([
+    [themeBatch("d1", "gold"), themeDecision("d1", "gold")],
+    [consensus([{ op: "object", decisionId: "d1", speaker: "Lee" }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "let's make it gold")]));
+  await flush();
+  await s.timers.advance(10_000);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "gold it is")]));
+  await flush();
+  assert.equal(s.doc().decisions[0].status, "pending");
+  assert.deepEqual(s.proto().theme!.accent, { value: "gold", status: "draft", decisionId: "d1", previous: "slate" });
+  assert.ok(!s.logs.some((l) => l.msg === "build.theme_reverted"));
 });
 
 test("objection to an agreed decision returns its nodes to draft", async () => {
@@ -874,7 +1149,7 @@ test("a model change to an agreed node sends it back to draft until a decision c
       patches("Changed: placeholder", [
         { op: "update", id: "home.quick-add", props: [{ key: "placeholder", value: "New task" }], decisionId: "d-placeholder" },
         // Changes nothing, so it is dropped: an update cannot demote an agreed node by itself.
-        { op: "update", id: "home.quick-add-btn", props: [{ key: "label", value: "Add" }], status: "draft" },
+        { op: "update", id: "home.quick-add-btn", props: [{ key: "label", value: "Add" }] },
       ], "Lee"),
       consensus([
         { op: "add_decision", id: "d-placeholder", text: "Say 'New task'", proposedBy: "Lee", affects: [] },
@@ -915,7 +1190,7 @@ test("a model remove of an agreed node, or of anything holding one, is dropped u
   const s = await setup([
     [
       ...AGREE_QUICK_ADD,
-      patches("Added: note", [addNode("home", "home.box", "Stack"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
+      patches("Added: note", [addNode("home", "home.box", "Section"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
       consensus([
         { op: "add_decision", id: "d-note", text: "A due note", proposedBy: "Amir", affects: ["home.box.note"] },
         { op: "mark_pending", decisionId: "d-note" },

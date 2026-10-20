@@ -1,6 +1,7 @@
 // Motion with meaning for the keyed reconcile: added nodes grow in, removed nodes collapse,
 // nodes whose layout shifted glide there (FLIP), prop edits cross-fade, a screen change
-// slides, and a draft that becomes agreed gets a short "settled" outline morph.
+// slides, and a draft that becomes agreed gets a short "settled" outline morph. A re-theme fades
+// a copy of the old canvas out over the new one; an agreed theme gets a settle frame round the canvas.
 // Only transform and opacity animate; every animation is stepped by the shared 15 fps clock.
 import { animate, logMotion, now } from "@renderer/clock.js";
 
@@ -11,7 +12,9 @@ export const FADE_MS = 250;
 export const SCREEN_MS = 450;
 export const SETTLE_MS = 400;
 const SETTLE_HOLD_MS = 700;
+export const THEME_FADE_MS = 450;
 const MAX_FADE_CLONE = 150; // descendants; bigger subtrees skip the cross-fade copy
+const MAX_THEME_CLONE = 3000; // elements; a bigger canvas re-themes without the fade
 const EASE = "ease-out";
 
 const flips = new WeakMap(); // element -> its in-flight glide
@@ -30,7 +33,11 @@ export function rootOf(el) {
   return root;
 }
 
-/** Layout box in the root's content coordinates, ignoring transforms (so mid-animation reads are stable). */
+/**
+ * Layout box in the root's content coordinates, ignoring transforms (so mid-animation reads are stable).
+ * Containers between `el` and the root that scroll their own content (the phone's screen area) are
+ * accounted for: the box is where `el` shows, not where it would be unscrolled.
+ */
 export function layoutBox(el, root) {
   if (!el.offsetParent) return null; // display:none somewhere up the tree
   let x = 0;
@@ -47,7 +54,47 @@ export function layoutBox(el, root) {
     e = p;
   }
   if (e !== root) return null;
+  for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    if ((a.scrollTop || a.scrollLeft) && scrolls(el, a)) {
+      x -= a.scrollLeft;
+      y -= a.scrollTop;
+    }
+  }
   return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+}
+
+// Whether scrolling `a` (an ancestor of el) moves el: not when something between them is positioned
+// out of flow against a box outside `a` (a Modal inside the phone's screen area covers the phone).
+function scrolls(el, a) {
+  for (let e = el; e && e !== a; e = e.parentElement) {
+    const pos = getComputedStyle(e).position;
+    if ((pos === "absolute" || pos === "fixed") && !(e.offsetParent && a.contains(e.offsetParent))) return false;
+  }
+  return true;
+}
+
+/** The nearest container between `el` and `root` that scrolls el's content vertically (the phone's screen area), or null. */
+export function scrollerOf(el, root) {
+  for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    if (a.scrollHeight > a.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(a).overflowY) && scrolls(el, a)) return a;
+  }
+  return null;
+}
+
+/**
+ * Scrolls `scroller` (from scrollerOf) so `box` (layoutBox in root coordinates) shows inside it, `margin`
+ * clear of its edges, at once. Returns how far its content moved up (0 when the box already showed).
+ */
+export function scrollWithin(scroller, root, box, margin = 24) {
+  const s = layoutBox(scroller, root);
+  if (!s) return 0;
+  const top = s.y + scroller.clientTop;
+  const view = scroller.clientHeight;
+  if (box.y >= top + 8 && box.y + box.h <= top + view - 8) return 0;
+  const max = Math.max(0, scroller.scrollHeight - view);
+  const before = scroller.scrollTop;
+  scroller.scrollTop = Math.min(max, Math.max(0, before + box.y - top - margin));
+  return scroller.scrollTop - before;
 }
 
 /** How far above `el` its draft tag reaches (theme.css), or 0 when it shows none. */
@@ -55,6 +102,13 @@ export function tagAbove(el) {
   const tag = getComputedStyle(el, "::after");
   if (tag.content === "none" || tag.content === "normal") return 0;
   return Math.max(0, -(parseFloat(tag.top) || 0));
+}
+
+/** How much of the canvas top the app frame's sticky top bar covers (0 for a sidebar, a phone, no frame). */
+export function topInset(root) {
+  const bar = root.querySelector(".b-app-chrome");
+  if (!bar || getComputedStyle(bar).position !== "sticky" || !bar.offsetHeight) return 0;
+  return bar.offsetHeight + (parseFloat(getComputedStyle(bar).top) || 0);
 }
 
 /** Overlay layer (content coordinates of the root) for settle outlines. */
@@ -68,9 +122,14 @@ export function motionLayer(root) {
   return layer;
 }
 
+const anchors = new WeakMap(); // element -> its nearest node ancestor when its rect was captured
+
 export function captureRects(map) {
   const rects = new Map();
-  for (const [id, el] of map) rects.set(id, el.getBoundingClientRect());
+  for (const [id, el] of map) {
+    rects.set(id, el.getBoundingClientRect());
+    anchors.set(el, el.parentElement ? el.parentElement.closest("[data-node-id]") : null);
+  }
   return rects;
 }
 
@@ -155,6 +214,72 @@ export function playSettled(el) {
   logMotion({ fn: "playSettled", id: el.dataset.nodeId });
 }
 
+// Whole-canvas layers: in the container's content coordinates, so they line up with what it shows.
+function canvasRoot(container) {
+  if (getComputedStyle(container).position === "static") container.style.position = "relative";
+  return container;
+}
+
+const scrollsOf = new WeakMap(); // theme fade copy -> [element, scrollTop, scrollLeft] of what was scrolled
+
+/** A static copy of the canvas content as it looks now, for the theme fade; null when too big to copy. */
+export function snapshotCanvas(container) {
+  const content = [...container.children].filter((c) => c.dataset.nodeId);
+  if (!content.length) return null;
+  if (content.reduce((n, c) => n + 1 + c.getElementsByTagName("*").length, 0) > MAX_THEME_CLONE) return null;
+  const snap = document.createElement("div");
+  snap.className = "m-theme-fade";
+  // cloneNode drops scroll positions: note where each scrolled element (the phone's screen area) was, in
+  // step with its copy, and restore them once the copy is in the page (playThemeFade).
+  const scrolled = [];
+  for (const c of content) {
+    const copy = c.cloneNode(true);
+    const live = [c, ...c.getElementsByTagName("*")];
+    const twin = [copy, ...copy.getElementsByTagName("*")];
+    live.forEach((el, i) => {
+      if (el.scrollTop || el.scrollLeft) scrolled.push([twin[i], el.scrollTop, el.scrollLeft]);
+    });
+    snap.append(copy);
+  }
+  scrollsOf.set(snap, scrolled);
+  // A copy must never be found as the node it shows (focus, lookups, interactions).
+  for (const n of snap.querySelectorAll("[data-node-id]")) n.removeAttribute("data-node-id");
+  snap.inert = true;
+  return snap;
+}
+
+/** Lays the old canvas (from snapshotCanvas) over the re-themed one and fades it out. */
+export function playThemeFade(container, snapshot) {
+  const root = canvasRoot(container);
+  // A set height, so the copied App's min-height: 100% fills the canvas as the live one does: on a short
+  // screen the area below the content must fade too, not switch to the new background at once.
+  Object.assign(snapshot.style, {
+    left: "0px", top: "0px", width: `${root.clientWidth}px`, height: `${Math.max(root.scrollHeight, root.clientHeight)}px`,
+  });
+  root.append(snapshot);
+  for (const [el, top, left] of scrollsOf.get(snapshot) ?? []) {
+    el.scrollTop = top;
+    el.scrollLeft = left;
+  }
+  whenDone(animate(snapshot, [{ opacity: 1 }, { opacity: 0 }], { duration: THEME_FADE_MS, easing: EASE }), () => snapshot.remove());
+  logMotion({ fn: "playThemeFade" });
+}
+
+/** A theme agreed: a solid frame settles around the whole canvas, then fades (same timing as playSettled). */
+export function playThemeSettled(container) {
+  const root = canvasRoot(container);
+  const frame = document.createElement("div");
+  frame.className = "m-theme-settle";
+  Object.assign(frame.style, {
+    left: `${root.scrollLeft}px`, top: `${root.scrollTop}px`, width: `${root.clientWidth}px`, height: `${root.clientHeight}px`,
+  });
+  root.append(frame);
+  animate(frame, [{ opacity: 0, transform: "scale(1.02)" }, { opacity: 1, transform: "none" }], { duration: SETTLE_MS, easing: EASE });
+  const out = animate(frame, [{ opacity: 1 }, { opacity: 0 }], { duration: SETTLE_MS, delay: SETTLE_MS + SETTLE_HOLD_MS, easing: EASE });
+  whenDone(out, () => frame.remove());
+  logMotion({ fn: "playThemeSettled" });
+}
+
 function visibleScreen(entries, rects) {
   for (const [id, el] of entries) {
     if (el.dataset.type !== "Screen") continue;
@@ -200,8 +325,21 @@ export function animateReconcile(prevRects, map, changes, { removed = new Map(),
     while (anc && !removedEls.has(anc)) anc = anc.parentElement;
     if (anc) continue; // leaves inside its removed ancestor
     const rect = prevRects.get(id);
-    if (isEmpty(rect) || !el.isConnected) el.remove();
-    else ghosts.push({ el, rect, exit: true });
+    if (isEmpty(rect)) {
+      el.remove();
+      continue;
+    }
+    if (!el.isConnected || el.parentElement.getClientRects().length === 0) {
+      // Its container went or hid on this render (a templated Screen's region that emptied, or that a template
+      // change dropped): it leaves from the nearest node it was in, if that still shows.
+      const host = anchors.get(el);
+      if (!host || !host.isConnected || removedEls.has(host) || host.getClientRects().length === 0) {
+        el.remove();
+        continue;
+      }
+      host.append(el);
+    }
+    ghosts.push({ el, rect, exit: true });
   }
 
   // 3. Cross-fade copies of updated nodes, and drafts that just became agreed.

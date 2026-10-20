@@ -16,11 +16,12 @@
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test && npm run smoke",
+    "icons": "node scripts/build-icons.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
-    "@builder/contracts": "*",
     "@anthropic-ai/sdk": "^0.135.0",
+    "@builder/contracts": "*",
     "@surrealdb/node": "3.1.0",
     "@surrealdb/node-native": "3.3.2",
     "surrealdb": "2.1.1",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",
+    "lucide-static": "^1.60.0",
     "typescript": "^7.0.2"
   }
 }

@@ -13,7 +13,7 @@ export type Resolution =
 /** How long Builder looks unsure after a command it could not run. */
 export const UNSURE_MS = 3000;
 
-const TEXT_PROPS = ["label", "text", "placeholder", "title"] as const;
+const TEXT_PROPS = ["label", "text", "placeholder", "title", "name"] as const;
 // Words people add around the name of a thing ("the task box", "Settings tab") that are not part of its label.
 const FILLER = new Set(["the", "a", "an", "to", "on", "of", "please", "button", "box", "field", "input", "text", "tab", "switch", "toggle", "option", "screen", "page"]);
 
@@ -72,8 +72,9 @@ function pick(hits: Hit[], accept: (n: UiNode) => Plan | null): Plan {
 const optionLabel = (target: string) => target.trim().toLowerCase().replace(/^option\s+/, "").toUpperCase();
 
 const toggles = (n: UiNode) => n.type === "Toggle" || n.type === "Checkbox";
-const CLICKABLE = new Set(["Button", "ListItem", "Tabs"]);
+const CLICKABLE = new Set(["Button", "ListItem", "Tabs", "Segmented", "Card", "MediaCard", "ProductCard", "PricingTier"]);
 const clickable = (n: UiNode) => CLICKABLE.has(n.type) || toggles(n) || !!n.on?.click?.length;
+const TYPEABLE = new Set(["Input", "Select", "Search", "DatePicker"]);
 const plan = (nodeId: string, interactions: Interaction[]): Plan => ({ ok: true, nodeId, interactions });
 
 /** Everything a click on `n` does: its own flip for a switch, then its click handlers. */
@@ -95,7 +96,7 @@ function planCommand(proto: Prototype, ui: UiState, cmd: UiCommand, comparison: 
     case "type": {
       const value = cmd.value;
       if (value === undefined) return { ok: false, reason: "not_found" };
-      return pick(matchText(nodes.filter((n) => n.type === "Input" || n.type === "Select"), cmd.target), (n) =>
+      return pick(matchText(nodes.filter((n) => TYPEABLE.has(n.type)), cmd.target), (n) =>
         plan(n.id, [{ kind: "setValue", target: n.id, value }, ...(n.on?.change ?? [])]));
     }
     case "navigate": {

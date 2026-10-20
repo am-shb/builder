@@ -205,7 +205,8 @@ import { connectStage, connectMeetingData, meetingDataUrl } from "@renderer/clie
 import { renderTree } from "@renderer/render.js";
 import { initialUiState, reduceInteraction, bindInteractions, findNode } from "@renderer/interact.js";
 import { startClock, onFrame, animate } from "@renderer/clock.js";
-import { screenTransitionEndsAt, fadeOutInPlace, playSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
+import { screenTransitionEndsAt, fadeOutInPlace, playSettled, snapshotCanvas, playThemeFade, playThemeSettled, ENTER_MS, GLIDE_MS } from "@renderer/motion.js";
+import { themeChange } from "@renderer/theme.js";
 import { createFocusQueue, focusTargets, playFocus, showPendingRegion, animatePointer, SPOTLIGHT_MS } from "@renderer/focus.js";
 import { createCharacter } from "@renderer/character.js";
 import { renderTodo } from "@renderer/todo.js";
@@ -329,6 +330,17 @@ onFrame((now) => {
 });
 
 let commands = Promise.resolve(); // voice commands run in order, each after its pointer cue
+
+// Where a voice command's pointer goes: a Screen's nav item in the app frame when it shows one (a hidden
+// Screen has no box to point at), else the target node itself.
+function pointerTarget(nodeId) {
+  const el = nodes.get(nodeId);
+  if (el && el.dataset.type === "Screen") {
+    const item = protoEl.querySelector(`[data-nav-screen="${CSS.escape(nodeId)}"]`);
+    if (shown(item)) return item;
+  }
+  return el;
+}
 
 // ---------- Builder's voice: streamed PCM, played here; its loudness drives the mouth ----------
 const voice = createAudioPlayer();
@@ -518,7 +530,12 @@ function onEvent(ev) {
       const changes = ev.changes ?? [];
       proto = ev.proto;
       if (ui) ui = { ...ui, screen: followScreen(prevProto, changes) };
+      // A re-theme fades the old canvas out over the new one; an agreed theme settles. Not under a comparison.
+      const theme = covered ? null : themeChange(prevProto, proto);
+      const snapshot = theme === "values" ? snapshotCanvas(protoEl) : null;
       draw(covered ? undefined : changes); // under the comparison: no motion; its focus waits
+      if (snapshot) playThemeFade(protoEl, snapshot);
+      else if (theme === "settled") playThemeSettled(protoEl);
       for (const c of focusTargets(focusable(prevProto, changes), nodes)) focusQueue.enqueue(c);
       break;
     }
@@ -527,7 +544,7 @@ function onEvent(ev) {
       break;
     case "command":
       commands = commands
-        .then(() => animatePointer(nodes.get(ev.nodeId)))
+        .then(() => animatePointer(pointerTarget(ev.nodeId)))
         .then(() => {
           if (proto && ui) { ui = reduceInteraction(ui, ev.interaction, proto); draw([]); }
         })

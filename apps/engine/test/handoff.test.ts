@@ -14,7 +14,8 @@ import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
-import { buildExportHtml } from "../src/handoff/export.ts";
+import { buildExportHtml, imagesUsed, RENDERER_MODULES } from "../src/handoff/export.ts";
+import { IMAGES } from "../public/renderer/images.js";
 
 const proto: Prototype = JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
 const EVIL = `Use </script><img src=x onerror=alert(1)> everywhere`;
@@ -172,5 +173,103 @@ test("live handoff page renders the prototype and flags drafts", async (t) => {
       if (process.env.HANDOFF_SHOT) await page.screenshot(process.env.HANDOFF_SHOT);
       assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
     }, { width: 1440, height: 900 });
+  } finally { h.close(); }
+});
+
+test("the export shows the agreed theme and opens offline", async (t) => {
+  const themed: Prototype = {
+    ...proto,
+    theme: {
+      accent: { value: "gold", status: "draft", decisionId: "d1", previous: "blue" },
+      warmth: { value: "neutral", status: "agreed", previous: "neutral" },
+      radius: { value: "soft", status: "agreed", previous: "soft" },
+      density: { value: "regular", status: "agreed", previous: "regular" },
+    },
+  };
+  const html = buildExportHtml(doc, themed);
+  for (const m of RENDERER_MODULES) assert.match(html, new RegExp(`"@renderer/${m.replace(/[./]/g, "\\$&")}":"data:text/javascript;base64,`), m);
+  const dir = mkdtempSync(join(tmpdir(), "handoff-"));
+  try {
+    const file = join(dir, "handoff.html");
+    writeFileSync(file, html);
+    await withChrome(t, async (page) => {
+      await page.goto(`file://${file}`);
+      await page.waitFor(`document.querySelector('#prototype [data-node-id="${proto.root.id}"]')`);
+      assert.equal(await page.eval(`getComputedStyle(document.querySelector('#prototype [data-node-id="${proto.root.id}"]')).getPropertyValue("--b-accent").trim()`), "#2563eb");
+      assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
+    }, { width: 1440, height: 900 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- images in the handoff ----
+const withImages: Prototype = (() => {
+  const p: Prototype = JSON.parse(JSON.stringify(proto));
+  p.root.children.push(
+    { id: "shop", type: "Screen", props: { title: "Shop" }, status: "agreed", children: [
+      { id: "shop.pic", type: "Image", props: { image: "food-3", label: "Latte" }, status: "agreed", children: [] },
+      { id: "shop.card", type: "ProductCard", props: { title: "Tote", image: "products-4" }, status: "agreed", children: [] },
+      { id: "shop.nope", type: "Image", props: { image: "pizza" }, status: "agreed", children: [] },
+      { id: "shop.same", type: "MediaCard", props: { title: "Again", image: "food-3" }, status: "agreed", children: [] },
+    ] },
+  );
+  p.currentScreen = "shop";
+  return p;
+})();
+
+test("imagesUsed mirrors what the renderer resolves, across every screen", () => {
+  assert.deepEqual(imagesUsed(withImages).sort(), ["food-3.webp", "products-4.webp"]);
+  assert.deepEqual(imagesUsed(proto), []);
+  const subject: Prototype = JSON.parse(JSON.stringify(proto));
+  subject.root.children[0].children.push({ id: "pic.x", type: "Image", props: { image: "abstract" }, status: "agreed", children: [] });
+  const [file] = imagesUsed(subject);
+  assert.match(file, /^abstract-\d\.webp$/);
+  assert.ok(IMAGES.some((i) => i.file === file));
+});
+
+test("the inline export contains exactly the images the prototype uses and opens offline", async (t) => {
+  const html = buildExportHtml(doc, withImages);
+  assert.equal(html.match(/data:image\/webp;base64,/g)?.length, 2);
+  for (const file of ["food-3.webp", "products-4.webp"]) {
+    const b64 = readFileSync(new URL(`../public/renderer/images/${file}`, import.meta.url)).toString("base64");
+    assert.ok(html.includes(b64), file);
+  }
+  t.diagnostic(`export with 2 images: ${html.length} bytes; without: ${buildExportHtml(doc, proto).length} bytes`);
+  assert.equal(buildExportHtml(doc, proto).includes("data:image/webp"), false, "no images, none inlined");
+  const dir = mkdtempSync(join(tmpdir(), "handoff-"));
+  try {
+    const file = join(dir, "handoff.html");
+    writeFileSync(file, html);
+    await withChrome(t, async (page) => {
+      await page.goto(`file://${file}`);
+      const shown = `!!document.querySelector('#prototype [data-node-id="shop"]')`;
+      await page.waitFor(shown);
+      const widths = await page.eval<number[]>(`(async () => {
+        const imgs = [...document.querySelectorAll('#prototype img')];
+        await Promise.all(imgs.map((i) => i.decode().catch(() => {})));
+        return imgs.map((i) => i.naturalWidth);
+      })()`);
+      assert.equal(widths.length, 3, "two photos plus the repeat of food-3");
+      assert.ok(widths.every((w) => w > 0), JSON.stringify(widths));
+      assert.ok((await page.eval<string[]>(`[...document.querySelectorAll('#prototype img')].map((i) => i.src.slice(0, 22))`)).every((s) => s === "data:image/webp;base64"));
+      assert.deepEqual(page.logs.filter((l) => /exception|error/i.test(l)), []);
+    }, { width: 1440, height: 900 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the live handoff references images by URL and the app serves them", async () => {
+  const h = await start();
+  try {
+    const id = randomUUID();
+    await h.store.createIntent(id, "https://meet.google.com/img-sess-ion");
+    await h.store.saveConsensus(id, doc, withImages);
+    const token = await h.store.ensureHandoffToken(id);
+    const page = await (await fetch(`${h.base}/handoff/${id}?token=${token}`, { headers: tunnel })).text();
+    assert.equal(page.includes("data:image/webp"), false);
+    assert.match(page, /"@renderer\/":"\/renderer\/"/);
+    const img = await fetch(`${h.base}/renderer/images/food-3.webp`, { headers: tunnel });
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get("content-type"), "image/webp");
+    assert.ok((await img.arrayBuffer()).byteLength > 1000);
+    assert.equal((await fetch(`${h.base}/renderer/images/missing-1.webp`, { headers: tunnel })).status, 404);
   } finally { h.close(); }
 });

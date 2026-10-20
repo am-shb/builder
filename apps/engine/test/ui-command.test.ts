@@ -51,6 +51,25 @@ test("ambiguous 'Add' with two clickable Add controls -> candidates", () => {
   assert.deepEqual(r.candidates.sort(), ["Add item (Button)", "Add task (Button)"]);
 });
 
+test("a pricing tier is clicked by its name", () => {
+  const p = twoScreens();
+  p.root.children[0].children.push({
+    id: "home.pro", type: "PricingTier", props: { name: "Pro", price: "$12" }, status: "draft",
+    on: { click: [{ kind: "open", target: "home.checkout" }] }, children: [],
+  });
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "pro" });
+  assert.deepEqual(r, { ok: true, nodeId: "home.pro", interaction: { kind: "open", target: "home.checkout" } });
+});
+
+test("cards are click targets, so a card and a button with one title are ambiguous", () => {
+  const p = twoScreens();
+  p.root.children[0].children.push({ id: "home.shoes", type: "ProductCard", props: { title: "Running shoes" }, status: "draft", children: [] });
+  p.root.children[0].children.push({ id: "home.shoes-btn", type: "Button", props: { label: "Running shoes" }, status: "draft", on: { click: [{ kind: "open", target: "x" }] }, children: [] });
+  const r = resolveCommand(p, initialUiState(p), { action: "click", target: "running shoes" });
+  assert.ok(!r.ok && r.reason === "ambiguous");
+  assert.deepEqual(r.candidates.sort(), ["Running shoes (Button)", "Running shoes (ProductCard)"]);
+});
+
 test("heading and button with the same label: click picks the button", () => {
   const p = twoScreens(); // includes a List titled "Add", which is not clickable
   p.root.children[0].children.push({ id: "home.h2", type: "Heading", props: { text: "Add" }, status: "draft", children: [] });
@@ -63,6 +82,21 @@ test("type ignores text nodes and finds the input", () => {
   p.root.children[0].children.push({ id: "home.hint", type: "Text", props: { text: "Type a task here" }, status: "draft", children: [] });
   const r = resolveCommand(p, initialUiState(p), { action: "type", target: "task", value: "x" });
   assert.ok(r.ok && r.nodeId === "home.input");
+});
+
+test("type finds a Search box and a DatePicker", () => {
+  const p = twoScreens();
+  p.root.children[0].children.push(
+    { id: "home.find", type: "Search", props: { placeholder: "Search expenses" }, status: "draft", children: [] },
+    { id: "home.due", type: "DatePicker", props: { label: "Due date" }, status: "draft", children: [] },
+  );
+  const ui = initialUiState(p);
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "search expenses", value: "taxi" }), {
+    ok: true, nodeId: "home.find", interaction: { kind: "setValue", target: "home.find", value: "taxi" },
+  });
+  assert.deepEqual(resolveCommand(p, ui, { action: "type", target: "due date", value: "Friday" }), {
+    ok: true, nodeId: "home.due", interaction: { kind: "setValue", target: "home.due", value: "Friday" },
+  });
 });
 
 test('"add" does not match "Address"; two-letter targets only match exactly', () => {

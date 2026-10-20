@@ -135,6 +135,29 @@ test("a removal is spotlit on the parent it left, with its label", async (t) => 
   });
 });
 
+test("a template change mid-meeting glides the same elements into the new regions", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    const region = (id: string, r: string) => ({ ...text(id, `Text ${id}`), props: { text: `Text ${id}`, region: r } });
+    await script([{ batch: { label: "Dashboard", ops: [
+      { op: "update", id: "home", props: { template: "dashboard" } },
+      add("home", region("h", "header")), add("home", region("s1", "stats")), add("home", region("m", "main")), add("home", region("side", "side")),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="side"]')`);
+    await sleep(1700);
+    const where = `(() => Object.fromEntries(["h", "s1", "m", "side"].map((id) => [id, document.querySelector('[data-node-id="' + id + '"]').parentElement.dataset.region])))()`;
+    assert.deepEqual(await page.eval(where), { h: "header", s1: "stats", m: "main", side: "side" });
+    await page.eval(`(() => { window.__motionLog = []; window.__kept = ["h", "s1", "m", "side"].map((id) => document.querySelector('[data-node-id="' + id + '"]')); })()`);
+    await script([{ batch: { label: "Chat layout", by: "Ada", ops: [{ op: "update", id: "home", props: { template: "chat" } }] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus")`, 3000);
+    // chat has list and main: header, stats and side fall back to main.
+    assert.deepEqual(await page.eval(where), { h: "main", s1: "main", m: "main", side: "main" });
+    assert.equal(await page.eval<boolean>(`window.__kept.every((e) => e.isConnected && e === document.querySelector('[data-node-id="' + e.dataset.nodeId + '"]'))`), true, "same elements, moved");
+    const log = await page.eval<{ fn: string; glides?: number; id?: string }[]>(`window.__motionLog`);
+    assert.ok(log.some((e) => e.fn === "animateReconcile" && (e.glides ?? 0) > 0), `children glide: ${JSON.stringify(log)}`);
+    assert.equal(log.find((e) => e.fn === "playFocus")!.id, "home");
+  });
+});
+
 test("voice command: pointer glides and presses before the action runs", async (t) => {
   await withStage(t, async ({ page, script }) => {
     await script([{ batch: { label: "Nav", ops: [
@@ -156,6 +179,85 @@ test("voice command: pointer glides and presses before the action runs", async (
     assert.ok(press && press.t - t0 >= 450, `press at ${press && press.t - t0}ms`);
   });
 });
+
+test("a voice navigate points at the nav item", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Screens", ops: [
+      add("home", text("home.t", "Home")),
+      add("app", { id: "about", type: "Screen", props: { title: "About" }, status: "agreed", children: [text("about.t", "About")] }),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-nav-screen="about"]')`);
+    // The command targets the Screen itself (no control on Home navigates there): the pointer goes to its nav item.
+    await page.eval(`window.stageEvent({ type: "command", nodeId: "about", interaction: { kind: "navigate", screen: "about" } })`);
+    await page.waitFor(`document.querySelector('[data-node-id="about"]').getClientRects().length > 0`, 3000);
+    const r = await page.eval<{ pointer: string; x: number; y: number }>(`(() => {
+      const r = document.querySelector('[data-nav-screen="about"]').getBoundingClientRect();
+      return { pointer: document.querySelector(".m-pointer").style.transform, x: Math.round(r.left + Math.min(r.width / 2, 48)), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    assert.equal(r.pointer, `translate(${r.x}px, ${r.y}px)`);
+  });
+});
+
+// A rect inside another (half a pixel of slack).
+const within = (r: { x: number; y: number; w: number; h: number }, o: { x: number; y: number; w: number; h: number }) =>
+  r.x >= o.x - 0.5 && r.y >= o.y - 0.5 && r.x + r.w <= o.x + o.w + 0.5 && r.y + r.h <= o.y + o.h + 0.5;
+const RECT = (sel: string) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; })()`;
+const lines = (n: number) => Array.from({ length: n }, (_, i) => add("home", text(`l${i}`, `Line number ${i + 1}`)));
+
+test("on a phone a change below the fold is revealed and ringed inside the phone", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Phone", ops: [{ op: "update", id: "app", props: { title: "Notes", device: "phone" } }, ...lines(20)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l19"]')`);
+    await sleep(1700);
+    await page.eval(`window.__motionLog = []`);
+    await script([{ batch: { label: "Added: last line", by: "Ada", ops: [
+      add("home", { id: "last", type: "Toggle", props: { label: "Remind me" }, status: "agreed", children: [] }),
+    ] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus" && e.id === "last")`, 5000);
+    await sleep(500); // the reveal glide has landed
+    const phone = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".b-phone"));
+    const ring = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".m-ring"));
+    const label = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(".m-label"));
+    assert.ok(within(ring, phone), `ring inside the phone: ${JSON.stringify({ ring, phone })}`);
+    assert.ok(label.y >= 0 && label.y + label.h <= 720, `label on the canvas: ${JSON.stringify(label)}`);
+    const node = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT('[data-node-id="last"]'));
+    assert.ok(within(node, ring), "the ring surrounds the node where it is shown");
+
+    // The voice pointer finds a control below the fold too.
+    await page.eval(`(() => { const b = document.querySelector(".b-phone .b-app-body"); b.scrollTop = 0; })()`);
+    await sleep(1700);
+    await page.eval(`window.stageEvent({ type: "command", nodeId: "last", interaction: { kind: "toggle", target: "last" } })`);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "animatePointer" && e.phase === "press")`, 3000);
+    const at = await page.eval<string>(`document.querySelector(".m-pointer").style.transform`);
+    const [x, y] = (at.match(/-?[\d.]+/g) ?? []).map(Number);
+    assert.ok(x >= phone.x && x <= phone.x + phone.w && y >= phone.y && y <= phone.y + phone.h, `pointer ${at} inside the phone ${JSON.stringify(phone)}`);
+    const target = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT('[data-node-id="last"]'));
+    assert.ok(y >= target.y && y <= target.y + target.h, `pointer ${at} on the control ${JSON.stringify(target)}`);
+  });
+});
+
+for (const nav of ["top", "sidebar"]) {
+  test(`a reveal glides the content, not the ${nav} frame`, async (t) => {
+    await withStage(t, async ({ page, script }) => {
+      await script([{ batch: { label: "Long", ops: [{ op: "update", id: "app", props: { title: "Notes", nav } }, ...lines(30)] } }]);
+      await page.waitFor(`document.querySelector('[data-node-id="l29"]')`);
+      await sleep(1700);
+      const sel = nav === "top" ? ".b-app-chrome" : ".b-app-rail";
+      const start = await page.eval<{ x: number; y: number; w: number; h: number }>(RECT(sel));
+      await page.eval(`(() => {
+        window.__chrome = []; const end = performance.now() + 2500;
+        const f = () => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); window.__chrome.push([b.left, b.top]); if (performance.now() < end) requestAnimationFrame(f); };
+        requestAnimationFrame(f);
+      })()`);
+      await script([{ batch: { label: "Added: last line", by: "Ada", ops: [add("home", text("last", "The last line"))] } }]);
+      await sleep(2600);
+      const scrolled = await page.eval<number>(`document.getElementById("proto").scrollTop`);
+      assert.ok(scrolled > 0, "the canvas scrolled to the change");
+      const moves = await page.eval<number[][]>(`window.__chrome.filter(([x, y]) => Math.abs(x - ${start.x}) > 0.5 || Math.abs(y - ${start.y}) > 0.5)`);
+      assert.deepEqual(moves, [], `the ${nav} frame stays put during the reveal`);
+    });
+  });
+}
 
 test("pending region shows a shimmer placeholder and clears it", async (t) => {
   await withStage(t, async ({ page }) => {
@@ -245,5 +347,156 @@ test("one 20 px draft tag per draft region: a draft inside a draft shows neither
     assert.equal(read["home.list"].outline, "none", "agreed");
     assert.equal(read["home.t1"].outline, "dashed", "a draft inside an agreed node keeps both");
     assert.match(read["home.t1"].tag, /draft/);
+  });
+});
+
+// A theme patch as the stage receives it: the current prototype with the given accent slot, and its change.
+type Slot = { value: string; status: string; decisionId?: string; previous: string };
+const themePatch = (slot: Slot, label: string, warmth?: Slot) => `(() => {
+  const p = JSON.parse(JSON.stringify(window.stageProto()));
+  const s = (v) => ({ value: v, status: "agreed", previous: v });
+  p.theme = { accent: ${JSON.stringify(slot)}, warmth: ${warmth ? JSON.stringify(warmth) : `s("neutral")`}, radius: s("soft"), density: s("regular") };
+  window.stageEvent({ type: "patch", proto: p, changes: [{ kind: "theme", id: "app", label: ${JSON.stringify(label)}, by: "Sara" }] });
+})()`;
+const GOLD_DRAFT = { value: "gold", status: "draft", decisionId: "d1", previous: "slate" };
+
+test("a theme value change fades the old canvas out", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    // A short screen and a background (warmth) change: the copy must cover the whole canvas, not just the content.
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await sleep(1700); // let the first spotlight finish
+    await page.eval(`window.__motionLog = []`);
+    const right = await page.eval<{ fades: number; ids: number; accent: string; snapAccent: string; aligned: string[]; covers: string[]; short: boolean }>(`(() => {
+      const canvas = document.getElementById("proto");
+      const content = document.querySelector('[data-node-id="a"]').getBoundingClientRect();
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent", { value: "warm", status: "draft", decisionId: "d1", previous: "neutral" })};
+      const fade = document.querySelector(".m-theme-fade");
+      const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); };
+      const c = canvas.getBoundingClientRect();
+      return {
+        short: content.bottom < c.bottom - 200,
+        aligned: fade ? [box(fade.firstElementChild), box(document.querySelector('[data-node-id="app"]'))] : [],
+        covers: fade ? [box(fade), [c.left, c.top, c.width, c.height].map(Math.round).join()] : [],
+        fades: document.querySelectorAll(".m-theme-fade").length,
+        ids: fade ? fade.querySelectorAll("[data-node-id]").length + (fade.hasAttribute("data-node-id") ? 1 : 0) : -1,
+        accent: document.querySelector('[data-node-id="app"]').style.getPropertyValue("--b-accent"),
+        snapAccent: fade ? fade.querySelector(".b-node").style.getPropertyValue("--b-accent") : "",
+      };
+    })()`);
+    assert.equal(right.fades, 1);
+    assert.equal(right.ids, 0, "the snapshot carries no node ids");
+    assert.ok(right.short, "the content ends well above the canvas bottom");
+    assert.equal(right.aligned[0], right.aligned[1], "the copied App sits exactly over the live one, full height");
+    assert.equal(right.covers[0], right.covers[1], "the copy covers the whole canvas");
+    assert.notEqual(right.snapAccent, right.accent, "the snapshot keeps the old theme over the new one");
+    const anims = await page.eval<{ props: string[]; duration: number; easing: string }[]>(`document.getAnimations()
+      .filter((a) => a.effect.target.classList.contains("m-theme-fade"))
+      .map((a) => ({ props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((p) => !["offset", "computedOffset", "easing", "composite"].includes(p)), duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing }))`);
+    assert.deepEqual(anims, [{ props: ["opacity"], duration: 450, easing: "ease-out" }]);
+    await sleep(600);
+    assert.equal(await page.eval<number>(`document.querySelectorAll(".m-theme-fade").length`), 0, "gone once faded");
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus")`, 3000);
+    await sleep(300);
+    const focus = await page.eval<{ id: string; label: string }[]>(`window.__motionLog.filter((e) => e.fn === "playFocus")`);
+    assert.deepEqual(focus.map((f) => [f.id, f.label]), [["app", "Proposed: gold accent · Sara"]]);
+  });
+});
+
+test("the theme fade copy of a scrolled phone shows what the live one shows", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Phone", ops: [{ op: "update", id: "app", props: { title: "Notes", device: "phone" } }, ...lines(30)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l29"]')`);
+    await sleep(1700);
+    await page.eval(`document.querySelector(".b-phone .b-app-body").scrollTop = 400`);
+    const tops = await page.eval<{ live: number; copy: number | null }>(`(() => {
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent", { value: "warm", status: "draft", decisionId: "d1", previous: "neutral" })};
+      const copy = document.querySelector(".m-theme-fade .b-app-body");
+      return { live: document.querySelector(".b-phone .b-app-body").scrollTop, copy: copy ? copy.scrollTop : null };
+    })()`);
+    assert.ok(tops.live > 100, `the live body is scrolled: ${JSON.stringify(tops)}`);
+    assert.equal(tops.copy, tops.live, "the copy is scrolled the same");
+  });
+});
+
+test("a reveal clears the sticky top bar", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Long", ops: [{ op: "update", id: "app", props: { title: "Notes", nav: "top" } }, ...lines(40)] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l39"]')`);
+    await sleep(1700);
+    // Scroll so line 10 sits right under the bar's band (its top 20px below the viewport top, behind the bar).
+    await page.eval(`(() => { const c = document.getElementById("proto"); const l = document.querySelector('[data-node-id="l10"]'); c.scrollTop += l.getBoundingClientRect().top - c.getBoundingClientRect().top - 20; })()`);
+    const bar = await page.eval<{ y: number; h: number }>(`(() => { const r = document.querySelector(".b-app-chrome").getBoundingClientRect(); return { y: r.top, h: r.height }; })()`);
+    const before = await page.eval<{ y: number }>(`(() => ({ y: document.querySelector('[data-node-id="l10"]').getBoundingClientRect().top }))()`);
+    assert.ok(before.y < bar.y + bar.h, `line 10 starts under the bar: ${JSON.stringify({ before, bar })}`);
+    await page.eval(`window.__motionLog = []`);
+    await script([{ batch: { label: "Edited: line 11", by: "Ada", ops: [{ op: "update", id: "l10", props: { text: "Line number 11, edited" } }] } }]);
+    await page.waitFor(`window.__motionLog.some((e) => e.fn === "playFocus" && e.id === "l10")`, 5000);
+    await sleep(600);
+    const after = await page.eval<number>(`document.querySelector('[data-node-id="l10"]').getBoundingClientRect().top`);
+    assert.ok(after >= bar.y + bar.h, `line 10 shows below the bar after the reveal: ${after} vs ${bar.y + bar.h}`);
+  });
+});
+
+test("a new screen opens at the top of the canvas", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Long", ops: [
+      ...lines(40),
+      add("app", { id: "about", type: "Screen", props: { title: "About" }, status: "agreed", children: Array.from({ length: 40 }, (_, i) => text(`about.t${i}`, `About line ${i}`)) }),
+    ] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="l39"]')`);
+    await sleep(1700);
+    await page.eval(`document.getElementById("proto").scrollTop = 500`);
+    assert.equal(await page.eval<number>(`document.getElementById("proto").scrollTop`), 500);
+    await script([{ batch: { label: "Show about", ops: [{ op: "set_screen", screenId: "about" }] } }]);
+    await page.waitFor(`document.querySelector('[data-node-id="about"]').getClientRects().length > 0`, 3000);
+    assert.equal(await page.eval<number>(`document.getElementById("proto").scrollTop`), 0);
+  });
+});
+
+test("a settled theme plays the agreed frame", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await page.eval(themePatch(GOLD_DRAFT, "Proposed: gold accent"));
+    await sleep(700);
+    const r = await page.eval<{ settles: number; fades: number; anims: { props: string[]; duration: number }[] }>(`(() => {
+      ${themePatch({ ...GOLD_DRAFT, status: "agreed" }, "Agreed: gold accent")};
+      return {
+        settles: document.querySelectorAll(".m-theme-settle").length,
+        fades: document.querySelectorAll(".m-theme-fade").length,
+        anims: document.getAnimations().filter((a) => a.effect.target.closest(".m-theme-settle")).map((a) => ({
+          props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((p) => !["offset", "computedOffset", "easing", "composite"].includes(p)),
+          duration: a.effect.getTiming().duration })),
+      };
+    })()`);
+    assert.equal(r.settles, 1);
+    assert.equal(r.fades, 0, "the values did not change, so nothing fades");
+    assert.ok(r.anims.length >= 1);
+    for (const a of r.anims) {
+      for (const p of a.props) assert.ok(p === "transform" || p === "opacity", `animates ${p}`);
+      assert.equal(a.duration, 400);
+    }
+    await page.waitFor(`!document.querySelector(".m-theme-settle")`, 3000);
+  });
+});
+
+test("no theme fade while covered", async (t) => {
+  await withStage(t, async ({ page, script }) => {
+    await script([{ batch: { label: "Start", ops: [add("home", text("a", "Alpha"))] } }]);
+    await page.eval(`(() => {
+      const p = window.stageProto();
+      const variant = (label) => ({ label, summary: "Option " + label, backers: ["Ada"], proto: p, focusIds: [] });
+      window.stageEvent({ type: "comparison", view: { conflictId: "c1", topic: "Accent", variants: [variant("A"), variant("B")] } });
+    })()`);
+    await sleep(100);
+    const r = await page.eval<{ fades: number; settles: number; accent: string }>(`(() => {
+      ${themePatch(GOLD_DRAFT, "Proposed: gold accent")};
+      const fades = document.querySelectorAll(".m-theme-fade").length;
+      ${themePatch({ ...GOLD_DRAFT, status: "agreed" }, "Agreed: gold accent")};
+      return { fades, settles: document.querySelectorAll(".m-theme-settle").length,
+        accent: document.querySelector('#proto [data-node-id="app"]').style.getPropertyValue("--b-accent") };
+    })()`);
+    assert.deepEqual({ fades: r.fades, settles: r.settles }, { fades: 0, settles: 0 });
+    assert.ok(r.accent, "the prototype is still drawn, without motion");
+    assert.deepEqual(page.logs.filter((l) => l.startsWith("console.error")), []);
   });
 });

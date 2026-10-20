@@ -1,0 +1,136 @@
+<style>
+  .note { font-size: 14px; color: #666; margin-top: 8px; line-height: 1.45; }
+  .fitbox { width:100%; position:relative; overflow:hidden; border-radius:8px; }
+  .fitbox > .inner { position:absolute; left:0; top:0; transform-origin:0 0; }
+
+  /* ---------- the prototype, themed by vars ---------- */
+  .p { --radius:14px; --bg:#f6f7f9; --surface:#fff; --ink:#0f172a; --ink-2:#475569; --ink-3:#94a3b8; --line:#e2e8f0;
+       --ok-bg:#dcfce7; --ok:#166534; --warn-bg:#fef3c7; --warn:#92400e; --bad-bg:#fee2e2; --bad:#991b1b;
+       font: 500 17px/1.4 "Inter", system-ui, sans-serif; color:var(--ink); background:var(--bg);
+       width:880px; height:720px; display:flex; }
+  .th-neutral { --accent:#1e293b; --accent-soft:#e8ebf0; --accent-ink:#fff; }
+  .th-gold    { --accent:#c8961e; --accent-soft:#faf0d4; --accent-ink:#1f1500; --bg:#faf8f3; --line:#ece6d8; }
+  .th-green   { --accent:#15803d; --accent-soft:#dcf3e4; --accent-ink:#fff;
+                /* semantic "approved" moves to teal so it doesn't read as the brand color */
+                --ok-bg:#ccfbf1; --ok:#115e59; }
+  .p-side { width:200px; background:var(--surface); border-right:1px solid var(--line); padding:22px 14px; display:flex; flex-direction:column; gap:4px; }
+  .p-logo { display:flex; align-items:center; gap:10px; font-weight:800; font-size:20px; padding:0 8px 18px; }
+  .p-logo i { width:30px; height:30px; border-radius:9px; background:var(--accent); display:block; }
+  .p-nav { display:flex; align-items:center; gap:10px; padding:10px; border-radius:10px; color:var(--ink-2); font-weight:600; }
+  .p-nav svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2; }
+  .p-nav.on { background:var(--accent-soft); color:var(--ink); } .p-nav.on svg { stroke:var(--accent); }
+  .p-main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .p-top { height:64px; display:flex; align-items:center; gap:14px; padding:0 26px; border-bottom:1px solid var(--line); background:var(--surface); }
+  .p-search { flex:1; height:40px; border-radius:10px; background:var(--bg); border:1px solid var(--line); display:flex; align-items:center; padding:0 14px; color:var(--ink-3); }
+  .p-av { width:38px; height:38px; border-radius:50%; background:#fde68a; color:#78350f; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; flex:none; }
+  .p-body { padding:22px 26px; display:flex; flex-direction:column; gap:16px; }
+  .p-head { display:flex; align-items:flex-end; justify-content:space-between; }
+  .p-head h1 { margin:0; font-size:30px; font-weight:800; letter-spacing:-.5px; }
+  .p-head p { margin:2px 0 0; color:var(--ink-2); }
+  .p-btn { background:var(--accent); color:var(--accent-ink); font-weight:700; padding:11px 18px; border-radius:10px; }
+  .p-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .p-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px; box-shadow:0 1px 2px rgb(15 23 42 / .06); }
+  .p-label { color:var(--ink-2); font-weight:600; font-size:15px; }
+  .p-num { font-size:32px; font-weight:800; letter-spacing:-.5px; margin-top:4px; }
+  .p-delta { display:inline-block; margin-top:6px; font-size:14px; font-weight:700; padding:2px 9px; border-radius:999px; }
+  .up { background:var(--ok-bg); color:var(--ok); } .down { background:var(--bad-bg); color:var(--bad); }
+  .p-grid { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; }
+  .p-chart { display:flex; align-items:flex-end; gap:10px; height:150px; margin-top:12px; }
+  .p-chart span { flex:1; background:var(--accent-soft); border-radius:6px 6px 2px 2px; }
+  .p-chart span.hi { background:var(--accent); }
+  .p-ax { display:flex; gap:10px; margin-top:6px; color:var(--ink-3); font-size:13px; } .p-ax b { flex:1; text-align:center; font-weight:600; }
+  .p-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+  .p-row:first-of-type { border-top:0; }
+  .p-row .p-av { width:34px; height:34px; font-size:13px; }
+  .p-row .who { flex:1; font-weight:600; } .p-row .who small { display:block; color:var(--ink-3); font-weight:500; font-size:13px; }
+  .p-amt { font-weight:700; }
+  .pill { font-size:13px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .pill.ok { background:var(--ok-bg); color:var(--ok); } .pill.wait { background:var(--warn-bg); color:var(--warn); }
+
+  /* ---------- the stage's comparison view (from theme.css .c-*) ---------- */
+  .c { width:1280px; height:720px; background:#0f1115; color:#f4f6fa; font-family:system-ui, sans-serif; position:relative; }
+  .c-top { position:absolute; left:28px; top:18px; right:28px; }
+  .c-topic { font:800 34px/1.15 system-ui; }
+  .c-hint { margin-top:8px; font:600 21px/1.2 system-ui; color:#b4bccb; }
+  .c-options { position:absolute; left:16px; right:16px; top:112px; bottom:16px; display:flex; gap:16px; }
+  .c-option { flex:1; display:flex; flex-direction:column; gap:12px; padding:12px; background:#171a21; border:2px solid #2a2f3b; border-radius:16px; }
+  .c-head { display:flex; gap:14px; height:76px; }
+  .c-label { width:66px; height:66px; border-radius:14px; background:#8fb0ff; color:#0f1115; display:flex; align-items:center; justify-content:center; font:900 46px/1 system-ui; flex:none; }
+  .c-sum { font:700 23px/1.25 system-ui; } .c-back { margin-top:4px; font:600 19px/1.25 system-ui; color:#b4bccb; } .c-back b { color:#f4f6fa; }
+  .c-prev { flex:1; position:relative; overflow:hidden; border-radius:10px; background:#fff; }
+  .c-prev > .p { position:absolute; left:0; top:0; transform-origin:0 0; }
+</style>
+
+<h2>Gold vs. green, as the room would see it</h2>
+<p class="subtitle">Top: where the meeting starts, the neutral house theme. Bottom: someone says "let's try gold vs green", and the stage opens its normal side-by-side comparison with the whole prototype re-themed in each option.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Before: neutral house theme (first draw, before anyone has talked about looks)</div>
+  <div class="mockup-body" style="padding:0">
+    <div class="fitbox" style="aspect-ratio:880/720; max-width:520px; margin:0 auto"><div class="inner" data-w="880" data-slot="neutral"></div></div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:16px">
+  <div class="mockup-header">The comparison on the full 1280×720 stage</div>
+  <div class="mockup-body" style="padding:0">
+    <div class="fitbox" style="aspect-ratio:1280/720"><div class="inner" data-w="1280">
+      <div class="c">
+        <div class="c-top"><div class="c-topic">Accent color: gold or green?</div><div class="c-hint">Say "A" or "B", or keep talking</div></div>
+        <div class="c-options">
+          <div class="c-option">
+            <div class="c-head"><div class="c-label">A</div><div><div class="c-sum">Gold: warm and premium, dark text on buttons</div><div class="c-back">Backed by <b>Sara</b></div></div></div>
+            <div class="c-prev" data-prev="gold"></div>
+          </div>
+          <div class="c-option">
+            <div class="c-head"><div class="c-label">B</div><div><div class="c-sum">Green: calm, reads as "money is fine"</div><div class="c-back">Backed by <b>Amir</b>, <b>Jo</b></div></div></div>
+            <div class="c-prev" data-prev="green"></div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<p class="note">Two details a theme has to handle, not just "swap one color": gold needs dark text on its buttons (white on gold is unreadable), and with a green brand the green "Approved" pills move to teal so status colors don't blur into the brand color. The model would only say <code>accent: gold</code>; the renderer works out the rest.</p>
+
+<script>
+  const SCREEN = (th) => `
+  <div class="p th-${th}">
+    <div class="p-side">
+      <div class="p-logo"><i></i>Ledger</div>
+      <div class="p-nav on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</div>
+      <div class="p-nav"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Expenses</div>
+      <div class="p-nav"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17" cy="9" r="2.5"/></svg>Team</div>
+      <div class="p-nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Settings</div>
+    </div>
+    <div class="p-main">
+      <div class="p-top"><div class="p-search">Search expenses…</div><div class="p-av">AS</div></div>
+      <div class="p-body">
+        <div class="p-head"><div><h1>Overview</h1><p>October · Design team</p></div><div class="p-btn">＋ Add expense</div></div>
+        <div class="p-stats">
+          <div class="p-card"><div class="p-label">Spent</div><div class="p-num">$12,480</div><span class="p-delta down">▲ 12% vs Sep</span></div>
+          <div class="p-card"><div class="p-label">Budget left</div><div class="p-num">$7,520</div><span class="p-delta up">38% left</span></div>
+          <div class="p-card"><div class="p-label">Waiting approval</div><div class="p-num">7</div><span class="p-delta down">3 overdue</span></div>
+        </div>
+        <div class="p-grid">
+          <div class="p-card"><div class="p-label">Spending by month</div>
+            <div class="p-chart"><span style="height:45%"></span><span style="height:62%"></span><span style="height:50%"></span><span style="height:78%"></span><span style="height:58%"></span><span class="hi" style="height:92%"></span></div>
+            <div class="p-ax"><b>May</b><b>Jun</b><b>Jul</b><b>Aug</b><b>Sep</b><b>Oct</b></div></div>
+          <div class="p-card"><div class="p-label">Recent</div>
+            <div class="p-row"><div class="p-av" style="background:#bfdbfe;color:#1e3a8a">SK</div><div class="who">Sara K.<small>Figma seats</small></div><span class="p-amt">$420</span><span class="pill ok">Approved</span></div>
+            <div class="p-row"><div class="p-av">AS</div><div class="who">Amir S.<small>Offsite venue</small></div><span class="p-amt">$1,150</span><span class="pill wait">Pending</span></div>
+            <div class="p-row"><div class="p-av" style="background:#fbcfe8;color:#831843">JL</div><div class="who">Jo L.<small>Taxi</small></div><span class="p-amt">$38</span><span class="pill ok">Approved</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.querySelector('[data-slot="neutral"]').innerHTML = SCREEN('neutral');
+  document.querySelectorAll('[data-prev]').forEach(el => { el.innerHTML = SCREEN(el.dataset.prev); });
+  function fit() {
+    document.querySelectorAll('.fitbox > .inner').forEach(i => { i.style.transform = `scale(${i.parentElement.clientWidth / Number(i.dataset.w)})`; });
+    document.querySelectorAll('.c-prev').forEach(p => { const s = p.firstElementChild; s.style.transform = `scale(${Math.min(p.clientWidth / 880, p.clientHeight / 720)})`; });
+  }
+  addEventListener('resize', fit); fit(); setTimeout(fit, 50);
+</script>

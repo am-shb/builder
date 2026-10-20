@@ -4,11 +4,18 @@
 // All doc and prototype text is escaped here; nothing is ever interpolated as markup.
 import { readFileSync } from "node:fs";
 import type { ConsensusDoc } from "../consensus/doc.ts";
+import { withAgreedTheme } from "../ui/tree.ts";
+import { resolveImage } from "../../public/renderer/images.js";
 import type { Interaction, Prototype, UiNode } from "../ui/schema.ts";
 
 const rendererDir = new URL("../../public/renderer/", import.meta.url);
-// The handoff's import graph: render.js -> components, motion (-> clock), interact.
-const RENDERER_MODULES = ["render.js", "components.js", "motion.js", "clock.js", "interact.js"] as const;
+// The handoff's import graph: render.js -> components (-> catalog, components/*), motion (-> clock), interact.
+// Modules import each other as "@renderer/<path>", which the inline export maps to data URLs one by one.
+export const RENDERER_MODULES = [
+  "render.js", "components.js", "motion.js", "clock.js", "interact.js", "catalog.js", "theme.js",
+  "components/dom.js", "components/frames.js", "components/data.js", "components/content.js", "components/input.js",
+  "components/feedback.js", "icons.js", "images.js",
+] as const;
 
 let cache: { template: string; theme: string; modules: Record<string, string> } | undefined;
 function assets() {
@@ -18,6 +25,26 @@ function assets() {
     modules: Object.fromEntries(RENDERER_MODULES.map((m) => [m, readFileSync(new URL(m, rendererDir), "utf8")])),
   };
   return cache;
+}
+
+// Component types whose `image` prop draws a built-in photo (the same ones the renderer resolves).
+const IMAGE_TYPES = new Set(["Image", "Hero", "ProductCard", "MediaCard"]);
+
+/** The image files the prototype renders, across every Screen: resolved exactly as the renderer does (same function, same node id). */
+export function imagesUsed(proto: Prototype): string[] {
+  const files = new Set<string>();
+  for (const n of flatten(proto.root)) {
+    if (!IMAGE_TYPES.has(n.type)) continue;
+    const photo = resolveImage(n.props.image, n.id);
+    if (photo) files.add(photo.file);
+  }
+  return [...files];
+}
+
+/** `globalThis.__builderImageData` for the inline export: used images only, as data URLs, so the file needs no network. */
+function imageDataScript(proto: Prototype): string {
+  const data = Object.fromEntries(imagesUsed(proto).map((f) => [f, `data:image/webp;base64,${readFileSync(new URL(`images/${f}`, rendererDir)).toString("base64")}`]));
+  return `<script>globalThis.__builderImageData = ${safeJson(data)};</script>`;
 }
 
 const esc = (v: unknown) =>
@@ -85,8 +112,9 @@ function decisionHtml(d: ConsensusDoc["decisions"][number], doc: ConsensusDoc): 
   return `<li class="decision"><p class="decision-text">${esc(d.text)}${d.status !== "agreed" ? ` ${FLAG}` : ""}</p><dl class="meta">${meta}</dl></li>`;
 }
 
-function render(doc: ConsensusDoc, proto: Prototype, mode: { inline: true } | { inline: false; exportHref?: string }): string {
+function render(doc: ConsensusDoc, fullProto: Prototype, mode: { inline: true } | { inline: false; exportHref?: string }): string {
   const a = assets();
+  const proto = withAgreedTheme(fullProto); // a draft theme slot shows its last agreed value
   const importMap = mode.inline
     ? { imports: Object.fromEntries(RENDERER_MODULES.map((m) => [`@renderer/${m}`, `data:text/javascript;base64,${Buffer.from(a.modules[m]).toString("base64")}`])) }
     : { imports: { "@renderer/": "/renderer/" } };
@@ -106,6 +134,7 @@ ${draftDecisions.length ? `<h3>Decisions</h3><ul class="decisions">${draftDecisi
     "<!--HEADING-->": esc(doc.app.name ?? "Prototype handoff"),
     "<!--PURPOSE-->": doc.app.purpose ? `<p class="sub">${esc(doc.app.purpose)}</p>` : "",
     "<!--IMPORTMAP-->": `<script type="importmap">${safeJson(importMap)}</script>`,
+    "<!--IMAGEDATA-->": mode.inline ? imageDataScript(proto) : "",
     "<!--THEME-->": theme,
     "<!--EXPORT-->": !mode.inline && mode.exportHref ? `<a class="btn" href="${esc(mode.exportHref)}" download>Download self-contained HTML</a>` : "",
     "<!--SPEC-->": `<ul class="tree root">${nodeHtml(proto.root)}</ul>`,
