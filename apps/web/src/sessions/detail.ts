@@ -17,11 +17,46 @@ export const STATUS_EXPLANATIONS: Record<string, string> = {
 
 export const UNKNOWN_STATUS_EXPLANATION = "This page doesn't know this status yet. Refresh later.";
 
+// Why a session ended, from the engine's status event (A2): its own limits, or Recall's reason for the bot leaving
+// (docs.recall.ai, "Call Ended Sub Codes"). A reason not listed here shows nothing, as an ended session did before.
+export const ENDED_REASONS: Record<string, string> = {
+  max_minutes: `${BOT_NAME} left when the session reached its time limit.`,
+  max_usd: `${BOT_NAME} left when the session reached its spending limit.`,
+  call_ended_by_host: "The host ended the meeting.",
+  call_ended_by_platform_idle: "The meeting service ended the meeting because it was idle.",
+  call_ended_by_platform_max_length: "The meeting service ended the meeting at its length limit.",
+  call_ended_by_platform_waiting_room_timeout: `Nobody let ${BOT_NAME} in from the waiting room in time.`,
+  timeout_exceeded_waiting_room: `Nobody let ${BOT_NAME} in from the waiting room in time.`,
+  bot_kicked_from_waiting_room: `${BOT_NAME} was turned away from the waiting room.`,
+  bot_kicked_from_call: `${BOT_NAME} was removed from the meeting.`,
+  timeout_exceeded_noone_joined: `${BOT_NAME} left because nobody joined.`,
+  timeout_exceeded_everyone_left: `${BOT_NAME} left after everyone else did.`,
+  bot_received_leave_call: `${BOT_NAME} was asked to leave.`,
+  meeting_not_started: "The meeting hadn't started yet.",
+};
+
+// Why a session failed: Recall's reason (docs.recall.ai, "Fatal Sub Codes"). Others get the general line.
+export const FAILED_REASONS: Record<string, string> = {
+  meeting_not_found: `${BOT_NAME} couldn't find the meeting. Check the link.`,
+  meeting_link_invalid: `${BOT_NAME} couldn't find the meeting. Check the link.`,
+  meeting_link_expired: "The meeting link has expired.",
+  meeting_ended: "The meeting had already ended.",
+  meeting_not_started: "The meeting hadn't started yet.",
+  meeting_requires_sign_in: `The meeting only lets signed-in people join, so ${BOT_NAME} couldn't.`,
+  meeting_requires_registration: `The meeting requires registration, so ${BOT_NAME} couldn't join.`,
+  meeting_not_accessible: `The meeting's access settings didn't let ${BOT_NAME} join.`,
+  meeting_password_incorrect: "The meeting's passcode didn't work.",
+  meeting_locked: "The meeting is locked.",
+  meeting_full: "The meeting is full.",
+};
+
 export function statusExplanation(status: string, errorCode?: string): string {
   if (status === "start_failed" && errorCode) {
     const r = engineRefusal(errorCode);
     return [r.title, r.detail].filter(Boolean).join(" ");
   }
+  if (status === "ended" && errorCode && Object.hasOwn(ENDED_REASONS, errorCode)) return ENDED_REASONS[errorCode]!;
+  if (status === "failed" && errorCode && Object.hasOwn(FAILED_REASONS, errorCode)) return FAILED_REASONS[errorCode]!;
   return Object.hasOwn(STATUS_EXPLANATIONS, status) ? STATUS_EXPLANATIONS[status]! : UNKNOWN_STATUS_EXPLANATION;
 }
 

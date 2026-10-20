@@ -22,7 +22,7 @@ export const LIST_LIMIT = 50;
 
 // The org's sessions, newest first, as the api returns them. Reloaded with Refresh, which is always in the header (and
 // "Try again" when the first load failed),
-// and when the org changes; statuses don't change on their own yet (plan WD6). No stage link here: it's a control link,
+// and when the org changes; the page also refreshes it quietly while a session may still change (plan WD6). No stage link here: it's a control link,
 // shown only on a session's own page.
 export function SessionsList({ list, now, emptyAction }: {
   list: OrgQuery<SessionView[]>;
