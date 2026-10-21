@@ -1,6 +1,5 @@
 import { useHostedAuth } from "@clerk/expo/hosted-auth";
 import { BOT_NAME, PRODUCT_NAME } from "@builder/session-core";
-import Constants, { ExecutionEnvironment } from "expo-constants";
 import { makeRedirectUri } from "expo-auth-session";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -12,10 +11,10 @@ import { font, radius, space, type as typeScale, useTheme } from "../../src/them
 type Mode = "sign-in" | "sign-up";
 
 // Sign-in and sign-up through Clerk's hosted pages (ADR 0016): the same instance, methods and organization step as the
-// web app, in the system browser, which comes back to the app when done. In Expo Go the app has no scheme of its own,
-// so the callback is Expo Go's development URL for this very screen: a signed-in visitor here goes on to the app
-// (app/(auth)/_layout.tsx), and a path the router doesn't know would show "Unmatched Route" instead. A built app uses
-// the callback Clerk registers for its package, which the @clerk/expo config plugin wires up outside the router.
+// web app, in the system browser, which comes back to the app when done. The callback is always this very screen's
+// URL (exp://.../--/sign-in in Expo Go, builder://sign-in in a build): a signed-in visitor here goes on to the app
+// (app/(auth)/_layout.tsx). Left to its default, Clerk picks a path the router doesn't know, which showed "Unmatched
+// Route" on a phone, and in a build it needs the package callback that only a rebuilt native project handles.
 export default function SignInScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -27,9 +26,8 @@ export default function SignInScreen() {
     if (busy) return;
     setBusy(mode);
     setProblem(null);
-    const inExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
     try {
-      const result = await startHostedAuth({ mode, ...(inExpoGo ? { redirectUrl: makeRedirectUri({ path: "sign-in" }) } : {}) });
+      const result = await startHostedAuth({ mode, redirectUrl: makeRedirectUri({ path: "sign-in" }) });
       const closed = result.authSessionResult?.type === "cancel" || result.authSessionResult?.type === "dismiss";
       if (!result.createdSessionId && !closed) setProblem("Sign-in didn't finish. Try again.");
     } catch {
