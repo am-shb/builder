@@ -1,0 +1,6 @@
+{
+  // The root base (type checking only, erasable syntax). No DOM lib: this code runs in a browser, in React Native and
+  // in Node's tests alike, so it may use only what all three have (fetch, URL, AbortSignal, Intl come with @types/node).
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "test"]
+}

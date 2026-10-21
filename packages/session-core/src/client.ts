@@ -1,4 +1,4 @@
-// The web app's only way to the api (ADR 0012, plan: "Talking to the api"). Every call sends the Clerk session token
+// The apps' only way to the api (ADR 0012, plan: "Talking to the api"), shared by the web and mobile apps. Every call sends the Clerk session token
 // as a Bearer token and nothing else that identifies the caller: the api takes the org from the token, so no org id is
 // ever sent. No cookies, no retries, and no timeout on a start: a retried or cut-off start can send a second paid bot.
 import type { z } from "zod";
@@ -23,9 +23,16 @@ export class ApiError extends Error {
   }
 }
 
-// An aborted request (the org changed, the page was left): ignored, nothing shown.
+// An aborted request (the org changed, the page was left): ignored, nothing shown. Told by its name: a browser throws a
+// DOMException named AbortError, React Native's fetch a plain Error with that name (Hermes has no DOMException).
 export function isAbort(err: unknown): boolean {
-  return err instanceof DOMException && err.name === "AbortError";
+  return err instanceof Error && err.name === "AbortError";
+}
+
+function abortError(): Error {
+  const err = new Error("aborted");
+  err.name = "AbortError";
+  return err;
 }
 
 export type ApiClient = {
@@ -49,7 +56,7 @@ export function createApiClient({ baseUrl, getToken, fetch: doFetch = globalThis
       throw new ApiError(0, "token_error");
     }
     if (!token) throw new ApiError(0, "signed_out");
-    if (opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
+    if (opts.signal?.aborted) throw abortError();
     const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${token}` };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     let res: Response;
@@ -63,7 +70,7 @@ export function createApiClient({ baseUrl, getToken, fetch: doFetch = globalThis
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
     } catch (err) {
-      if (isAbort(err) || opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
+      if (isAbort(err) || opts.signal?.aborted) throw abortError();
       // Offline, DNS, or the browser refused the reply (CORS).
       throw new ApiError(0, "network_error");
     }
@@ -71,7 +78,7 @@ export function createApiClient({ baseUrl, getToken, fetch: doFetch = globalThis
     try {
       json = await res.json();
     } catch (err) {
-      if (isAbort(err) || opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
+      if (isAbort(err) || opts.signal?.aborted) throw abortError();
       throw new ApiError(res.status, res.ok ? "bad_response" : `http_${res.status}`);
     }
     if (!res.ok) {

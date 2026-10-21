@@ -1,7 +1,7 @@
 // The api, faked as a `fetch` (plan: "Testing"). It records every request and answers from routes set per test; a route
 // it doesn't know answers 404 not_found, like the api. Replies are built from the web's schemas (WC1 will switch them to
 // @builder/contracts), so a shape change shows up here.
-import { SessionView } from "../../src/api/schemas.ts";
+import { SessionView } from "@builder/session-core";
 
 export const API = "http://api.test";
 

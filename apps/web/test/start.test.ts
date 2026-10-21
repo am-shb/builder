@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../src/api/client.ts";
-import { explainError } from "../src/api/errors.ts";
+import { ApiError } from "@builder/session-core";
+import { explainError } from "@builder/session-core";
 import {
   ACTIVE_MARGIN_MS, checkMeetingLink, findActiveCopy, findUnconfirmedStart, isLinkProblem, linkProblemText, meetingKey,
   sameMeetingLink, shouldConfirmStart, startConfirmation, UNCONFIRMED_WINDOW_MS, type StartResult,
-} from "../src/sessions/start.ts";
+} from "@builder/session-core";
 import { session } from "./helpers/fake-api.ts";
 
 const NOW = new Date("2026-10-20T15:00:00Z");

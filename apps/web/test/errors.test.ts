@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../src/api/client.ts";
-import { explainError, roleLabel } from "../src/api/errors.ts";
+import { ApiError } from "@builder/session-core";
+import { explainError, roleLabel } from "@builder/session-core";
 import { BOT_NAME, PRODUCT_NAME } from "../src/brand.ts";
 import { session } from "./helpers/fake-api.ts";
 

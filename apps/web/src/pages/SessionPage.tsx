@@ -3,25 +3,26 @@ import { useAuth } from "@clerk/react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useOrgQuery, type OrgQuery } from "../api/ApiProvider.tsx";
-import { ApiError } from "../api/client.ts";
-import type { SessionView } from "../api/schemas.ts";
+import { ApiError } from "@builder/session-core";
+import type { SessionView } from "@builder/session-core";
 import { SignedInShell } from "../auth/SignedInShell.tsx";
 import { Button } from "../components/Button.tsx";
 import { DraftToAgreed } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
-import { isInProgress, StatusPill } from "../components/StatusPill.tsx";
+import { isInProgress } from "@builder/session-core";
+import { StatusPill } from "../components/StatusPill.tsx";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
 import { useRefreshNews } from "../hooks/useRefreshNews.tsx";
 import { cn } from "../lib/cn.ts";
-import { exactTime, limitsText, statusExplanation } from "../sessions/detail.ts";
+import { exactTime, limitsText, statusExplanation } from "@builder/session-core";
 import { ErrorNotice } from "../sessions/ErrorNotice.tsx";
-import { meetingDisplay } from "../sessions/meeting.ts";
+import { meetingDisplay } from "@builder/session-core";
 import { RefreshFailed } from "../sessions/SessionsList.tsx";
 import { StageLink } from "../sessions/StageLink.tsx";
-import { mayStillChange } from "../sessions/start.ts";
-import { startedWhen } from "../sessions/time.ts";
+import { mayStillChange } from "@builder/session-core";
+import { startedWhen } from "@builder/session-core";
 
 // A session's page (plan: "Session detail"): its status and what it means, the meeting, its times and limits, an error
 // code for support, and the stage link behind "Show". From GET /v1/sessions/:id, for the active org only. Refresh

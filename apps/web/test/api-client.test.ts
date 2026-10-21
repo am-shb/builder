@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, isAbort } from "../src/api/client.ts";
+import { ApiError, createApiClient, isAbort } from "@builder/session-core";
 import { API, errorBody, fakeApi, session } from "./helpers/fake-api.ts";
 
 const client = (api: ReturnType<typeof fakeApi>, token: string | null = "token-org_a") =>

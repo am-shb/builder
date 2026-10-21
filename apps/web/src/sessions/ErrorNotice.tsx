@@ -1,8 +1,8 @@
 import { useClerk } from "@clerk/react";
 import { ArrowLeft, RotateCw } from "lucide-react";
 import { Link } from "react-router";
-import type { ErrorContext } from "../api/errors.ts";
-import { explainError } from "../api/errors.ts";
+import type { ErrorContext } from "@builder/session-core";
+import { explainError } from "@builder/session-core";
 import { Button } from "../components/Button.tsx";
 import { Callout } from "../components/Callout.tsx";
 

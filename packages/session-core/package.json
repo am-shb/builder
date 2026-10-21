@@ -1,0 +1,19 @@
+{
+  "name": "@builder/session-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The session screens' framework-free logic, shared by the web and mobile apps (ADR 0004, ADR 0016).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@builder/contracts": "*",
+    "zod": "^4.6.7"
+  }
+}

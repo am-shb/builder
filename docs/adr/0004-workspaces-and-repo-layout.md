@@ -50,6 +50,11 @@ docs/  e2e/
 - The engine moves to `apps/engine` in one PR that only moves files and fixes paths, before other branches start.
   `services/`, `apps/admin/`, `packages/`, `db/` and `infra/` go away. Their briefs fold into the app READMEs.
 
+**Amendment 2026-10-21.** The mobile app (ADR 0016) is the second app to need the web's session logic (the api
+client, reply schemas, error text, start rules, status labels), so that logic moved to `packages/session-core`
+(`@builder/session-core`), under a `packages/*` workspace glob for shared code that isn't a contract. Same rules as
+`contracts/`: TypeScript source, no build step, no framework dependency, owned by both consumers.
+
 ## Consequences
 - Each app owner works mostly in their own folder, with their own dependencies, tests and deploy.
 - A disagreement between two apps fails the type check in the PR that causes it, not in production.

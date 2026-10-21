@@ -2,7 +2,8 @@ import { ChevronRight, Monitor, Users, Video } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 import { Skeleton } from "./Skeleton.tsx";
-import { isInProgress, StatusPill, statusLabel } from "./StatusPill.tsx";
+import { isInProgress, statusLabel } from "@builder/session-core";
+import { StatusPill } from "./StatusPill.tsx";
 
 const PLATFORM_ICON: Record<string, typeof Video> = { meet: Video, zoom: Monitor, teams: Users };
 

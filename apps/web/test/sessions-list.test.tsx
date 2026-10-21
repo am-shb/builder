@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { clerk, setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider, useOrgQuery } from "../src/api/ApiProvider.tsx";
 import { SessionsList } from "../src/sessions/SessionsList.tsx";
-import { meetingDisplay } from "../src/sessions/meeting.ts";
-import { startedWhen } from "../src/sessions/time.ts";
+import { meetingDisplay } from "@builder/session-core";
+import { startedWhen } from "@builder/session-core";
 import { axeViolations } from "./helpers/axe.ts";
 import { API, errorBody, fakeApi, session } from "./helpers/fake-api.ts";
 

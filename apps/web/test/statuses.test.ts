@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SessionStatus } from "@builder/contracts";
 import { describe, expect, it } from "vitest";
-import { isInProgress, STATUS_LABELS } from "../src/components/StatusPill.tsx";
-import { STATUS_EXPLANATIONS, statusExplanation, UNKNOWN_STATUS_EXPLANATION } from "../src/sessions/detail.ts";
-import { ACTIVE_STATUSES } from "../src/sessions/start.ts";
+import { isInProgress, STATUS_LABELS } from "@builder/session-core";
+import { STATUS_EXPLANATIONS, statusExplanation, UNKNOWN_STATUS_EXPLANATION } from "@builder/session-core";
+import { ACTIVE_STATUSES } from "@builder/session-core";
 
 // The api's statuses: the contract's, plus the api's own, read from its source (they move to contracts/ in WC1).
 function apiStatuses(): string[] {

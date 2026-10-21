@@ -4,8 +4,8 @@ import { Link } from "react-router";
 import { BOT_NAME } from "../brand.ts";
 import { Button } from "../components/Button.tsx";
 import { Callout } from "../components/Callout.tsx";
-import { statusLabel } from "../components/StatusPill.tsx";
-import { isLinkProblem, type StartResult } from "./start.ts";
+import { statusLabel } from "@builder/session-core";
+import { isLinkProblem, type StartResult } from "@builder/session-core";
 
 // What happened to a start, until the next one or until put away (plan: the error table's POST rows). A start that may
 // have sent a bot is a persistent warning with no retry; the list has already reloaded. Replies about the link itself
