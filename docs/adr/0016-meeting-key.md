@@ -1,4 +1,4 @@
-# 0014: A shared meeting key for duplicate-bot checks
+# 0016: A shared meeting key for duplicate-bot checks
 
 - **Status:** proposed
 - **Date:** 2026-10-19
