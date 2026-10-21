@@ -941,9 +941,9 @@ test("tool schemas sent to the model are strict-compatible", async () => {
 function heldPort() {
   const calls: { req: RunToolsRequest; resolve: (r: RunToolsResult) => void }[] = [];
   const port: ModelPort = { runTools: (req) => new Promise((resolve) => calls.push({ req, resolve })) };
-  const release = async (i: number, toolCalls: ToolCall[] = [], stopReason: RunToolsResult["stopReason"] = "tool_use") => {
+  const release = async (i: number, toolCalls: ToolCall[] = [], stopReason: RunToolsResult["stopReason"] = "tool_use", dropped = 0) => {
     calls[i].resolve({
-      toolCalls, ms: 5, dropped: 0, stopReason,
+      toolCalls, ms: 5, dropped, stopReason,
       usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
     });
     await flush();
@@ -1106,6 +1106,18 @@ test("a run that applies nothing removes its tasks at once, without done", async
   await flush();
   assert.deepEqual(lastTasks(s.sent), []);
   assert.equal(taskEvents(s.sent).some((e) => e.tasks.some((t) => t.state === "done")), false);
+});
+
+test("a run that only records consensus marks its tasks done, unless the model's tool calls were dropped", async () => {
+  const decide = consensus([{ op: "add_decision", id: "d1", text: "Show done items", proposedBy: "Amir", affects: [] }]);
+  for (const [dropped, done] of [[0, true], [1, false]] as const) {
+    const held = heldPort();
+    const s = await setup(held.port);
+    s.loop.handoff(s.sessionId, withTask([await s.say("Amir", "add some done items")], "Adding done items"));
+    await flush();
+    await held.release(0, [decide], "tool_use", dropped);
+    assert.equal(taskEvents(s.sent).some((e) => e.tasks.some((t) => t.state === "done")), done, `dropped ${dropped}`);
+  }
 });
 
 test("a refusal after a streamed batch still marks the tasks done", async () => {

@@ -518,6 +518,7 @@ export function createBuildLoop(deps: {
     const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0 };
     const deferred: ToolPatchBatch[] = [];
     let opsApplied = 0;
+    let droppedCalls = 0;
     let rt: SessionRuntime | null = null;
     let region = false;
     let stage = "setup";
@@ -594,6 +595,7 @@ export function createBuildLoop(deps: {
         messages: [{ role: "user", content: userTurn(h, grounding, doc, proto) }],
       });
       stage = "apply";
+      droppedCalls = result.dropped;
       const base = {
         session_id: sessionId, stop_reason: result.stopReason, tool_calls: result.toolCalls.length,
         dropped: result.dropped, ms: Math.round(result.ms), topics: h.topics.length, grounding: grounding.length,
@@ -623,7 +625,9 @@ export function createBuildLoop(deps: {
       } catch (err) {
         log("build.cleanup_failed", { session_id: sessionId, error: errorCode(err) });
       }
-      finishTasks(sessionId, st, taskIds, patchCounts.applied > 0 || opsApplied > 0);
+      // A run that only recorded consensus is done, unless the model's tool calls were dropped: then what it
+      // meant to draw is missing, and the list shouldn't say otherwise.
+      finishTasks(sessionId, st, taskIds, patchCounts.applied > 0 || (opsApplied > 0 && droppedCalls === 0));
       ensureTick(sessionId, st);
       schedule(sessionId, st);
     }
