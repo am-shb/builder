@@ -1,0 +1,17 @@
+{
+  // The root base (type checking only, erasable syntax), changed where a Metro bundle needs it (ADR 0016). tsc
+  // type-checks; Metro transforms. No DOM lib: React Native's own types declare fetch, URL and timers.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "jsx": "react-jsx",
+    "lib": ["esnext"],
+    "types": ["node", "react-native"],
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  },
+  "include": ["app", "src", "test", "expo-env.d.ts", ".expo/types/**/*.ts"]
+}

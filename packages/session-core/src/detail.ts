@@ -2,6 +2,7 @@
 import type { SessionLimits } from "@builder/contracts";
 import { engineRefusal } from "./errors.ts";
 import { BOT_NAME } from "./brand.ts";
+import { parseUrl } from "./settings.ts";
 
 // The one-line explanation under the status. Ended has none; a status this page doesn't know says so plainly.
 // "Didn't start" depends on why: the engine's error code, worded as the start's reply worded it.
@@ -63,8 +64,8 @@ export function statusExplanation(status: string, errorCode?: string): string {
 // The stage link, only if it is one we can show as a link: https, or http on the local dev server (the local engine).
 // Anything else (javascript:, data:, a broken value) is never rendered, so a bad value can't become a script link.
 export function safeStageUrl(raw: string | undefined, { dev = false } = {}): string | null {
-  if (!raw || !URL.canParse(raw)) return null;
-  const url = new URL(raw);
+  const url = raw ? parseUrl(raw) : null;
+  if (!url) return null;
   if (url.protocol === "https:" || (dev && url.protocol === "http:")) return url.href;
   return null;
 }

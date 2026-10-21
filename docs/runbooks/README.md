@@ -6,6 +6,23 @@ ADR 0011). **Owner:** TBD.
 Logs are one JSON object per line on stdout, shaped like `{"t": ..., "msg": "<event>", ...ids and counts}`. They never
 contain transcript text, prompts or model output, so you can paste them into an issue. Filter by `session_id`.
 
+## The mobile app: Expo Go and EAS Update
+
+The mobile app (`apps/mobile`, [ADR 0016](../adr/0016-mobile-stack.md)) has no server of its own. During development it
+runs in Expo Go from `npm start -w @builder/mobile`. To hand someone a link that opens in Expo Go without the laptop:
+
+1. `npx eas-cli login` once (an Expo account; the project is created on the first `eas init` in `apps/mobile`, which
+   writes its id into `app.json`).
+2. In `apps/mobile`, with `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and `EXPO_PUBLIC_API_URL` set to the deployed api's
+   origin in the shell or `.env`: `eas update --branch preview --message "<what changed>"`. The values are built into
+   the JavaScript at this point, so a new api origin or Clerk instance means a new update.
+3. The command prints the update's page; its QR code and link open the app in Expo Go. Starting a session from it
+   sends a real, paid bot to the meeting, as from the web site.
+
+An Android APK that needs no Expo Go: `eas build --platform android --profile preview` (`apps/mobile/eas.json`, built
+in the cloud, about fifteen minutes), which gives an install link. The Clerk dashboard must have the Native API on and
+the app's package (`com.builder.mobile`) registered, or sign-in can't come back to the app.
+
 ## Live meeting test
 
 Live tests cost money (Recall bot minutes, models, TTS). Run one only when the meeting-engine owner has approved it.
