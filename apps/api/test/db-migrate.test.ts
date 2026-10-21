@@ -2,7 +2,7 @@
 // engine's test/migrate.test.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecordId } from "surrealdb";
@@ -69,7 +69,10 @@ test("a failing file applies nothing, leaves no row and stops the run; the files
 });
 
 test("openDb migrates an in-process database, in memory or in a folder that keeps its data", async () => {
-  const path = mkdtempSync(join(tmpdir(), "api-surrealkv-"));
+  // Under data/ (git-ignored), not the OS temp folder: a Windows path with a drive letter can't reach the in-process
+  // engine (surrealkvEndpoint in src/db/connect.ts).
+  mkdirSync("data", { recursive: true });
+  const path = mkdtempSync(join("data", "test-surrealkv-"));
   const first = await openDb({ path });
   await first.upsertOrg("org_A");
   const s = await first.createSessionUnlessActive("org_A", {
