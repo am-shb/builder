@@ -14,7 +14,7 @@ five screens on Android and iOS, built on the same api and the same Clerk instan
 phone and shareable as a link.
 
 ## Options considered
-1. **Expo (SDK 58, Expo Router), in the monorepo as `apps/mobile`.** The sponsor's tool, file-based routes like the web,
+1. **Expo (SDK 57, Expo Router), in the monorepo as `apps/mobile`.** The sponsor's tool, file-based routes like the web,
    runs in Expo Go with no native toolchain (the team has no Mac and no Android SDK set up), publishes a shareable
    update with EAS, and Expo's Metro config handles npm workspaces on its own since SDK 52.
 2. **Make the web app a PWA.** No new app, but no native sign-in, no app on the home screen on iOS without ceremony, and
@@ -24,7 +24,9 @@ phone and shareable as a link.
 ## Decision
 Option 1, with these rules:
 
-- **Stack.** Expo SDK 58 (React Native 0.88, React 19.3, the same React as the web), Expo Router (file-based, typed
+- **Stack.** Expo SDK 57 (React Native 0.86, React 19.2), the SDK that Expo Go in the app stores runs on 2026-10-21
+  (SDK 58 shipped on 2026-10-15, but its Expo Go wasn't in the stores yet, and an iPhone can only run the store build;
+  move to 58 once it is). Expo Router (file-based, typed
   routes), `@clerk/expo` with its secure-store token cache, zod for parsing replies. Type checking with the root
   TypeScript (erasable syntax only, as everywhere, ADR 0001); Metro transforms. `npm run check -w @builder/mobile` is
   `tsc -p .` and `node --test` on the pure parts, needs no key and no network, and runs in CI with every other
@@ -67,8 +69,10 @@ Option 1, with these rules:
   in `app.json`. A test scans the source for these, for `console.`, for plain storage, and for raw colors.
 - **Identifiers.** `scheme: builder`, `com.builder.mobile` as the iOS bundle identifier and Android package: a
   placeholder, as the product name is. Changing it later means re-registering the app in Clerk; do it before any store.
-  React is excluded from Expo's version check (`expo.install.exclude`): the web pins 19.3.1 and a monorepo may hold one
-  React, and React Native 0.88 accepts `^19.3.0`.
+  The web pins React 19.3.1 and SDK 57 wants 19.2, so the mobile app keeps its own React under `apps/mobile/node_modules`;
+  Expo's Metro resolution (SDK 55+) points every module at the app's copy. The root `overrides` pin the Expo and React
+  Native packages to the SDK's versions, because `@clerk/expo` is hoisted to the root and npm would otherwise install a
+  second, newer Expo there to satisfy its peer dependencies.
 - **Distribution.** Expo Go during the build week: `npx expo start` on the same Wi-Fi, or `--tunnel`. For the
   submission, an EAS Update on the `preview` branch, which opens in Expo Go from a link, and an Android APK from EAS
   Build if time allows. Neither needs a native toolchain on the laptop. Store submission is out of scope.

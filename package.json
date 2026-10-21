@@ -32,6 +32,10 @@
     },
     "@surrealdb/sqon": {
       "typescript": "$typescript"
-    }
+    },
+    "expo": "~57.0.0",
+    "expo-constants": "~57.0.22",
+    "expo-font": "~57.0.4",
+    "react-native": "0.86.3"
   }
 }
