@@ -120,6 +120,28 @@ test("patchBatchJsonSchema is strict (additionalProperties false at every object
   assert.ok(objects > 8, "walked the object schemas");
 });
 
+test("ToolPatchBatch takes props written as an object or a JSON string as pairs, and the wire schema still asks for pairs", () => {
+  const parsed = ToolPatchBatch.parse({ label: "x", ops: [
+    { op: "add", parentId: "home", node: { id: "a", type: "Text", props: { text: "Buy milk" } } },
+    { op: "add", parentId: "home", node: { id: "b", type: "Checkbox", props: '{"label":"Done","checked":true}' } },
+    { op: "add", parentId: "home", node: { id: "c", type: "Text", props: '[{"key":"text","value":"Call dentist"}]' } },
+    { op: "update", id: "a", props: { text: "Buy oat milk" } },
+  ] });
+  const props = parsed.ops.map((op) => (op.op === "add" ? op.node.props : op.op === "update" ? op.props : null));
+  assert.deepEqual(props, [
+    [{ key: "text", value: "Buy milk" }],
+    [{ key: "label", value: "Done" }, { key: "checked", value: true }],
+    [{ key: "text", value: "Call dentist" }],
+    [{ key: "text", value: "Buy oat milk" }],
+  ]);
+  for (const bad of ["not json", 7, { text: { nested: 1 } }, [{ text: "x" }]]) {
+    const r = ToolPatchBatch.safeParse({ label: "x", ops: [{ op: "add", parentId: "home", node: { id: "a", type: "Text", props: bad } }] });
+    assert.equal(r.success, false, JSON.stringify(bad));
+  }
+  const wire = JSON.stringify(patchBatchJsonSchema());
+  assert.ok(wire.includes('"props":{"type":"array"'), "the model is still told to send pairs");
+});
+
 test("fromToolBatch converts props pairs to a record and the result applies via applyBatch", () => {
   const { batch } = fromToolBatch({ label: "Added: form", by: "Amir", ops: [
     { op: "add", parentId: "app", node: { id: "form", type: "Screen", props: [{ key: "title", value: "Form" }] } },

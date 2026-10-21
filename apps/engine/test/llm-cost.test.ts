@@ -9,7 +9,7 @@ import { settle, testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
 import { MODELS, BUILD_FALLBACKS, DEADLINE_MS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
 import { PRICES, costOf, withCostRecording } from "../src/agent/cost.ts";
-import { patchBatchJsonSchema } from "../src/ui/schema.ts";
+import { patchBatchJsonSchema, ToolPatchBatch } from "../src/ui/schema.ts";
 
 const ENV = {
   RECALL_REGION: "us-west-2", RECALL_API_KEY: "test-key",
@@ -374,6 +374,16 @@ test("llm_tool_dropped logs each zod issue's dotted path and code, never values 
   );
   const text = JSON.stringify(logs);
   for (const leak of ["leak-me", "secret-kind", "extra", "9137", "expected"]) assert.ok(!text.includes(leak), `log must not contain ${leak}`);
+});
+
+test("port keeps an apply_patches call whose props were written as an object", async () => {
+  const tool = { name: "apply_patches", description: "p", strict: true, input_schema: patchBatchJsonSchema(), schema: ToolPatchBatch };
+  const input = { label: "Added: done items", ops: [{ op: "add", parentId: "home.list", node: { id: "home.item-3", type: "ListItem", props: { text: "Pay rent" } } }] };
+  const port = createOpenRouterPort({ openrouterApiKey: "k" }, { fetch: (async () => sse(toolUseStream({ name: "apply_patches", json: [JSON.stringify(input)] }))) as typeof fetch, log: () => {} });
+  const r = await port.runTools({ loop: "build", ...REQ, tools: [tool], effort: "low" });
+  assert.equal(r.dropped, 0);
+  const call = r.toolCalls[0].input as ToolPatchBatch;
+  assert.deepEqual(call.ops[0].op === "add" && call.ops[0].node.props, [{ key: "text", value: "Pay rent" }]);
 });
 
 test("port strips unknown keys at any depth for every tool, and keeps everything else strict", async () => {

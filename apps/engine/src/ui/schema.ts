@@ -130,10 +130,27 @@ export type Change = {
 export const ToolProp = z.strictObject({ key: z.string(), value: PropValue });
 export type ToolProp = z.infer<typeof ToolProp>;
 
+// The build model reads the prototype with props as an object and sometimes writes them back that
+// way, or as a JSON string; OpenRouter doesn't enforce strict schemas. Before the fix, a production
+// session lost every batch after the first to this. Either form becomes key/value pairs here; the
+// JSON schema sent to the model is unchanged (it describes the pairs).
+const asPairs = (v: unknown): unknown => {
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return v;
+    }
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+  return Object.entries(v).map(([key, value]) => ({ key, value }));
+};
+const ToolProps = z.preprocess(asPairs, z.array(ToolProp));
+
 export const ToolNode = z.strictObject({
   id: NodeId,
   type: ComponentTypeSchema,
-  props: z.array(ToolProp),
+  props: ToolProps,
   on: z.strictObject({
     click: z.array(Interaction).optional(),
     change: z.array(Interaction).optional(),
@@ -146,7 +163,7 @@ const toolThemeValue = (slot: ThemeSlotName) => z.enum(THEME_OPTIONS[slot] as [s
 
 export const ToolPatchOp = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("add"), parentId: NodeId, index: z.number().int().min(0).optional(), node: ToolNode }),
-  z.strictObject({ op: z.literal("update"), id: NodeId, props: z.array(ToolProp).optional(), decisionId: z.string().optional() }),
+  z.strictObject({ op: z.literal("update"), id: NodeId, props: ToolProps.optional(), decisionId: z.string().optional() }),
   z.strictObject({ op: z.literal("remove"), id: NodeId }),
   z.strictObject({ op: z.literal("move"), id: NodeId, parentId: NodeId, index: z.number().int().min(0) }),
   z.strictObject({ op: z.literal("set_screen"), screenId: NodeId }),
