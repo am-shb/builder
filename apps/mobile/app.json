@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Builder",
+    "slug": "builder",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "builder",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.builder.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.builder.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d5c4c",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0d5c4c",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      "@clerk/expo",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

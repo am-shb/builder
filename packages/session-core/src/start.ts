@@ -2,6 +2,7 @@
 // ask before starting again (WD8), and which outcomes are about the link itself.
 import type { ExplainedError } from "./errors.ts";
 import type { SessionView } from "./schemas.ts";
+import { parseUrl } from "./settings.ts";
 
 // Every result keeps the link it was for, so a second start for the same meeting after an unknown outcome asks first
 // (WD8) even when the list couldn't reload.
@@ -16,9 +17,8 @@ export type StartOrg = { id: string | null | undefined; name: string | undefined
 // The browser only checks that the link is an https URL; which meeting hosts are allowed is the api's rule, kept in
 // one place (plan: "Start form"). The api's 400 covers the rest.
 export function checkMeetingLink(input: string): string | null {
-  const raw = input.trim();
-  if (!URL.canParse(raw)) return null;
-  const url = new URL(raw);
+  const url = parseUrl(input.trim());
+  if (!url) return null;
   return url.protocol === "https:" ? url.href : null;
 }
 
@@ -27,8 +27,8 @@ export function checkMeetingLink(input: string): string | null {
 // ask first, so a match that's too eager costs one extra question, never a bot. The api and engine match exact links
 // today; a shared key for them is a separate decision (ADR draft "shared meeting key").
 export function meetingKey(link: string): string {
-  if (!URL.canParse(link)) return link.trim();
-  const u = new URL(link);
+  const u = parseUrl(link);
+  if (!u) return link.trim();
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   const path = u.pathname.replace(/\/+$/, "");
   if (host === "meet.google.com") {

@@ -20,6 +20,7 @@ its first tasks.
 | `apps/engine/` | The engine (Builder core): `src/`, `public/`, `test/`, `scripts/` |
 | `apps/api/` | Accounts, sessions, billing and jobs. Today only `GET /health` |
 | `apps/web/` | The customer app and staff pages. No code yet |
+| `apps/mobile/` | The customer app on phones: an Expo app with the web's screens ([ADR 0016](docs/adr/0016-mobile-stack.md)) |
 | `contracts/` | zod schemas for what crosses an app boundary (engine and api, api and web) |
 | `packages/session-core/` | The session screens' framework-free logic, shared by the web and mobile apps |
 | `e2e/` | Tests that cross apps |

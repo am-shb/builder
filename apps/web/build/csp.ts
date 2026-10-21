@@ -4,7 +4,7 @@
 // Render sends the rest as headers, set on builder-web in render.yaml: frame-ancestors (which a <meta> policy can't
 // carry), X-Frame-Options, Referrer-Policy, nosniff, Permissions-Policy and Cross-Origin-Opener-Policy.
 import { loadEnv, type Plugin } from "vite";
-import { apiOrigin, clerkFrontendApiHost } from "../src/lib/settings.ts";
+import { apiOrigin, clerkFrontendApiHost } from "@builder/session-core";
 
 export type CspInput = {
   apiUrl?: string | undefined;

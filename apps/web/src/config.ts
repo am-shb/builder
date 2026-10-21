@@ -1,4 +1,4 @@
-import { apiOrigin, clerkFrontendApiHost } from "./lib/settings.ts";
+import { apiOrigin, clerkFrontendApiHost } from "@builder/session-core";
 
 // The web app's two settings (ADR 0012), both public by design and built into the JavaScript. A missing or malformed
 // one turns the app into a "not configured" page instead of failing the build. The rules are the same ones the build's

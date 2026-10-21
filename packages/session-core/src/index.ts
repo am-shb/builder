@@ -17,3 +17,4 @@ export {
 export { meetingDisplay, type MeetingDisplay } from "./meeting.ts";
 export { startedWhen } from "./time.ts";
 export { isInProgress, isKnownStatus, STATUS_LABELS, statusLabel } from "./status.ts";
+export { apiOrigin, clerkFrontendApiHost, parseUrl } from "./settings.ts";

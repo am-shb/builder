@@ -8,6 +8,7 @@ put your name in the Owner column and open a small PR. One owner per area. Anyon
 | Engine (Builder core) | `apps/engine/` | TBD | v0 working | none |
 | Web (customer app and staff pages) | `apps/web/` | TBD | not started | api |
 | Api (accounts, sessions, billing, jobs) | `apps/api/` | TBD | skeleton (`/health`) | contracts, engine |
+| Mobile (the customer app on phones, Expo) | `apps/mobile/` | TBD | the web's first slice, in Expo Go | api, session-core |
 | Contracts (schemas between apps) | `contracts/` | engine and api owners together | engine and api shapes written | none |
 | Session core (logic shared by the web and mobile apps) | `packages/session-core/` | web and mobile owners together | in use by web; mobile next | contracts |
 | Infra and quality | `render.yaml`, CI, `e2e/`, `docs/security/`, `docs/runbooks/` | TBD | CI running (ADR 0001 proposed). Dockerfiles, `docker-compose.yml`, `render.yaml` (production, CD on checks pass) and the deploy runbook written. The SurrealDB Cloud instance exists; its users and the Render services are not set up yet | none |

@@ -6,9 +6,9 @@ production product with accounts, billing and the rest.
 
 ## Before you start
 1. Read [docs/workstreams.md](docs/workstreams.md), then the README in the folder for your area. The repo is npm
-   workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)): three apps and `contracts/`. The engine's code is
+   workspaces ([ADR 0004](docs/adr/0004-workspaces-and-repo-layout.md)): four apps, `contracts/` and `packages/`. The engine's code is
    in `apps/engine/` (`src/`, `public/`, `test/`, `scripts/`).
-2. Work inside your app's folder: `apps/engine`, `apps/api` or `apps/web`. To change another app, `contracts/`, or the
+2. Work inside your app's folder: `apps/engine`, `apps/api`, `apps/web` or `apps/mobile`. To change another app, `contracts/`, or the
    engine's interfaces, write an ADR (`docs/adr/`) or get that owner's review. `contracts/` needs both the engine and
    api owners.
 3. Settle an area's open decisions with an ADR before writing its code.
@@ -16,8 +16,9 @@ production product with accounts, billing and the rest.
    bugs are in `docs/known-issues.md`; claim one by putting your name next to it.
 
 ## Layout
-- `apps/engine`, `apps/api`, `apps/web`: one app each, with its own `package.json`, `tsconfig.json` and tests.
+- `apps/engine`, `apps/api`, `apps/web`, `apps/mobile`: one app each, with its own `package.json`, `tsconfig.json` and tests.
 - `contracts/` (`@builder/contracts`): zod schemas for what crosses an app boundary. Schemas only, changes are additive.
+- `packages/session-core` (`@builder/session-core`): the session logic the web and mobile apps share. Framework-free.
 - Code is shared only when two apps import it. Code used by one app is a folder inside that app.
 
 ## Current stack (engine)
