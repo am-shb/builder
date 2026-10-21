@@ -13,7 +13,9 @@ type Mode = "sign-in" | "sign-up";
 
 // Sign-in and sign-up through Clerk's hosted pages (ADR 0016): the same instance, methods and organization step as the
 // web app, in the system browser, which comes back to the app when done. In Expo Go the app has no scheme of its own,
-// so the callback is Expo Go's development URL; a built app uses the callback Clerk registers for its package.
+// so the callback is Expo Go's development URL for this very screen: a signed-in visitor here goes on to the app
+// (app/(auth)/_layout.tsx), and a path the router doesn't know would show "Unmatched Route" instead. A built app uses
+// the callback Clerk registers for its package, which the @clerk/expo config plugin wires up outside the router.
 export default function SignInScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -27,7 +29,7 @@ export default function SignInScreen() {
     setProblem(null);
     const inExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
     try {
-      const result = await startHostedAuth({ mode, ...(inExpoGo ? { redirectUrl: makeRedirectUri({ path: "hosted-callback" }) } : {}) });
+      const result = await startHostedAuth({ mode, ...(inExpoGo ? { redirectUrl: makeRedirectUri({ path: "sign-in" }) } : {}) });
       const closed = result.authSessionResult?.type === "cancel" || result.authSessionResult?.type === "dismiss";
       if (!result.createdSessionId && !closed) setProblem("Sign-in didn't finish. Try again.");
     } catch {
