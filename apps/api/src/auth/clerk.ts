@@ -3,6 +3,7 @@
 // Never log a token or a verification message: messages quote claims from the token. Log the reason code only.
 import type { IncomingMessage } from "node:http";
 import { verifyToken } from "@clerk/backend";
+import { decodeJwt } from "@clerk/backend/jwt";
 import type { ClerkConfig } from "../config.ts";
 import { HttpError } from "../http.ts";
 import type { Log } from "../router.ts";
@@ -51,6 +52,20 @@ export function callerFromClaims(claims: Record<string, unknown>): Caller | null
   return { userId, sessionId: str(claims.sid), orgId, orgRole };
 }
 
+/**
+ * Whether the token names the site it was minted for. A browser's token carries its origin in `azp`; a native app's
+ * token (Expo, through Clerk's Native API) has no origin and no `azp` at all. Read without verifying, only to choose
+ * the check: the signature and the times are verified right after. A token that can't be decoded reads as naming a
+ * site, so the verifier reports it as it would any malformed token.
+ */
+function namesAuthorizedParty(token: string): boolean {
+  try {
+    return decodeJwt(token).payload.azp !== undefined;
+  } catch {
+    return true;
+  }
+}
+
 export function createClerkAuth(clerk: ClerkConfig | null, deps: { log: Log; verify?: VerifyToken }): Authenticator {
   const verify = deps.verify ?? verifyToken;
   return {
@@ -63,7 +78,14 @@ export function createClerkAuth(clerk: ClerkConfig | null, deps: { log: Log; ver
         // jwtKey and no secretKey: verification can't fall back to fetching keys from Clerk. The exported
         // verifyToken returns the claims and throws a TokenVerificationError, whose `reason` is a code such as
         // "token-expired", for a bad token.
-        claims = (await verify(token, { jwtKey: clerk.jwtKey, authorizedParties: clerk.authorizedParties })) as unknown as Record<string, unknown>;
+        // `authorizedParties` makes the verifier require an `azp` that is one of our web origins. A native app's token
+        // has none (Clerk: "if the azp claim doesn't exist, skip this step"), so it is checked without that option. The
+        // check guards against a token leaked to another site through a shared cookie; this api takes Bearer tokens
+        // only, never cookies, and the signature, times, subject and session status are checked either way.
+        const options = namesAuthorizedParty(token)
+          ? { jwtKey: clerk.jwtKey, authorizedParties: clerk.authorizedParties }
+          : { jwtKey: clerk.jwtKey };
+        claims = (await verify(token, options)) as unknown as Record<string, unknown>;
       } catch (err) {
         const reason = (err as { reason?: unknown } | null)?.reason;
         deps.log("auth.rejected", { reason: typeof reason === "string" ? reason : err instanceof Error ? err.name : "unknown" });

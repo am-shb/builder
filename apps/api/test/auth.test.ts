@@ -87,7 +87,7 @@ test("bad tokens are refused with 401, and the log carries a reason code but nev
     "not yet valid": signToken({ notBeforeIn: 120 }),
     "signed by another key": signToken({ key: otherPrivateKey }),
     "minted for another site": signToken({ azp: "https://evil.example" }),
-    "no azp": signToken({ azp: null }),
+    "empty azp": signToken({ azp: "" }),
     "pending session": signToken({ sts: "pending" }),
     "alg none": signJwt({ alg: "none", typ: "JWT" }, { sub: "user_x", exp: now + 60, azp: "http://localhost:5173" }),
     "alg HS256": signJwt({ alg: "HS256", typ: "JWT" }, { sub: "user_x", exp: now + 60, azp: "http://localhost:5173" }),
@@ -116,6 +116,21 @@ test("bad tokens are refused with 401, and the log carries a reason code but nev
   assert.ok(reasons.includes("token-invalid-authorized-parties"), `reasons: ${reasons.join(", ")}`);
   assert.ok(reasons.includes("session-pending"));
   assert.ok(reasons.includes("no-subject"));
+});
+
+// Clerk mints a native app's token (Expo, through the Native API) with no `azp`: there's no browser origin to put in
+// it. Such a token is checked on its signature, times and subject alone. A token that names a site still has to name
+// one of ours, and an `azp` that is present but empty is a bad claim, not a missing one.
+test("a native token, which has no azp, is accepted; everything else about it is still checked", async () => {
+  const { lines, log } = capture();
+  const auth = createClerkAuth(testClerk, { log });
+  const caller = await auth.authenticate(req(`Bearer ${signToken({ azp: null, rol: "admin" })}`));
+  assert.deepEqual(caller, { userId: "user_test_1", sessionId: "sess_test_1", orgId: "org_test_a", orgRole: ORG_ADMIN });
+  await rejectsWith(auth.authenticate(req(`Bearer ${signToken({ azp: null, key: otherPrivateKey })}`)), 401, "unauthenticated");
+  await rejectsWith(auth.authenticate(req(`Bearer ${signToken({ azp: null, expiresIn: -60 })}`)), 401, "unauthenticated");
+  await rejectsWith(auth.authenticate(req(`Bearer ${signToken({ azp: null, sts: "pending" })}`)), 401, "unauthenticated");
+  await rejectsWith(auth.authenticate(req(`Bearer ${signToken({ azp: "https://evil.example" })}`)), 401, "unauthenticated");
+  assert.deepEqual(lines.map((l) => l.reason), ["token-invalid-signature", "token-expired", "session-pending", "token-invalid-authorized-parties"]);
 });
 
 test("a missing or non-Bearer header is 401 without calling the verifier", async () => {

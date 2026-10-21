@@ -38,3 +38,6 @@ org-owned data later means a migration of every table.
 - We depend on Clerk being up for sign-in, and Clerk's pricing scales with active users.
 - Follow-up (api owner): token verification and a `requireOrgRole` helper in `apps/api/src/auth`, the webhook
   handler, and tests that a request can never read another org's rows.
+- Added 2026-10-21: a native app (`apps/mobile`, Clerk's Expo SDK with the Native API on) gets session tokens from the
+  same instance, checked with the same key. Those tokens carry no `azp`, so the api applies its authorized-parties rule
+  only to tokens that have one. Clerk's own guidance for `azp`: if the claim doesn't exist, skip that step.
