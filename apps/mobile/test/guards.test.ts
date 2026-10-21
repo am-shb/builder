@@ -42,8 +42,10 @@ test("the app reads no EXPO_PUBLIC_ variable but the two public ones, and nothin
 });
 
 test("no URL of ours is written in the code: origins come from the settings", () => {
+  // Expo's update server, which `eas update:configure` writes into app.json, is the one third-party host allowed.
+  const ALLOWED_HOSTS = new Set(["u.expo.dev"]);
   const found = shipped.flatMap(({ file, text }) =>
-    [...text.matchAll(/\b(?:https?|wss?):\/\/([^\s"'`/:;)]+)/g)].map((m) => `${file}: ${m[1]}`));
+    [...text.matchAll(/\b(?:https?|wss?):\/\/([^\s"'`/:;)]+)/g)].map((m) => m[1]!).filter((h) => !ALLOWED_HOSTS.has(h)).map((h) => `${file}: ${h}`));
   assert.deepEqual(found, []);
   assert.deepEqual(offenders(shipped, /onrender\.com|clerk\.accounts\.dev/), []);
 });

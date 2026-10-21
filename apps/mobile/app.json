@@ -42,6 +42,17 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "79aa2258-f7cc-4d67-b10f-1e22c15cd18d"
+      }
+    },
+    "owner": "omidi77",
+    "runtimeVersion": "exposdk:57.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/79aa2258-f7cc-4d67-b10f-1e22c15cd18d"
     }
   }
 }
