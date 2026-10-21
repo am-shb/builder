@@ -2,7 +2,7 @@
 // guaranteed by running one call at a time must still hold when calls overlap.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecordId } from "surrealdb";
@@ -12,7 +12,12 @@ import { emptyDoc } from "../src/consensus/doc.ts";
 import { emptyPrototype, UNTITLED_APP } from "../src/ui/tree.ts";
 
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
-const tmpDir = () => join(mkdtempSync(join(tmpdir(), "engine-surreal-")), "surreal");
+// Under data/ (git-ignored), not the OS temp folder: a Windows path with a drive letter can't reach the in-process
+// engine (surrealkvEndpoint in src/db/connect.ts).
+const tmpDir = () => {
+  mkdirSync("data", { recursive: true });
+  return join(mkdtempSync(join("data", "test-surreal-")), "surreal");
+};
 // Writes to a store's folder behind its back, as older code or a bug might have. The store must be closed.
 async function raw(path: string, sql: string, vars: Record<string, unknown>) {
   const db = await connect({ path });
@@ -153,7 +158,8 @@ test("E4: a session saved before 0002 still reads after it, with no org and no l
   const { copyFileSync, mkdirSync } = await import("node:fs");
   const { migrate, MIGRATIONS_DIR } = await import("../src/db/migrate.ts");
   const path = tmpDir();
-  const only0001 = join(mkdtempSync(join(tmpdir(), "engine-0001-")), "db");
+  mkdirSync("data", { recursive: true });
+  const only0001 = join(mkdtempSync(join("data", "test-0001-")), "db");
   mkdirSync(only0001);
   copyFileSync(join(MIGRATIONS_DIR, "0001_init.surql"), join(only0001, "0001_init.surql"));
   const db = await connect({ path });
