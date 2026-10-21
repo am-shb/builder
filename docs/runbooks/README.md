@@ -16,8 +16,11 @@ runs in Expo Go from `npm start -w @builder/mobile`. To hand someone a link that
 2. In `apps/mobile`, with `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and `EXPO_PUBLIC_API_URL` set to the deployed api's
    origin in the shell or `.env`: `eas update --branch preview --message "<what changed>"`. The values are built into
    the JavaScript at this point, so a new api origin or Clerk instance means a new update.
-3. The command prints the update's page; its QR code and link open the app in Expo Go. Starting a session from it
-   sends a real, paid bot to the meeting, as from the web site.
+3. The command prints the update's page. Only an Expo account with access to the project can open the update in
+   Expo Go, and Expo Go 57 on Android can't open any (expo/expo#50139), so for people outside the team hand out the
+   APK below. Starting a session from either sends a real, paid bot to the meeting, as from the web site.
+   The two `EXPO_PUBLIC_*` values live in the EAS `preview` environment (`eas env:list --environment preview`), so a
+   publish or build from any machine gets the same ones; `eas env:set` changes them.
 
 An Android APK that needs no Expo Go: `eas build --platform android --profile preview` (`apps/mobile/eas.json`, built
 in the cloud, about fifteen minutes), which gives an install link. The Clerk dashboard must have the Native API on and
