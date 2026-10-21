@@ -71,6 +71,10 @@ Native API on
 - **Hot reload doesn't reach the phone on some Wi-Fi:** the bundle and the api work, but the dev client's channel to
   Expo CLI drops ("Cannot connect to Expo CLI"), so edits need Reload from Expo Go's menu, and the device's
   `console.log` lines reach Metro only after a reload. Development-only; nothing in the app.
+- **Expo Go can't be the judge-facing link.** Expo lets only accounts with access to the project open a published
+  update in Expo Go, and Expo Go 57.0.9 on Android fails on every EAS Update anyway (expo/expo#50139, fixed in Expo
+  Go 58; iOS works). The shareable artifact is the Android APK from `eas build --platform android --profile preview`,
+  which embeds the bundle and takes later `preview` updates. iPhone needs TestFlight, so an Apple developer account.
 - **Reopening the project from Expo Go's recent list reuses the last deep link** it was opened with. After a sign-in
   callback that was a bad path, that meant "Unmatched Route" on every launch until the entry was cleared.
 
@@ -86,5 +90,8 @@ Native API on
       Clerk's organization step, the sessions list with the org and role, a start that moves to "In the meeting" on the
       engine's event, the session screen with the stage link, the reuse guard, the organization switcher
 - [ ] The same on an iPhone
-- [ ] An EAS Update on `preview`, opened cold in Expo Go
+- [x] An EAS Update on `preview` (group f42e387c, 2026-10-21). Opening it cold in Expo Go on Android fails on Expo Go 57's
+      own bug (see Known limits); an APK build is the link to hand out
+- [ ] An Android APK from EAS Build with the deployed api's origin baked in (`EXPO_PUBLIC_API_URL` in the EAS
+      `preview` environment)
 - [ ] A real icon and splash image
