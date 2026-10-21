@@ -1,7 +1,7 @@
 // The session page's words and checks, as plain functions (plan: "Session detail", "Status labels", "Stage link").
 import type { SessionLimits } from "@builder/contracts";
-import { engineRefusal } from "../api/errors.ts";
-import { BOT_NAME } from "../brand.ts";
+import { engineRefusal } from "./errors.ts";
+import { BOT_NAME } from "./brand.ts";
 
 // The one-line explanation under the status. Ended has none; a status this page doesn't know says so plainly.
 // "Didn't start" depends on why: the engine's error code, worded as the start's reply worded it.

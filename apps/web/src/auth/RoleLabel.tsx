@@ -1,5 +1,5 @@
 import { useOrgQuery } from "../api/ApiProvider.tsx";
-import { roleLabel } from "../api/errors.ts";
+import { roleLabel } from "@builder/session-core";
 
 // The member's role in the active organization, from GET /v1/me, on desktop beside the org switcher. It's a nicety:
 // while it loads, or if it fails, nothing shows.

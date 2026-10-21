@@ -1,7 +1,7 @@
 // The start flow's rules, as plain functions: checking a link, telling whether two links are the same meeting, when to
 // ask before starting again (WD8), and which outcomes are about the link itself.
-import type { ExplainedError } from "../api/errors.ts";
-import type { SessionView } from "../api/schemas.ts";
+import type { ExplainedError } from "./errors.ts";
+import type { SessionView } from "./schemas.ts";
 
 // Every result keeps the link it was for, so a second start for the same meeting after an unknown outcome asks first
 // (WD8) even when the list couldn't reload.

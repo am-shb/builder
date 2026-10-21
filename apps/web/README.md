@@ -33,7 +33,10 @@ succeeds without them.
 For the api and the engine next to it, with no bot and no spend, see "Local development" in the plan.
 
 ## Layout
-- `src/`: the app. `brand.ts` holds `PRODUCT_NAME` and `BOT_NAME`: the product name and domain aren't decided, so
+- `src/`: the app's screens, hooks and components. The session logic they share with the mobile app (the api client, the
+  reply schemas, the error text, the start rules, the session page's words, meeting display, times, status labels) is
+  `@builder/session-core` ([packages/session-core](../../packages/session-core/README.md)), imported by name.
+  `brand.ts` re-exports `PRODUCT_NAME` and `BOT_NAME` from it: the product name and domain aren't decided, so
   every screen takes the names from there, and no URL of ours is written in the code.
 - `src/styles/globals.css`: the design tokens (light and dark), the type scale and the one elevation level. The only
   file with raw colors; a test fails on a raw color anywhere else in `src/`.

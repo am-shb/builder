@@ -1,9 +1,9 @@
 import { useAuth, useOrganization } from "@clerk/react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useApi } from "../api/ApiProvider.tsx";
-import { ApiError } from "../api/client.ts";
-import { explainError } from "../api/errors.ts";
-import { isLinkProblem, type StartOrg, type StartResult } from "./start.ts";
+import { ApiError } from "@builder/session-core";
+import { explainError } from "@builder/session-core";
+import { isLinkProblem, type StartOrg, type StartResult } from "@builder/session-core";
 
 export type StartSession = {
   // Starts a session for the link. Resolves with the outcome, or null when a start is already running.

@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { BOT_NAME } from "../brand.ts";
 import { Button } from "../components/Button.tsx";
 import { TextField } from "../components/TextField.tsx";
-import { checkMeetingLink } from "./start.ts";
+import { checkMeetingLink } from "@builder/session-core";
 
 export const LINK_HINT = `Google Meet, Zoom or Teams. ${BOT_NAME} asks to join; admit it from the meeting.`;
 export const LINK_ERROR = "Use an https Google Meet, Zoom or Teams link.";

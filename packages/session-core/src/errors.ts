@@ -1,5 +1,5 @@
 // Every api error in our own words (plan: "Errors (every api code)"). The UI shows these, never the api's message.
-import { BOT_NAME, PRODUCT_NAME } from "../brand.ts";
+import { BOT_NAME, PRODUCT_NAME } from "./brand.ts";
 import { ApiError } from "./client.ts";
 
 // Where the error happened: reading a list or the role, reading one session's page, or starting a session.

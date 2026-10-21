@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createApiClient, isAbort, type ApiClient } from "./client.ts";
+import { createApiClient, isAbort, type ApiClient } from "@builder/session-core";
 
 const ApiContext = createContext<ApiClient | null>(null);
 

@@ -5,13 +5,13 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider, useOrgQuery } from "../src/api/ApiProvider.tsx";
-import type { SessionView } from "../src/api/schemas.ts";
+import type { SessionView } from "@builder/session-core";
 import { BOT_NAME } from "../src/brand.ts";
 import { AUTO_REFRESH_MS, useAutoRefresh } from "../src/hooks/useAutoRefresh.ts";
 import { HomePage } from "../src/pages/HomePage.tsx";
 import { SessionPage } from "../src/pages/SessionPage.tsx";
-import { ENDED_REASONS, FAILED_REASONS, STATUS_EXPLANATIONS, statusExplanation } from "../src/sessions/detail.ts";
-import { mayStillChange } from "../src/sessions/start.ts";
+import { ENDED_REASONS, FAILED_REASONS, STATUS_EXPLANATIONS, statusExplanation } from "@builder/session-core";
+import { mayStillChange } from "@builder/session-core";
 import { StartSessionProvider } from "../src/sessions/StartSessionProvider.tsx";
 import { API, errorBody, fakeApi, session, type Reply } from "./helpers/fake-api.ts";
 

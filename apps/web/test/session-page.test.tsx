@@ -6,7 +6,7 @@ import { setClerk } from "./helpers/clerk.tsx";
 import { ApiProvider } from "../src/api/ApiProvider.tsx";
 import { SessionPage } from "../src/pages/SessionPage.tsx";
 import { BOT_NAME, PRODUCT_NAME } from "../src/brand.ts";
-import { exactTime, limitsText, safeStageUrl, statusExplanation } from "../src/sessions/detail.ts";
+import { exactTime, limitsText, safeStageUrl, statusExplanation } from "@builder/session-core";
 import { StageLink } from "../src/sessions/StageLink.tsx";
 import { axeViolations } from "./helpers/axe.ts";
 import { API, errorBody, fakeApi, session, type Reply } from "./helpers/fake-api.ts";

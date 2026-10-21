@@ -2,18 +2,18 @@ import { CircleAlert, RotateCw } from "lucide-react";
 import { Link } from "react-router";
 import type { ReactNode } from "react";
 import type { OrgQuery } from "../api/ApiProvider.tsx";
-import { explainError } from "../api/errors.ts";
-import type { SessionView } from "../api/schemas.ts";
+import { explainError } from "@builder/session-core";
+import type { SessionView } from "@builder/session-core";
 import { BOT_NAME } from "../brand.ts";
 import { SectionHeader } from "../components/AppShell.tsx";
 import { Button } from "../components/Button.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { SessionList, SessionRow, SessionRowSkeleton } from "../components/SessionRow.tsx";
 import { ErrorNotice } from "./ErrorNotice.tsx";
-import { meetingDisplay } from "./meeting.ts";
+import { meetingDisplay } from "@builder/session-core";
 import { useRefreshNews } from "../hooks/useRefreshNews.tsx";
 import { cn } from "../lib/cn.ts";
-import { startedWhen } from "./time.ts";
+import { startedWhen } from "@builder/session-core";
 
 export const EMPTY_STEPS = ["Paste the meeting link", `Admit ${BOT_NAME} when it asks to join`, "Watch the prototype take shape"];
 

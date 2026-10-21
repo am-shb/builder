@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { BOT_NAME } from "../brand.ts";
 import { Button, buttonVariants } from "../components/Button.tsx";
 import { cn } from "../lib/cn.ts";
-import { safeStageUrl } from "./detail.ts";
+import { safeStageUrl } from "@builder/session-core";
 
 // The stage link (plan WD5). It carries the stage's control token, so it stays hidden until asked for, with a warning
 // next to it. It's rendered as a link only if it's https (or http on the local dev server). Copying puts it on the

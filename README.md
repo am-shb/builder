@@ -21,6 +21,7 @@ its first tasks.
 | `apps/api/` | Accounts, sessions, billing and jobs. Today only `GET /health` |
 | `apps/web/` | The customer app and staff pages. No code yet |
 | `contracts/` | zod schemas for what crosses an app boundary (engine and api, api and web) |
+| `packages/session-core/` | The session screens' framework-free logic, shared by the web and mobile apps |
 | `e2e/` | Tests that cross apps |
 | `docs/` | Workstreams, ADRs, architecture, product, security, runbooks, known issues |
 
