@@ -1,13 +1,18 @@
-import { StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
+import { StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from "react-native";
 import { font, radius, space, touch, type as typeScale, useTheme } from "../theme.ts";
 
 // A labelled field with a hint and an error line, as on the web. The error replaces the hint and is read by screen
 // readers through the input's accessibility hint. Text is 16, so iOS never zooms into it.
-export function TextField({ label, hint, error, style, ...input }: TextInputProps & { label: string; hint?: string; error?: string | undefined }) {
+export function TextField({ label, hint, error, containerStyle, ...input }: TextInputProps & {
+  label: string;
+  hint?: string;
+  error?: string | undefined;
+  containerStyle?: StyleProp<ViewStyle>;
+}) {
   const { colors } = useTheme();
   const note = error ?? hint;
   return (
-    <View style={style}>
+    <View style={containerStyle}>
       <Text style={[styles.label, { color: colors.ink2 }]}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
