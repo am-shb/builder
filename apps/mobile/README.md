@@ -61,6 +61,19 @@ links are text. `BOT_NAME` and `PRODUCT_NAME` come from `@builder/session-core`.
 `apps/api` (with the native-token rule), `@builder/session-core`, `@builder/contracts`, the Clerk instance with the
 Native API on
 
+## Known limits (seen on the phone, 2026-10-21)
+- **An abandoned hosted sign-in sticks to the device's Clerk client.** Clerk returns the same pending hosted-auth
+  flow (same state and callback) for a client until it is completed, so after a callback that never reached the app
+  (as happened with the wrong redirect path before #30), every later attempt showed the first attempt's callback.
+  Destroying the device's Clerk client (`clerk.client.destroy()`) and reloading cleared it. With the callback on the
+  sign-in screen this doesn't arise, but a person who kills the app mid-flow may hit it; a "start over" affordance
+  that destroys the client is the fix if it does.
+- **Hot reload doesn't reach the phone on some Wi-Fi:** the bundle and the api work, but the dev client's channel to
+  Expo CLI drops ("Cannot connect to Expo CLI"), so edits need Reload from Expo Go's menu, and the device's
+  `console.log` lines reach Metro only after a reload. Development-only; nothing in the app.
+- **Reopening the project from Expo Go's recent list reuses the last deep link** it was opened with. After a sign-in
+  callback that was a bad path, that meant "Unmatched Route" on every launch until the entry was cleared.
+
 ## Open decisions
 - Distribution after the hackathon: Expo Go and EAS Update only, or TestFlight and Play internal testing (needs the
   identifiers decided)
@@ -69,6 +82,9 @@ Native API on
 ## First tasks
 - [x] ADR 0016
 - [x] Sign-in, organizations, the list, the start form, the session screen
-- [ ] Checked on an Android phone and an iPhone against the local setup (the web plan's manual check)
+- [x] Checked on an Android phone (Samsung, Expo Go 57) against the local setup on 2026-10-21: hosted sign-in and
+      Clerk's organization step, the sessions list with the org and role, a start that moves to "In the meeting" on the
+      engine's event, the session screen with the stage link, the reuse guard, the organization switcher
+- [ ] The same on an iPhone
 - [ ] An EAS Update on `preview`, opened cold in Expo Go
 - [ ] A real icon and splash image
