@@ -33,6 +33,13 @@ Created when they have code, under `src/`:
 
 ## Depends on / provides
 - Depends on: `@builder/contracts`, SurrealDB, Clerk
+
+## Who may call `/v1`
+Every `/v1` request carries a Clerk session token as a Bearer token, checked offline with `CLERK_JWT_KEY`
+(`src/auth/clerk.ts`). A browser's token names its origin in `azp`, which must be one of `CLERK_AUTHORIZED_PARTIES`. A
+native app's token (`apps/mobile`, through Clerk's Native API) has no `azp`, because it has no origin: it is checked on
+its signature, times, subject and session status, and the `azp` rule doesn't apply to it. An `azp` that is present but
+not one of ours is still refused. The api takes no cookies, so the cross-site case `azp` guards against can't reach it.
 - Provides: the API that `apps/web` builds against, and the receiving end of the engine's events
 
 ## Open decisions
