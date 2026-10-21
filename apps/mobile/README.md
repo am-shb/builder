@@ -92,6 +92,7 @@ Native API on
 - [ ] The same on an iPhone
 - [x] An EAS Update on `preview` (group f42e387c, 2026-10-21). Opening it cold in Expo Go on Android fails on Expo Go 57's
       own bug (see Known limits); an APK build is the link to hand out
-- [ ] An Android APK from EAS Build with the deployed api's origin baked in (`EXPO_PUBLIC_API_URL` in the EAS
-      `preview` environment)
+- [x] An Android APK from EAS Build with the deployed api's origin baked in (`EXPO_PUBLIC_API_URL` in the EAS
+      `preview` environment): build 59af9bc2 on 2026-10-21, its install link on the project's builds page on expo.dev.
+      The bundle inside was checked to name the deployed api and the Clerk key
 - [ ] A real icon and splash image
