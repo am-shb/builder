@@ -37,9 +37,10 @@ Option 1, with these rules:
   account's pending step, or after leaving the last org) goes to choose one.
 - **Clerk.** Sign-in and sign-up through Clerk's hosted pages (`useHostedAuth`), opened in the system browser and
   coming back to the app: the same instance, methods and organization step as the web, nothing to rebuild, and it
-  works in Expo Go. In Expo Go the callback is Expo Go's development URL (`makeRedirectUri`), because the app has no
-  scheme of its own there; a built app uses the callback Clerk registers for its package, which the `@clerk/expo`
-  config plugin wires. Organizations have no prebuilt native components, so `/choose-organization` is Clerk's
+  works in Expo Go. The callback is always the sign-in screen's own URL from `makeRedirectUri` (`exp://.../--/sign-in`
+  in Expo Go, `builder://sign-in` in a build): a path the router knows, whose layout forwards a signed-in visitor to
+  the app. Clerk's default callback is a path with no screen, and in a build it needs a rebuilt native project.
+  Checked on an Android phone on 2026-10-21. Organizations have no prebuilt native components, so `/choose-organization` is Clerk's
   `useOrganizationList`: the memberships to pick from, and a name to create one. Telemetry is off.
 - **The api and native tokens.** Clerk mints a native app's token with no `azp`, because it has no browser origin,
   and `@clerk/backend` refuses such a token once `authorizedParties` is set. The api now applies its authorized-parties
