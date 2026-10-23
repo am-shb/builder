@@ -154,8 +154,11 @@
 }
 .b-phone .b-app-body { overflow-y: auto; scrollbar-width: none; }
 .b-phone .b-screen { padding: 20px 16px 24px; gap: var(--b-gap); }
-/* One column on a phone. */
+/* One column on a phone, except a 2-column Grid, which stays two. */
 .b-app .b-phone :is(.b-grid, .b-split) { grid-template-columns: minmax(0, 1fr); }
+.b-app .b-phone .b-grid.is-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* A segmented control is wider than half a phone, so it takes the whole row. */
+.b-app .b-phone .b-grid.is-cols-2 > .b-segmented { grid-column: 1 / -1 !important; }
 .b-app .b-phone .b-grid > * { grid-column: auto !important; }
 
 .b-screen {

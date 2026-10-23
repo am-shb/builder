@@ -934,6 +934,28 @@ test("review fixes", async (t) => {
         await page.screenshot(path.join(dir, "dashboard-one-stat.png"));
       });
 
+      await t.test("on a phone a 2-column Grid stays two columns and a 3-column Grid stacks", async () => {
+        await fresh();
+        const card = (id: string) => ({ id, type: "ProductCard", props: { title: id, price: "$4" }, status: "agreed", children: [] });
+        const stat = (id: string) => ({ id, type: "StatCard", props: { label: id, value: "1" }, status: "agreed", children: [] });
+        const screen = {
+          id: "grids", type: "Screen", props: { title: "Grids" }, status: "agreed",
+          children: [
+            { id: "grids.two", type: "Grid", props: { columns: "2" }, status: "agreed", children: ["a", "b", "c", "d"].map((n) => card(`grids.two.${n}`)) },
+            { id: "grids.three", type: "Grid", props: { columns: "3" }, status: "agreed", children: ["a", "b", "c"].map((n) => stat(`grids.three.${n}`)) },
+          ],
+        };
+        await page.eval(`(() => { window.proto.root.props.device = "phone"; window.proto.root.children.push(${JSON.stringify(screen)}); window.show("grids"); })()`);
+        const pos = (sel: string) => page.eval<{ top: number; left: number }>(`(() => { const e = document.querySelector('[data-node-id="${sel}"]'); return { top: e.offsetTop, left: e.offsetLeft }; })()`);
+        const [a, b, c] = [await pos("grids.two.a"), await pos("grids.two.b"), await pos("grids.two.c")];
+        assert.equal(a.top, b.top, "first two cards share a row");
+        assert.notEqual(a.left, b.left, "first two cards sit side by side");
+        assert.ok(c.top > a.top, "the third card wraps to a second row");
+        const tops = [await pos("grids.three.a"), await pos("grids.three.b"), await pos("grids.three.c")].map((p) => p.top);
+        assert.equal(new Set(tops).size, 3, `a 3-column grid stacks on a phone: ${JSON.stringify(tops)}`);
+        await page.screenshot(path.join(dir, "phone-grid-two.png"));
+      });
+
       t.diagnostic(`screenshots: ${dir}`);
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     });
