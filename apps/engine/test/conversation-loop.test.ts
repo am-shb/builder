@@ -970,3 +970,12 @@ test("no spoken pick without a comparison, from the bot, or for a line that only
   assert.equal(s.handoffs.length, 0);
   assert.equal(s.logs.filter((l) => l.msg === "conversation.spoken_pick").length, 0);
 });
+
+test("a line that triggers a spoken pick still gets its normal model turn", async () => {
+  const s = await setup([[speak("Going with B.", "answer")]]);
+  showAB(s.rt);
+  await s.say("Omid Omidi", "Builder, let's go with B");
+  await flush();
+  assert.equal(s.handoffs.length, 1);
+  assert.equal(s.requests.length, 1, "the model is still called for that line");
+});
