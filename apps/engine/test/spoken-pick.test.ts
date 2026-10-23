@@ -20,5 +20,6 @@ test("lines that only mention, ask about or contradict a pick are not picks", ()
     "I'd go with C", "A or B?", "go with A, no wait, B",
     "B and A are both fine", "B, but I am not sure", "B but A has the sales", "B, definitely not",
     "we should do a", "we do a", "take a", "B?!", "B.?",
+    "B... actually A", "B, then A", "B, wait, A", "go with B, on second thought A",
   ]) assert.equal(matchSpokenPick(text, labels), null, text);
 });

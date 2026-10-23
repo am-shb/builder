@@ -12,8 +12,8 @@ const PATTERNS = [
   new RegExp(`^${LEAD}(?:option\\s+)?${LABEL}\\s+is\\s+(?:actually\\s+|clearly\\s+)?better$`),
 ];
 const LOOKING = /\b(?:show|see|look|view)\b/;
-// Hedges and negations anywhere in the line: not a pick ("B, definitely not"; a leading "no, B" is also dropped).
-const HEDGE = /\b(?:not|no|nope|never|dont|doesnt|isnt|wont|cant|maybe|perhaps|unless|if|unsure)\b/;
+// Hedges, negations and corrections ("B, then A") anywhere in the line: not a pick ("B, definitely not"; a leading "no, B" is also dropped).
+const HEDGE = /\b(?:not|no|nope|never|dont|doesnt|isnt|wont|cant|maybe|perhaps|unless|if|unsure|wait|then|instead|rather|scratch that|on second thought|actually(?! better))\b/;
 // Another option named in a clause that picks nothing. "a" is left out: it is mostly the article.
 const OTHER_LABEL = /\b(?:b|c|bee)\b|\boption a\b/;
 
