@@ -14,8 +14,9 @@ const PATTERNS = [
 const LOOKING = /\b(?:show|see|look|view)\b/;
 // Hedges, negations and corrections ("B, then A") anywhere in the line: not a pick ("B, definitely not"; a leading "no, B" is also dropped).
 const HEDGE = /\b(?:not|no|nope|never|dont|doesnt|isnt|wont|cant|maybe|perhaps|unless|if|unsure|wait|then|instead|rather|scratch that|on second thought|actually(?! better))\b/;
-// Another option named in a clause that picks nothing. "a" is left out: it is mostly the article.
-const OTHER_LABEL = /\b(?:b|c|bee)\b|\boption a\b/;
+// Another option named in a clause that picks nothing. "a" is the label only as a clause's last word or
+// after "option"; elsewhere it is the article.
+const OTHER_LABEL = /\b(?:b|c|bee)\b|\boption a\b|\ba$/;
 
 // The label a line picks, or null. A line picks when its pick clauses all name one label, no other clause
 // names an option, and nothing hedges or negates ("B and A are both fine" and "go with A, no wait, B" pick
