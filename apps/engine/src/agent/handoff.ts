@@ -257,10 +257,11 @@ function nextQuestionId(doc: ConsensusDoc): string {
  */
 export function applyConsensusOps(
   input: ConsensusDoc, ops: ConsensusUpdate[], now: number, proto: Prototype,
-): { doc: ConsensusDoc; addedConflicts: string[]; propsDropped: number } {
+): { doc: ConsensusDoc; addedConflicts: string[]; propsDropped: number; unoffered: number } {
   let doc = input;
   const addedConflicts: string[] = [];
   let propsDropped = 0;
+  let unoffered = 0;
   for (const op of ops) {
     switch (op.op) {
       case "add_decision":
@@ -288,8 +289,9 @@ export function applyConsensusOps(
         const conflict: Conflict = {
           id: op.id, topic: op.topic, status: "open", openedAt: now,
           variants: op.variants.map((v) => {
-            const { batch, dropped } = fromToolBatch({ ...v.batch, decisionId: `d-${op.id}` }, {}, proto);
+            const { batch, dropped, unoffered: skipped } = fromToolBatch({ ...v.batch, decisionId: `d-${op.id}` }, {}, proto);
             propsDropped += dropped;
+            unoffered += skipped;
             return { label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(batch, doc) };
           }),
         };
@@ -309,5 +311,5 @@ export function applyConsensusOps(
       }
     }
   }
-  return { doc, addedConflicts, propsDropped };
+  return { doc, addedConflicts, propsDropped, unoffered };
 }

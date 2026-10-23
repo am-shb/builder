@@ -106,7 +106,7 @@ const addNode = (parentId: string, id: string, type: string, props: [string, unk
 
 const QUICK_ADD = [
   patches("Added: quick-add · Amir", [
-    addNode("home", "home.quick-add", "Input", [["placeholder", "Add a task"]], "d-quick-add"),
+    addNode("home", "home.quick-add", "Text", [["text", "Add a task"]], "d-quick-add"),
     addNode("home", "home.quick-add-btn", "Button", [["label", "Add"]], "d-quick-add"),
   ], "Amir"),
 ];
@@ -117,8 +117,8 @@ const conflictVariant = (label: string, summary: string, backers: string[], ops:
 const DONE_CONFLICT = consensus([{
   op: "add_conflict", id: "c-done", topic: "Where done tasks go",
   variants: [
-    conflictVariant("A", "Hide done tasks behind a toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle", [["label", "Show done"]])]),
-    conflictVariant("B", "Move done tasks to a Done tab", ["Sara"], [addNode("home", "home.tabs", "Tabs", [["tabs", ["To do", "Done"]]])]),
+    conflictVariant("A", "Hide done tasks behind a toggle", ["Amir"], [addNode("home", "home.show-done", "Badge", [["text", "Show done"]])]),
+    conflictVariant("B", "Move done tasks to a Done tab", ["Sara"], [addNode("home", "home.tabs", "Card", [["title", "Done"]])]),
   ],
 }]);
 
@@ -341,12 +341,46 @@ test("add_conflict shows comparison with ≥2 valid variants", async () => {
   assert.equal(findNode(s.proto(), "home.tabs"), undefined, "variants are not applied to the main prototype");
 });
 
+test("a conflict variant with one unoffered add keeps its other ops, and the run counts the skip", async () => {
+  const s = await setup([[consensus([{
+    op: "add_conflict", id: "c-done", topic: "Where done tasks go",
+    variants: [
+      conflictVariant("A", "Badge", ["Amir"], [addNode("home", "home.show-done", "Badge", [["text", "Show done"]])]),
+      conflictVariant("B", "Card with a heading", ["Sara"], [
+        addNode("home", "home.done-card", "Card", [["title", "Done"]]),
+        addNode("home", "home.done-heading", "Heading", [["text", "Done"]]),
+      ]),
+    ],
+  }])]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "badge"), await s.say("Sara", "card")]));
+  await flush();
+  const conflict = s.doc().conflicts[0];
+  assert.deepEqual(conflict.variants.map((v) => v.label), ["A", "B"]);
+  assert.deepEqual(conflict.variants[1].batch.ops.map((o) => (o.op === "add" ? o.node.id : o.op)), ["home.done-card"]);
+  assert.ok(s.sent.some((e) => e.type === "comparison"), "the comparison still shows");
+  assert.equal(s.logs.find((l) => l.msg === "build.run")!.fields?.ops_unoffered, 1);
+});
+
+test("an apply_patches batch with an unoffered add and its child keeps the rest", async () => {
+  const s = await setup([[patches("Added: mixed", [
+    addNode("home", "home.title", "Heading", [["text", "Tasks"]]),
+    addNode("home.title", "home.title.sub", "Text", [["text", "sub"]]),
+    addNode("home", "home.note", "Text", [["text", "Due Fri"]]),
+  ])]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a title and a note")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.title"), undefined);
+  assert.equal(findNode(s.proto(), "home.title.sub"), undefined);
+  assert.ok(findNode(s.proto(), "home.note"));
+  assert.equal(s.logs.find((l) => l.msg === "build.run")!.fields?.ops_unoffered, 2);
+});
+
 test("add_conflict with fewer than 2 applicable variants records the conflict but shows no comparison", async () => {
   const s = await setup([[consensus([{
     op: "add_conflict", id: "c-x", topic: "Where done tasks go",
     variants: [
-      conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]),
-      conflictVariant("B", "Tab", ["Sara"], [addNode("missing", "missing.tabs", "Tabs")]),
+      conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]),
+      conflictVariant("B", "Tab", ["Sara"], [addNode("missing", "missing.tabs", "Card")]),
     ],
   }])]]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "toggle"), await s.say("Sara", "tab")]));
@@ -451,8 +485,8 @@ const RESOLVE_B = (groundingIds: number[]) => handoff(groundingIds, {
 const conflictOp = (id: string, aNode: string, bNode: string) => ({
   op: "add_conflict", id, topic: `Topic ${id}`,
   variants: [
-    conflictVariant("A", "Option A", ["Amir"], [addNode("home", aNode, "Toggle", [["label", "A"]])]),
-    conflictVariant("B", "Option B", ["Sara"], [addNode("home", bNode, "Tabs", [["tabs", ["x", "y"]]])]),
+    conflictVariant("A", "Option A", ["Amir"], [addNode("home", aNode, "Badge", [["text", "A"]])]),
+    conflictVariant("B", "Option B", ["Sara"], [addNode("home", bNode, "Card", [["title", "x"]])]),
   ],
 });
 const PICK_ANY_B = (groundingIds: number[]) => handoff(groundingIds, {
@@ -517,18 +551,18 @@ test("model batch cannot mark nodes agreed", async () => {
   const s = await setup([[
     // The tool format has no status: a batch or a variant that sends one is rejected whole.
     patches("Added: quick-add", [
-      { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Input", props: [], status: "agreed", decisionId: "d-quick-add" } },
+      { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Text", props: [], status: "agreed", decisionId: "d-quick-add" } },
     ]),
     patches("Settled: title", [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
     consensus([{ op: "add_conflict", id: "c-y", topic: "Toggle", variants: [
-      conflictVariant("A", "Toggle", ["Amir"], [{ op: "add", parentId: "home", node: { id: "home.show-done", type: "Toggle", props: [], status: "agreed" } }]),
-      conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]),
+      conflictVariant("A", "Toggle", ["Amir"], [{ op: "add", parentId: "home", node: { id: "home.show-done", type: "Badge", props: [], status: "agreed" } }]),
+      conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Card")]),
     ] }]),
-    patches("Added: title", [addNode("home", "home.title", "Heading", [["text", "Tasks"]], "d-quick-add")]),
+    patches("Added: title", [addNode("home", "home.title", "Text", [["text", "Tasks"]], "d-quick-add")]),
     consensus([
       { op: "add_decision", id: "d-quick-add", text: "Quick-add", proposedBy: "Amir", affects: ["home.title"] },
       { op: "add_conflict", id: "c-x", topic: "Where done tasks go", variants: [
-        conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]),
+        conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]),
         conflictVariant("B", "Rename the heading", ["Sara"], [{ op: "update", id: "home.title", props: [{ key: "text", value: "Today" }] }]),
       ] },
     ]),
@@ -617,10 +651,10 @@ test("an update whose props all drop leaves an agreed node alone (known issue I2
 
 test("a variant update whose props all drop does not retag the node", async () => {
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{ op: "add_conflict", id: "c1", topic: "Heading", variants: [
       conflictVariant("A", "Red", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "color", value: "red" }] }]),
-      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Toggle")]),
+      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Badge")]),
     ] }]),
   ]]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "red"), await s.say("Sara", "toggle")]));
@@ -849,14 +883,14 @@ test("objection to an agreed decision returns its nodes to draft", async () => {
 test("rejected winning batch does not flip pre-existing nodes", async () => {
   // B updates the existing heading, then adds under a missing parent, so its whole batch is rejected.
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{
       op: "add_conflict", id: "c-done", topic: "Heading",
       variants: [
         conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
         conflictVariant("B", "Rename and tab", ["Sara"], [
           { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
-          addNode("missing", "missing.tabs", "Tabs"),
+          addNode("missing", "missing.tabs", "Card"),
         ]),
       ],
     }]),
@@ -1205,7 +1239,7 @@ test("a model change to an agreed node sends it back to draft until a decision c
     AGREE_QUICK_ADD,
     [
       patches("Changed: placeholder", [
-        { op: "update", id: "home.quick-add", props: [{ key: "placeholder", value: "New task" }], decisionId: "d-placeholder" },
+        { op: "update", id: "home.quick-add", props: [{ key: "text", value: "New task" }], decisionId: "d-placeholder" },
         // Changes nothing, so it is dropped: an update cannot demote an agreed node by itself.
         { op: "update", id: "home.quick-add-btn", props: [{ key: "label", value: "Add" }] },
       ], "Lee"),
@@ -1225,7 +1259,7 @@ test("a model change to an agreed node sends it back to draft until a decision c
   s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "the box should say New task")]));
   await flush();
   const input = findNode(s.proto(), "home.quick-add")!;
-  assert.deepEqual([input.status, input.decisionId, input.props.placeholder], ["draft", "d-placeholder", "New task"], "changed, so not agreed any more");
+  assert.deepEqual([input.status, input.decisionId, input.props.text], ["draft", "d-placeholder", "New task"], "changed, so not agreed any more");
   assert.equal(findNode(s.proto(), "home.quick-add-btn")!.status, "agreed", "a no-op update leaves the node alone");
   assert.deepEqual(s.patches().at(-1)!.changes.map((c) => c.id), ["home.quick-add"]);
   assert.equal(s.doc().decisions.find((d) => d.id === "d-quick-add")!.status, "agreed", "the earlier decision stands");
@@ -1248,7 +1282,7 @@ test("a model remove of an agreed node, or of anything holding one, is dropped u
   const s = await setup([
     [
       ...AGREE_QUICK_ADD,
-      patches("Added: note", [addNode("home", "home.box", "Section"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
+      patches("Added: note", [addNode("home", "home.box", "Card"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
       consensus([
         { op: "add_decision", id: "d-note", text: "A due note", proposedBy: "Amir", affects: ["home.box.note"] },
         { op: "mark_pending", decisionId: "d-note" },
@@ -1284,14 +1318,14 @@ test("a model remove of an agreed node, or of anything holding one, is dropped u
 test("the model sees resolvedChoice only for a pick merged just now; an unmerged pick becomes a redraw proposal (known issue I3)", async () => {
   // B updates the heading, then adds under a missing parent, so its whole batch is rejected at resolve time.
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{
       op: "add_conflict", id: "c-done", topic: "Heading",
       variants: [
         conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
         conflictVariant("B", "Rename and tab", ["Sara"], [
           { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
-          addNode("missing", "missing.tabs", "Tabs"),
+          addNode("missing", "missing.tabs", "Card"),
         ]),
       ],
     }]),
@@ -1332,7 +1366,7 @@ test("two conflicts raised in one run are shown one after the other (known issue
   const due = consensus([{
     op: "add_conflict", id: "c-due", topic: "Due dates",
     variants: [
-      conflictVariant("A", "A due date on every task", ["Amir"], [addNode("home", "home.due", "Input", [["label", "Due"]])]),
+      conflictVariant("A", "A due date on every task", ["Amir"], [addNode("home", "home.due", "Text", [["text", "Due"]])]),
       conflictVariant("B", "No due dates yet", ["Sara"], [addNode("home", "home.later", "Text", [["text", "Due dates later"]])]),
     ],
   }]);
@@ -1358,13 +1392,13 @@ test("two conflicts raised in one run are shown one after the other (known issue
 
 test("a batch's by must be someone heard in the grounding lines (known issue M9)", async () => {
   const s = await setup([[
-    patches("Added: quick-add", [addNode("home", "home.quick-add", "Input")], "Bob"),
+    patches("Added: quick-add", [addNode("home", "home.quick-add", "Text")], "Bob"),
     patches("Added: button", [addNode("home", "home.add", "Button", [["label", "Add"]])], "Amir"),
     consensus([{
       op: "add_conflict", id: "c-x", topic: "Where done tasks go",
       variants: [
-        { ...conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]), batch: { label: "Option A", by: "Bob", ops: [addNode("home", "home.show-done", "Toggle")] } },
-        { ...conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]), batch: { label: "Option B", by: "Sara", ops: [addNode("home", "home.tabs", "Tabs")] } },
+        { ...conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]), batch: { label: "Option A", by: "Bob", ops: [addNode("home", "home.show-done", "Badge")] } },
+        { ...conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Card")]), batch: { label: "Option B", by: "Sara", ops: [addNode("home", "home.tabs", "Card")] } },
       ],
     }]),
   ]]);

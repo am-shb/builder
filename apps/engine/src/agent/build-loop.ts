@@ -11,7 +11,7 @@ import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
-import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
+import { offeredOnly, patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch, themeStatusOp } from "../ui/tree.ts";
 import { tickAgreement } from "../consensus/doc.ts";
@@ -66,7 +66,7 @@ const TOOLS: PortTool[] = [
       "summary and nextUp. Call it once per hand-off with every op in order; call it whenever any of those changed. " +
       "Only people heard in the grounding lines can propose, support or object.",
     strict: true,
-    input_schema: toolJsonSchema(UpdateConsensusInput),
+    input_schema: offeredOnly(toolJsonSchema(UpdateConsensusInput)),
     schema: UpdateConsensusInput,
   },
 ];
@@ -404,12 +404,13 @@ export function createBuildLoop(deps: {
 
   // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
   // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
-  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses).
+  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses);
+  // `unoffered` counts adds of a type the model is not offered, skipped one by one (ADR 0017).
   function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
     const credit = groundCredit(input, speakers);
     const snap = view(rt);
-    const { batch, dropped } = fromToolBatch(credit.batch, {}, snap.proto);
-    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped };
+    const { batch, dropped, unoffered } = fromToolBatch(credit.batch, {}, snap.proto);
+    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped, unoffered };
   }
 
   // Ids and counts only: never the props themselves.
@@ -417,7 +418,7 @@ export function createBuildLoop(deps: {
     if (count > 0) log("build.props_dropped", { session_id: sessionId, count, ...(source ? { source } : {}) });
   }
 
-  type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number };
+  type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number; unoffered: number };
 
   // Applies one prepared batch and counts what happened. True when it changed the screen.
   function applyPrepared(sessionId: string, rt: SessionRuntime, batch: PatchBatch, opsGiven: number, counts: PatchCounts): boolean {
@@ -459,21 +460,23 @@ export function createBuildLoop(deps: {
 
     // Deferred patches before the ops, so decisions and conflicts can reference the nodes they add.
     for (const input of deferred) {
-      const { batch, creditDropped, propsDropped } = prepareBatch(input, rt, speakers, reopening);
+      const { batch, creditDropped, propsDropped, unoffered } = prepareBatch(input, rt, speakers, reopening);
       patchCounts.creditDropped += creditDropped;
+      patchCounts.unoffered += unoffered;
       logPropsDropped(sessionId, propsDropped);
       applyPrepared(sessionId, rt, batch, input.ops.length, patchCounts);
     }
     const counts = {
       patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty,
       consensus_invalid: consensusInvalid, ops: grounded.ops.length, grounding_dropped: grounded.dropped + patchCounts.creditDropped,
-      promoted: 0, reopened: 0, conflicts: 0,
+      promoted: 0, reopened: 0, conflicts: 0, ops_unoffered: 0,
     };
 
     if (grounded.ops.length) {
       // Applied to the doc as it is now, so a promotion made during the run is kept.
       const before = view(rt).doc;
-      const { doc, addedConflicts, propsDropped } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
+      const { doc, addedConflicts, propsDropped, unoffered } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
+      patchCounts.unoffered += unoffered;
       rt.setDoc(doc);
       logPropsDropped(sessionId, propsDropped, "conflict");
       const wasAgreed = (id: string) => before.decisions.find((b) => b.id === id)?.status === "agreed";
@@ -507,6 +510,7 @@ export function createBuildLoop(deps: {
         else log("build.comparison_queued", { session_id: sessionId, conflict_id: id });
       }
     }
+    counts.ops_unoffered = patchCounts.unoffered;
     return counts;
   }
 
@@ -525,7 +529,7 @@ export function createBuildLoop(deps: {
     const running = new Set(taskIds);
     st.tasks = st.tasks.map((t) => (running.has(t.id) ? { ...t, state: "now" } : t));
     pushTasks(sessionId, st);
-    const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0 };
+    const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0, unoffered: 0 };
     const deferred: ToolPatchBatch[] = [];
     let opsApplied = 0;
     let droppedCalls = 0;
@@ -577,12 +581,13 @@ export function createBuildLoop(deps: {
           }
           // A batch this run's reopenings could change (it removes an agreed node) waits for them.
           const agreedIds = new Set(view(live).doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
-          const { batch, creditDropped, propsDropped } = prepareBatch(parsed.data, live, speakers, new Set());
+          const { batch, creditDropped, propsDropped, unoffered } = prepareBatch(parsed.data, live, speakers, new Set());
           if (batch.ops.length !== prepareBatch(parsed.data, live, speakers, agreedIds).batch.ops.length) {
             deferred.push(parsed.data);
             return;
           }
           patchCounts.creditDropped += creditDropped;
+          patchCounts.unoffered += unoffered;
           logPropsDropped(sessionId, propsDropped);
           if (!applyPrepared(sessionId, live, batch, parsed.data.ops.length, patchCounts)) return;
           lastPatchMs = clock() - startedAt;
@@ -613,7 +618,7 @@ export function createBuildLoop(deps: {
       };
       // A refusal or no usable call leaves the doc as it is (batches already streamed stay on screen),
       // and so does a call that ended while the model was working: the handoff is already final.
-      const streamedCounts = { patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty };
+      const streamedCounts = { patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty, ops_unoffered: patchCounts.unoffered };
       if (ended.has(sessionId)) log("build.run", { ...base, ...streamedCounts, discarded: "ended" });
       else if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", { ...base, ...streamedCounts });
       else {

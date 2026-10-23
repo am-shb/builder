@@ -1,7 +1,7 @@
 import { MAX_DEPTH, MAX_NODES, PatchBatch, Prototype } from "./schema.ts";
 import type { Change, PatchOp, Theme, ThemeSlotName, ToolPatchBatch, ToolProp, UiNode } from "./schema.ts";
 import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
-import { normalizeProps } from "../../public/renderer/catalog.js";
+import { normalizeProps, OFFERED_PROPS_OMIT, OFFERED_TYPES } from "../../public/renderer/catalog.js";
 
 export type ApplyResult =
   | { ok: true; proto: Prototype; changes: Change[] }
@@ -232,29 +232,51 @@ function propsToRecord(props: ToolProp[]): Record<string, unknown> {
  * the batch's, else `defaults.decisionId`. drop_theme becomes a theme_status revert. An update whose
  * props were all dropped or empty (on a known node, naming no decisionId of its own) is skipped, as is
  * a set_theme that sets no slot or has no decision at all, which could never be agreed or dropped
- * (both counted in `dropped`).
+ * (both counted in `dropped`). Props the model is not offered (`region` on any type, a Screen's
+ * `template`) are dropped and counted too, on adds and updates, and an `add` of a type outside OFFERED_TYPES is skipped with
+ * its descendants in the batch, each skip counted in `unoffered` (ADR 0017). Updates to nodes that
+ * already exist keep working for every type.
  */
 export function fromToolBatch(
   t: ToolPatchBatch, defaults: { decisionId?: string } = {}, proto?: Prototype,
-): { batch: PatchBatch; dropped: number } {
+): { batch: PatchBatch; dropped: number; unoffered: number } {
   const batchDecision = t.decisionId ?? defaults.decisionId;
   const withDecision = (own: string | undefined) => {
     const id = own ?? batchDecision;
     return id === undefined ? {} : { decisionId: id };
   };
   const added = new Map<string, string>();
+  const skipped = new Set<string>();
   let dropped = 0;
+  let unoffered = 0;
   const normalize = (type: string | undefined, props: ToolProp[]): UiNode["props"] => {
     const record = propsToRecord(props);
     dropped += props.length - Object.keys(record).length;
     const out = normalizeProps(type ?? "", record);
     dropped += out.dropped.length;
+    // Valid for the renderer's stored trees, but not offered to the model (ADR 0017).
+    const omit = type !== undefined && Object.hasOwn(OFFERED_PROPS_OMIT, type) ? (OFFERED_PROPS_OMIT as Record<string, string[]>)[type] : [];
+    for (const key of ["region", ...omit]) {
+      if (Object.hasOwn(out.props, key)) {
+        delete out.props[key];
+        dropped++;
+      }
+    }
     return out.props;
   };
   const ops = t.ops.flatMap((op): PatchOp[] => {
+    // An op aimed at a node this batch skipped has nothing left to act on.
+    if ((op.op === "update" || op.op === "remove" || op.op === "move") && skipped.has(op.id)) return [];
+    if (op.op === "move" && skipped.has(op.parentId)) return [];
     switch (op.op) {
       case "add": {
         const { props, decisionId, ...rest } = op.node;
+        // Not offered, or inside something that was not: skipped whole, so the batch keeps its other ops.
+        if (!OFFERED_TYPES.includes(op.node.type) || skipped.has(op.parentId)) {
+          skipped.add(op.node.id);
+          unoffered++;
+          return [];
+        }
         added.set(op.node.id, op.node.type);
         const node: UiNode = { ...rest, props: normalize(op.node.type, props), status: "draft", ...withDecision(decisionId), children: [] };
         return [{ ...op, node }];
@@ -288,5 +310,5 @@ export function fromToolBatch(
   });
   const batch: PatchBatch = { ops, label: t.label };
   if (t.by !== undefined) batch.by = t.by;
-  return { batch, dropped };
+  return { batch, dropped, unoffered };
 }
