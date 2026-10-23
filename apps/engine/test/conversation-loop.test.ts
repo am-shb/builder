@@ -941,3 +941,32 @@ test("a hand-off that streams in after the call ended is not forwarded", async (
   await release(0, [updateBuild(handoff([id]))]);
   assert.equal(s.handoffs.length, 0);
 });
+
+// A comparison on screen with options A and B, as the runtime shows it.
+function showAB(rt: ReturnType<typeof createRuntime> extends (id: string) => infer R ? R : never) {
+  const variant = (label: string) => ({ label, summary: `Option ${label}`, backers: [], proto: { screens: [] } as never, focusIds: [] });
+  rt.showComparison({ conflictId: "c-top", topic: "Top", variants: [variant("A"), variant("B")] });
+}
+
+test("a spoken pick of a label on screen hands the pick to the build loop, grounded in that line", async () => {
+  const s = await setup([[]]);
+  showAB(s.rt);
+  const id = await s.say("Omid Omidi", "let's go with B");
+  assert.equal(s.handoffs.length, 1);
+  assert.deepEqual(s.handoffs[0], {
+    topics: [{ title: "Pick", task: "Merging option B", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-top", winner: "B" } }],
+    mood: "converging", groundingIds: [id],
+  });
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.spoken_pick")?.fields, { session_id: s.sessionId, conflict_id: "c-top", winner: "B" });
+});
+
+test("no spoken pick without a comparison, from the bot, or for a line that only asks to see an option", async () => {
+  const s = await setup([[]]);
+  await s.say("Omid Omidi", "let's go with B");
+  assert.equal(s.handoffs.length, 0, "no comparison on screen");
+  showAB(s.rt);
+  await s.say("Builder", "let's go with B");
+  await s.say("Omid Omidi", "show option B");
+  assert.equal(s.handoffs.length, 0);
+  assert.equal(s.logs.filter((l) => l.msg === "conversation.spoken_pick").length, 0);
+});

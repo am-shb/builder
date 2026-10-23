@@ -123,10 +123,10 @@ test("todo-app session replays end to end", async () => {
   // The voice command ran on the stage (visible, so Builder stayed quiet about it).
   assert.ok(logs.some((l) => l.msg === "conversation.command" && l.fields!.ok === true && l.fields!.visible === true));
 
-  // Cost: every scripted call was recorded, 12 conversation and 7 build.
+  // Cost: every scripted call was recorded, 12 conversation and 8 build (the spoken pick starts a run of its own).
   const calls = await store.listModelCalls(session.id);
   assert.equal(calls.filter((c) => c.loop === "conversation").length, 12);
-  assert.equal(calls.filter((c) => c.loop === "build").length, 7);
+  assert.equal(calls.filter((c) => c.loop === "build").length, 8);
   assert.ok(await store.sessionCost(session.id) > 0);
 
   // Handoff page lists the decisions; the export is self-contained.

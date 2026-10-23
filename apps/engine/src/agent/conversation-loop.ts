@@ -11,6 +11,7 @@ import { toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { HandoffSchema, HandoffToolInput } from "./handoff.ts";
 import type { Handoff } from "./handoff.ts";
+import { matchSpokenPick } from "./spoken-pick.ts";
 import { ADDRESS_RE, createStuckDetector } from "./stuck.ts";
 import type { StuckDetector, StuckEvent } from "./stuck.ts";
 import { findNode } from "../ui/tree.ts";
@@ -559,6 +560,25 @@ export function createConversationLoop(deps: {
     }
   };
 
+  // A person's line that plainly picks an option shown on screen goes straight to the build loop, grounded in
+  // that line, without waiting for the model to notice. The line still gets its normal turn. Never throws.
+  const spokenPick = (sessionId: string, eventId: number, speaker: string | null, text: string) => {
+    if (!speaker) return;
+    try {
+      const comparison = view(sessionId).comparison;
+      if (!comparison) return;
+      const winner = matchSpokenPick(text, comparison.variants.map((v) => v.label));
+      if (!winner) return;
+      log("conversation.spoken_pick", { session_id: sessionId, conflict_id: comparison.conflictId, winner });
+      buildLoop.handoff(sessionId, {
+        topics: [{ title: "Pick", task: `Merging option ${winner}`, proposals: [], questionsRaised: [], resolvedChoice: { conflictId: comparison.conflictId, winner } }],
+        mood: "converging", groundingIds: [eventId],
+      });
+    } catch (err) {
+      log("conversation.spoken_pick_failed", { session_id: sessionId, error: errorCode(err) });
+    }
+  };
+
   return {
     onUtterance(sessionId: string, u: { id: number; speaker: string | null; text: string | null }): void {
       const text = u.text;
@@ -567,6 +587,7 @@ export function createConversationLoop(deps: {
         const st = state(sessionId);
         pushLine(st, { id: u.id, speaker: u.speaker ?? "Unknown", text });
         st.humanIds.add(u.id);
+        spokenPick(sessionId, u.id, u.speaker, text);
         st.waitingSince ??= clock();
         if (u.speaker) st.heard.add(u.speaker);
         st.commandFollowUps = 0;

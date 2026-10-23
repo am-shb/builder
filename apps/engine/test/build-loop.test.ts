@@ -1461,3 +1461,18 @@ test("a batch that streams in after the call ended is not drawn", async () => {
   assert.equal(s.patches().length, 0);
   assert.equal(findNode(s.proto(), "home.quick-add"), undefined);
 });
+
+test("a spoken pick followed by a model hand-off carrying the same pick resolves once", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  const pick = (ids: number[]) => handoff(ids, {
+    topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-top", winner: "B" } }],
+  });
+  s.loop.handoff(s.sessionId, pick([await s.say("Omid", "let's go with B")]));
+  await flush();
+  s.loop.handoff(s.sessionId, pick([await s.say("Omid", "let's go with B")]));
+  await flush();
+  assert.equal(s.doc().decisions.filter((d) => d.id === "d-c-top").length, 1);
+  assert.equal(s.sent.filter((e) => e.type === "resolve").length, 1);
+});
