@@ -319,7 +319,7 @@ export function createBuildLoop(deps: {
         choice = { conflictId: open[0].id, winner: choice.winner };
       }
       const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
-      const r = rt.resolveComparison(choice.conflictId, choice.winner);
+      const r = rt.resolveComparison(choice.conflictId, choice.winner, [...speakers]);
       if (!r.ok) {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };

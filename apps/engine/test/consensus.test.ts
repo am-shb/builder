@@ -141,3 +141,23 @@ test("store round-trips consensus doc and prototype", async () => {
   assert.equal((await store.getConsensus("s1"))!.doc.phase, "opening");
   await store.close();
 });
+
+test("resolveConflict records the winner's backers then the pickers as agreeing", () => {
+  const batch = { ops: [], label: "variant" };
+  const mk = (backers: string[]): ConsensusDoc => ({
+    ...emptyDoc(),
+    conflicts: [{
+      id: "c-top", topic: "Navigation", status: "open", openedAt: 0,
+      variants: [
+        { label: "A", summary: "Sidebar", backers: [], batch },
+        { label: "B", summary: "Top tabs", backers, batch },
+      ],
+    }],
+  });
+  const backed = resolveConflict(mk(["Omid Omidi"]), "c-top", "B", 1, ["Mohammad Amin Shamshiri", "Omid Omidi", "Amir Shahbandegan"]);
+  assert.deepEqual(backed.decision.agreedBy, ["Omid Omidi", "Mohammad Amin Shamshiri", "Amir Shahbandegan"]);
+  assert.equal(backed.decision.proposedBy, "Omid Omidi");
+  const unbacked = resolveConflict(mk([]), "c-top", "B", 1, ["Amir Shahbandegan"]);
+  assert.equal(unbacked.decision.proposedBy, "Amir Shahbandegan");
+  assert.deepEqual(unbacked.decision.agreedBy, ["Amir Shahbandegan"]);
+});

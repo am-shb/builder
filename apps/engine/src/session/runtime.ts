@@ -242,7 +242,7 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
     // conflict in the doc. An unappliable batch still resolves the doc; `applied`
     // says whether the winner's batch landed on the prototype in this call. A conflict
     // already resolved is settled: nothing is applied, changed or sent again.
-    resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; applied?: boolean; error?: string } {
+    resolveComparison(conflictId: string, winner: "A" | "B" | "C", pickers: string[] = []): { ok: boolean; applied?: boolean; error?: string } {
       const conflict = doc.conflicts.find((c) => c.id === conflictId);
       const variant = conflict?.variants.find((v) => v.label === winner);
       if (!conflict || !variant) {
@@ -253,7 +253,7 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
 
       const r = applyPatchBatch(proto, variant.batch);
       if (!r.ok) log("runtime.winner_batch_rejected", { session_id: sessionId, conflict_id: conflictId, winner });
-      doc = resolveConflict(doc, conflictId, winner, clock()).doc;
+      doc = resolveConflict(doc, conflictId, winner, clock(), pickers).doc;
       if (r.ok) proto = r.proto;
       // Only this conflict's comparison closes (the stage plays it out on "resolve"); then the next
       // open conflict, if any, takes the screen. Another conflict's comparison stays (known issue M1).

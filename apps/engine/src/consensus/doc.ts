@@ -120,6 +120,7 @@ export function resolveConflict(
   conflictId: string,
   winner: "A" | "B" | "C",
   now: number,
+  pickers: string[] = [],
 ): { doc: ConsensusDoc; decision: Decision } {
   const conflict = doc.conflicts.find((c) => c.id === conflictId);
   const won = conflict?.variants.find((v) => v.label === winner);
@@ -133,8 +134,9 @@ export function resolveConflict(
     id,
     text: won.summary,
     status: "agreed",
-    proposedBy: won.backers[0] ?? "Unknown",
-    agreedBy: won.backers,
+    proposedBy: won.backers[0] ?? pickers[0] ?? "Unknown",
+    // Whoever spoke the pick agrees with it, alongside the people who backed the option.
+    agreedBy: [...new Set([...won.backers, ...pickers])],
     decidedAt: now,
     affects: [],
     rejectedOptions: conflict.variants.filter((v) => v.label !== winner).map((v) => v.summary),

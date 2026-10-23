@@ -471,6 +471,17 @@ test("a pick with no conflict id merges B when exactly one conflict is open", as
   assert.equal(d.status, "agreed");
 });
 
+test("the speaker of a pick is recorded as agreeing even when not a backer", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Mohammad Amin Shamshiri", "B please")]));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c-top")!;
+  assert.ok(d.agreedBy.includes("Mohammad Amin Shamshiri"));
+  assert.ok(d.agreedBy.includes("Sara"));
+});
+
 test("a pick with no conflict id merges nothing when two conflicts are open", async () => {
   const s = await setup([[consensus([conflictOp("c-one", "home.a1", "home.b1"), conflictOp("c-two", "home.a2", "home.b2")])], []]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
