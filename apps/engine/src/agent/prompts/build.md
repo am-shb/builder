@@ -60,7 +60,7 @@ Use `add_open_question` when someone asks something the room has not answered (`
 Record a conflict with `add_conflict` when two or more participants push incompatible choices for the same thing and nobody has settled it. Give it 2 or 3 variants labelled A, B and C. Each variant:
 
 - changes the same part of the prototype, built from the same components, so the variants compare like for like;
-- carries a `summary` that is a one-line tradeoff a person can say out loud ("Done tasks hide behind a toggle: tidy, but easy to forget");
+- carries a `summary` that is a one-line tradeoff a person can say out loud ("Order again on top: regulars reorder in one tap, but the special gets less space");
 - lists its `backers` as they appear in the grounding lines;
 - has a `batch` that applies cleanly to the prototype as it will be after this turn's `apply_patches`. Leave its `decisionId` out: a variant belongs to the decision the room's pick records.
 

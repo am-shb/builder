@@ -22,6 +22,9 @@ const OFFERED_NOTES: Record<string, string> = {
   Screen: "One page of the app; the stage shows one at a time; children stack top to bottom in the order added",
 };
 
+// Offered values narrower than the catalog's (the renderer and normalizeProps still take the rest).
+const OFFERED_KINDS: Record<string, Record<string, Kind>> = { Grid: { columns: ["2", "3"] } };
+
 /** Markdown table, one row per offered component grouped by catalog group, then the style options and the types that hold children. */
 export function componentTable(): string {
   const entries = Object.entries(CATALOG).filter(([type]) => (OFFERED_TYPES as string[]).includes(type));
@@ -32,7 +35,7 @@ export function componentTable(): string {
       const omit = (OFFERED_PROPS_OMIT as Record<string, string[]>)[type] ?? [];
       const props = Object.entries(entry.props as Record<string, Kind>)
         .filter(([k]) => !omit.includes(k))
-        .map(([k, kind]) => `${k}: ${kindText(kind)}`).join(", ");
+        .map(([k, kind]) => `${k}: ${kindText(OFFERED_KINDS[type]?.[k] ?? kind)}`).join(", ");
       rows.push(`| \`${type}\` | ${props || "none"} | ${entry.styles.join(", ") || "-"} | ${OFFERED_NOTES[type] ?? entry.note} |`);
     }
   }

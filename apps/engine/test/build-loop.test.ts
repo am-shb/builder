@@ -14,6 +14,8 @@ import { emptyDoc } from "../src/consensus/doc.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
+// @ts-ignore plain JS module shared with the browser
+import { OFFERED_TYPES } from "../public/renderer/catalog.js";
 
 const flush = () => settle();
 
@@ -1015,6 +1017,25 @@ test("tool schemas sent to the model are strict-compatible", async () => {
     };
     walk(schema);
   }
+});
+
+test("the update_consensus schema offers only OFFERED_TYPES for variant nodes", async () => {
+  const s = await setup([[]]);
+  s.loop.handoff(s.sessionId, handoff([]));
+  await flush();
+  const tools = s.requests[0].tools as { name: string; input_schema: unknown }[];
+  const schema = tools.find((t) => t.name === "update_consensus")!.input_schema;
+  const enums: unknown[] = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    const o = v as Record<string, any>;
+    if (o.properties?.type?.enum && o.properties.id) enums.push(o.properties.type.enum);
+    Object.values(o).forEach(walk);
+  };
+  walk(schema);
+  assert.ok(enums.length >= 1, "variant nodes carry a type enum");
+  for (const e of enums) assert.deepEqual(e, OFFERED_TYPES);
 });
 
 // A port whose calls stay pending, so a test can stream tool calls into a run still in flight.

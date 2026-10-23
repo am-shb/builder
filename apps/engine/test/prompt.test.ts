@@ -96,3 +96,8 @@ test("the prompt lists every image subject, name and caption, and says when to u
 test("the prompt says the app starts with a home Screen to update", () => {
   assert.match(buildSystemPrompt(), /starts with one empty Screen, `home`: for the first page, update it \(title, icon\) instead of adding another/);
 });
+
+test("the offered Grid takes 2 or 3 columns, matching the layout rules", () => {
+  const row = componentTable().split("\n").find((l) => l.startsWith("| `Grid` |"))!;
+  assert.ok(row.includes("columns: 2|3 |"), row);
+});
