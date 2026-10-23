@@ -154,3 +154,64 @@ test("the routed fake port sends each call to its own loop's script", async () =
   assert.equal(second.toolCalls[0].name, "update_consensus");
   assert.ok(second.usage.inputTokens > 0, "nonzero usage so cost accounting has something to record");
 });
+
+// ---- local replay: plain lines into /speech, optionally waiting for the stage ----
+function tinyServer(handler: (req: http.IncomingMessage, body: string) => unknown) {
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(handler(req, body))); });
+  });
+  servers.add(server);
+  return new Promise<string>((r) => server.listen(0, "127.0.0.1", () => r(`http://127.0.0.1:${(server.address() as { port: number }).port}`)));
+}
+
+test("local replay posts unsigned lines to /speech", async () => {
+  const seen: { url?: string; sig: unknown; body: any }[] = [];
+  const base = await tinyServer((req, body) => { seen.push({ url: req.url, sig: req.headers["webhook-signature"], body: JSON.parse(body) }); return { ok: true }; });
+  const f: Fixture = { participants: ["Ada"], utterances: [{ t: 10, speaker: "Ada", text: "hello there" }, { t: 20, speaker: "Ada", text: "half", partial: true }] };
+  const result = await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, sleep: async () => {} });
+  assert.equal(result.posted, 3);
+  assert.deepEqual(seen.map((s) => s.url), Array(3).fill("/api/sessions/s1/speech"));
+  assert.deepEqual(seen.map((s) => s.body.kind), ["join", "utterance", "partial"]);
+  assert.deepEqual(seen[1].body, { kind: "utterance", speaker: "Ada", text: "hello there" });
+  assert.ok(seen.every((s) => s.sig === undefined));
+});
+
+test("waitFor comparison polls the stage state before posting the line", async () => {
+  const order: string[] = [];
+  let polls = 0;
+  const base = await tinyServer((req) => {
+    if (req.url!.startsWith("/state")) { polls++; order.push("poll"); return { comparison: polls > 2 ? { conflictId: "c1" } : null }; }
+    order.push("post");
+    return { ok: true };
+  });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "go with B", waitFor: "comparison" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, stateUrl: `${base}/state?token=x`, sleep: async () => {} });
+  assert.deepEqual(order, ["poll", "poll", "poll", "post"]);
+});
+
+test("waitFor no-comparison waits for it to clear; a timeout throws", async () => {
+  let polls = 0;
+  const base = await tinyServer((req) => req.url!.startsWith("/state") ? { comparison: ++polls > 1 ? null : { conflictId: "c1" } } : { ok: true });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", waitFor: "no-comparison" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, stateUrl: `${base}/state`, sleep: async () => {} });
+  assert.equal(polls, 2);
+
+  const never = await tinyServer(() => ({ comparison: null }));
+  const g: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", waitFor: "comparison" }] };
+  await assert.rejects(
+    replay(g, { baseUrl: never, sessionId: "s1", secret: "", local: true, stateUrl: `${never}/state`, sleep: async () => {}, waitTimeoutMs: 700 }),
+    /waitFor comparison timed out/,
+  );
+});
+
+test("a shot is taken 8 s of scripted time after its line, divided by speed", async () => {
+  const base = await tinyServer(() => ({ ok: true }));
+  const slept: number[] = [];
+  const shots: string[] = [];
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", shot: "beat1" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, speed: 2, sleep: async (ms) => { slept.push(ms); }, onShot: async (n) => { shots.push(n); } });
+  assert.deepEqual(shots, ["beat1"]);
+  assert.ok(slept.includes(4000));
+});
