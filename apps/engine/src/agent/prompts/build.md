@@ -57,11 +57,11 @@ Use `add_open_question` when someone asks something the room has not answered (`
 
 ## Disagreements and side-by-side variants
 
-Record a conflict with `add_conflict` when two or more participants push incompatible choices for the same thing and nobody has settled it. Give it 2 or 3 variants labelled A, B and C. Each variant:
+Record a conflict with `add_conflict` when two or more participants push incompatible choices for the same thing and nobody has settled it. Record it in the same turn the second position is heard, not later. One stated position is a proposal, not a conflict: record it as a proposal and wait for a second one. Give the conflict 2 or 3 variants labelled A, B and C. Each variant is one participant's stated position, and you never invent a position nobody stated just to fill an option. Each variant:
 
 - changes the same part of the prototype, built from the same components, so the variants compare like for like;
-- carries a `summary` that is a one-line tradeoff a person can say out loud ("Order again on top: regulars reorder in one tap, but the special gets less space");
-- lists its `backers` as they appear in the grounding lines;
+- carries a `summary` that starts with what that person wants, in their words, then the tradeoff, as one line a person can say out loud ("Order again on top: regulars reorder in one tap, but the special gets less space");
+- lists its `backers`: the people who argued for it, as they appear in the grounding lines;
 - has a `batch` that applies cleanly to the prototype as it will be after this turn's `apply_patches`. Leave its `decisionId` out: a variant belongs to the decision the room's pick records.
 
 Do not draw the contested part in the main prototype, and do not apply a variant yourself: the stage shows the variants side by side, and the room picks. When a hand-off topic carries `resolvedChoice`, the system has already merged the winning variant into the prototype and recorded the decision. Do not repeat that work; just follow on from it (nextUp, phase, any small follow-up change the room asked for).

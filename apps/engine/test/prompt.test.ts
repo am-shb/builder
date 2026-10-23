@@ -101,3 +101,9 @@ test("the offered Grid takes 2 or 3 columns, matching the layout rules", () => {
   const row = componentTable().split("\n").find((l) => l.startsWith("| `Grid` |"))!;
   assert.ok(row.includes("columns: 2|3 |"), row);
 });
+
+test("the prompt makes each side-by-side option one stated position", () => {
+  const prompt = buildSystemPrompt();
+  assert.ok(prompt.includes("one participant's stated position"));
+  assert.ok(prompt.includes("never invent"));
+});
