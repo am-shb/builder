@@ -16,6 +16,7 @@ import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
 import { buildExportHtml, imagesUsed, RENDERER_MODULES } from "../src/handoff/export.ts";
 import { IMAGES } from "../public/renderer/images.js";
+import { HandoffToolInput, normalizeResolvedChoice } from "../src/agent/handoff.ts";
 
 const proto: Prototype = JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
 const EVIL = `Use </script><img src=x onerror=alert(1)> everywhere`;
@@ -280,4 +281,23 @@ test("the live handoff references images by URL and the app serves them", async 
     assert.ok((await img.arrayBuffer()).byteLength > 1000);
     assert.equal((await fetch(`${h.base}/renderer/images/missing-1.webp`, { headers: tunnel })).status, 404);
   } finally { h.close(); }
+});
+
+test("normalizeResolvedChoice reads the shapes models write", () => {
+  const star = (winner: string) => ({ conflictId: "*", winner });
+  assert.deepEqual(normalizeResolvedChoice('{"conflictId":"c-top","winner":"B"}'), { conflictId: "c-top", winner: "B" });
+  for (const v of ["B", "b", "option B", "Option b"]) assert.deepEqual(normalizeResolvedChoice(v), star("B"), v);
+  assert.deepEqual(normalizeResolvedChoice({ conflictId: "c-top", winner: "b" }), { conflictId: "c-top", winner: "B" });
+  assert.deepEqual(normalizeResolvedChoice({ conflictId: "c-top", label: "B" }), { conflictId: "c-top", winner: "B" });
+  assert.deepEqual(normalizeResolvedChoice({ winner: "B" }), star("B"));
+  assert.equal(normalizeResolvedChoice("D"), "D");
+  assert.equal(normalizeResolvedChoice(42), 42);
+});
+
+test("HandoffToolInput accepts a resolvedChoice written as a bare label", () => {
+  const topic = { title: "t", proposals: [], questionsRaised: [], resolvedChoice: "B" };
+  const r = HandoffToolInput.safeParse({ topics: [topic], mood: "converging", groundingIds: [1] });
+  assert.ok(r.success);
+  assert.deepEqual(r.data.topics[0].resolvedChoice, { conflictId: "*", winner: "B" });
+  assert.ok(!HandoffToolInput.safeParse({ topics: [{ ...topic, resolvedChoice: "D" }], mood: "converging", groundingIds: [1] }).success);
 });

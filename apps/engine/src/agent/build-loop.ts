@@ -299,7 +299,8 @@ export function createBuildLoop(deps: {
 
   // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
   // when a person (not Builder) in this session's grounding lines is behind the hand-off.
-  function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
+  function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], picked: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
+    let choice = picked;
     try {
       const { speakers } = groundingFor(stored, groundingIds);
       if (speakers.size === 0) {
@@ -308,6 +309,15 @@ export function createBuildLoop(deps: {
       }
       const rt = runtime(sessionId);
       const before = view(rt).doc;
+      // "*", or an id that names no conflict, means the only open conflict.
+      if (!before.conflicts.some((c) => c.id === choice.conflictId)) {
+        const open = before.conflicts.filter((c) => c.status === "open");
+        if (open.length !== 1) {
+          log("build.resolve_ambiguous", { session_id: sessionId, open: open.length });
+          return { kind: "ignored" };
+        }
+        choice = { conflictId: open[0].id, winner: choice.winner };
+      }
       const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
       const r = rt.resolveComparison(choice.conflictId, choice.winner);
       if (!r.ok) {

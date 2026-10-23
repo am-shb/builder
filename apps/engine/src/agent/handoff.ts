@@ -42,10 +42,46 @@ export type Handoff = z.infer<typeof HandoffSchema>;
 // the hand-off has its own, the last topic's copy moves up (the latest request wins, as when
 // hand-offs merge). The topics lose theirs, and a topic whose view was not kept gets it as its
 // screenHint when it has none, so no request is silently lost. The wire schema stays HandoffSchema.
-export const HandoffToolInput = z.preprocess(hoistRequestedView, HandoffSchema);
+export const HandoffToolInput = z.preprocess(repairHandoff, HandoffSchema);
+
+const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+
+function repairHandoff(v: unknown): unknown {
+  return hoistRequestedView(normalizeResolvedChoices(v));
+}
+
+function normalizeResolvedChoices(v: unknown): unknown {
+  if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && t.resolvedChoice !== undefined)) return v;
+  return { ...v, topics: v.topics.map((t) => (isRecord(t) && t.resolvedChoice !== undefined ? { ...t, resolvedChoice: normalizeResolvedChoice(t.resolvedChoice) } : t)) };
+}
+
+// Models write the room's pick as a JSON string, a bare label ("B", "option b"), or an object with
+// `label` for `winner` or no conflict id (a production session lost a pick to this). A recognised
+// shape becomes { conflictId, winner }, with conflictId "*" when only a label was given (the build
+// loop reads that as the one open conflict). Anything else comes back unchanged and fails validation.
+export function normalizeResolvedChoice(v: unknown): unknown {
+  const label = (x: unknown) => {
+    const m = typeof x === "string" ? /^\s*(?:option\s*)?([abc])\s*$/i.exec(x) : null;
+    return m ? m[1].toUpperCase() : null;
+  };
+  if (typeof v === "string") {
+    const bare = label(v);
+    if (bare) return { conflictId: "*", winner: bare };
+    if (!v.trimStart().startsWith("{")) return v;
+    try {
+      const parsed: unknown = JSON.parse(v);
+      return isRecord(parsed) ? normalizeResolvedChoice(parsed) : v;
+    } catch {
+      return v;
+    }
+  }
+  if (!isRecord(v)) return v;
+  const winner = label(v.winner) ?? label(v.label);
+  if (!winner) return v;
+  return { conflictId: typeof v.conflictId === "string" && v.conflictId ? v.conflictId : "*", winner };
+}
 
 function hoistRequestedView(v: unknown): unknown {
-  const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
   if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && "requestedView" in t)) return v;
   let view = v.requestedView;
   if (view === undefined) {

@@ -448,6 +448,41 @@ const RESOLVE_B = (groundingIds: number[]) => handoff(groundingIds, {
   topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
 });
 
+const conflictOp = (id: string, aNode: string, bNode: string) => ({
+  op: "add_conflict", id, topic: `Topic ${id}`,
+  variants: [
+    conflictVariant("A", "Option A", ["Amir"], [addNode("home", aNode, "Toggle", [["label", "A"]])]),
+    conflictVariant("B", "Option B", ["Sara"], [addNode("home", bNode, "Tabs", [["tabs", ["x", "y"]]])]),
+  ],
+});
+const PICK_ANY_B = (groundingIds: number[]) => handoff(groundingIds, {
+  topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "*", winner: "B" } }],
+});
+
+test("a pick with no conflict id merges B when exactly one conflict is open", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Amir", "B please")]));
+  await flush();
+  assert.ok(findNode(s.proto(), "home.b"), "B is merged");
+  assert.equal(findNode(s.proto(), "home.a"), undefined);
+  const d = s.doc().decisions.find((x) => x.id === "d-c-top")!;
+  assert.equal(d.status, "agreed");
+});
+
+test("a pick with no conflict id merges nothing when two conflicts are open", async () => {
+  const s = await setup([[consensus([conflictOp("c-one", "home.a1", "home.b1"), conflictOp("c-two", "home.a2", "home.b2")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Amir", "B please")]));
+  await flush();
+  assert.deepEqual(s.doc().conflicts.map((c) => c.status), ["open", "open"]);
+  assert.equal(findNode(s.proto(), "home.b1"), undefined);
+  assert.equal(findNode(s.proto(), "home.b2"), undefined);
+  assert.deepEqual(s.logs.find((l) => l.msg === "build.resolve_ambiguous")?.fields, { session_id: s.sessionId, open: 2 });
+});
+
 test("ungrounded resolvedChoice is ignored", async () => {
   const s = await setup([[DONE_CONFLICT], [], [], [], []]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "toggle"), await s.say("Sara", "tab")]));
