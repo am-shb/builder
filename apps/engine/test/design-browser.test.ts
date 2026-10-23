@@ -956,6 +956,41 @@ test("review fixes", async (t) => {
         await page.screenshot(path.join(dir, "phone-grid-two.png"));
       });
 
+      await t.test("on a phone a 2-column Grid gives wide children the full row and fits the screen", async () => {
+        await fresh();
+        const node = (id: string, type: string, props: Record<string, unknown>) => ({ id, type, props, status: "agreed", children: [] });
+        const screen = {
+          id: "wide", type: "Screen", props: { title: "Wide" }, status: "agreed",
+          children: [{
+            id: "wide.grid", type: "Grid", props: { columns: "2" }, status: "agreed",
+            children: [
+              node("wide.grid.chart", "ChartCard", { title: "Sales", kind: "bar", data: [4, 6, 5, 8], labels: ["Jan", "Feb", "Mar", "Apr"], span: "2" }),
+              node("wide.grid.table", "Table", { columns: ["Item", "Qty", "Total"], rows: [["Flat white", "2", "$9.00"], ["Croissant", "1", "$4.50"]] }),
+              node("wide.grid.seg", "Segmented", { options: ["Week", "Month", "Year"], value: "Month" }),
+              node("wide.grid.p1", "ProductCard", { title: "Beans", price: "$12" }),
+              node("wide.grid.p2", "ProductCard", { title: "Mug", price: "$9" }),
+            ],
+          }],
+        };
+        await page.eval(`(() => { window.proto.root.props.device = "phone"; window.proto.root.children.push(${JSON.stringify(screen)}); window.show("wide"); })()`);
+        const w = (id: string) => page.eval<number>(`document.querySelector('[data-node-id="${id}"]').getBoundingClientRect().width`);
+        const grid = await w("wide.grid");
+        for (const id of ["chart", "table"]) {
+          const width = await w(`wide.grid.${id}`);
+          assert.ok(Math.abs(width - grid) < 2, `${id} spans the full grid row: ${width} vs ${grid}`);
+        }
+        const seg = await page.eval<{ right: number; top: number }>(`(() => { const r = document.querySelector('[data-node-id="wide.grid.seg"]').getBoundingClientRect(); return { right: r.right, top: r.top }; })()`);
+        const gridRight = await page.eval<number>(`document.querySelector('[data-node-id="wide.grid"]').getBoundingClientRect().right`);
+        const p1Top = await page.eval<number>(`document.querySelector('[data-node-id="wide.grid.p1"]').getBoundingClientRect().top`);
+        assert.ok(seg.right <= gridRight + 1 && seg.top < p1Top, "the segmented control sits in its own row inside the grid");
+        const top = (id: string) => page.eval<number>(`document.querySelector('[data-node-id="${id}"]').offsetTop`);
+        const left = (id: string) => page.eval<number>(`document.querySelector('[data-node-id="${id}"]').offsetLeft`);
+        assert.equal(await top("wide.grid.p1"), await top("wide.grid.p2"), "the two product cards share a row");
+        assert.notEqual(await left("wide.grid.p1"), await left("wide.grid.p2"));
+        const content = await page.eval<{ scroll: number; client: number }>(`(() => { const b = document.querySelector(".b-phone .b-app-body"); return { scroll: b.scrollWidth, client: b.clientWidth }; })()`);
+        assert.ok(content.scroll <= content.client, `no horizontal overflow: ${JSON.stringify(content)}`);
+      });
+
       t.diagnostic(`screenshots: ${dir}`);
       assert.deepEqual(page.logs.filter((l) => l.startsWith("exception")), []);
     });
