@@ -16,7 +16,7 @@
     "@builder/session-core": "*",
     "@clerk/expo": "^4.13.1",
     "@expo-google-fonts/schibsted-grotesk": "^0.4.2",
-    "expo": "~57.0.0",
+    "expo": "~58.0.14",
     "expo-auth-session": "~57.0.16",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.22",
