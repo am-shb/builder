@@ -12,13 +12,13 @@ export const SIGN_UP = "/sign-up";
 export const SIGN_IN = "/sign-in";
 
 // The home page's title and description: the browser tab, search results and share cards (build/meta.ts).
-export const HOME_TITLE = `${PRODUCT_NAME} · Your meeting ends with a working prototype`;
-export const HOME_DESCRIPTION = `${PRODUCT_NAME} joins your call, listens, and builds a clickable prototype on screen while the team decides. Decisions turn agreed only when people say so.`;
+export const HOME_TITLE = `${PRODUCT_NAME} · The AI product manager that builds what you decide`;
+export const HOME_DESCRIPTION = `${PRODUCT_NAME} joins your call like a product manager: it asks who the app is for, lays out the trade-offs when you disagree, and builds a clickable prototype while the team decides.`;
 
 export const HERO = {
-  eyebrow: "An AI teammate for your meetings",
+  eyebrow: "An AI product manager for your meetings",
   headline: ["Your meeting ends with", "a working prototype."] as const,
-  sub: `${BOT_NAME} joins your call, listens, and builds a clickable prototype on screen while the team decides.`,
+  sub: `${BOT_NAME} joins your call like a product manager. It asks who the app is for, lays out the trade-offs when you disagree, and builds the clickable prototype as you decide.`,
   platforms: "Built for Google Meet. Zoom and Microsoft Teams links work too.",
   // What the hero's animation shows, for people who can't see it.
   sceneSummary:
@@ -35,14 +35,14 @@ export const DEMO_VIDEO: string | null = null;
 export const BEFORE_AFTER = {
   eyebrow: "Before and after",
   title: "Leave the meeting with something you can click",
-  lead: `Most meetings end with notes, and someone spends the next days turning them into a mockup. With ${PRODUCT_NAME}, the meeting itself produces it.`,
+  lead: `Most meetings end with notes, loose ends and a mockup someone builds days later. With ${PRODUCT_NAME}, the questions get asked in the room, and the meeting produces the prototype.`,
   before: {
     label: "Today",
     title: "The meeting ends with notes",
     points: [
       "A page of notes, and everyone remembering a different decision",
       "Someone spends days turning it into a mockup",
-      "The next meeting reopens the same questions",
+      "Open questions get lost, and the next meeting reopens them",
     ],
   },
   after: {
@@ -50,8 +50,8 @@ export const BEFORE_AFTER = {
     title: "The meeting ends with a working prototype",
     points: [
       "A clickable prototype, built on screen while you talked",
-      "A decision log: what was agreed, by whom, and what is still open",
-      "A handoff page with the component spec, ready for engineers",
+      "Disagreements laid out as options with their trade-offs, and open questions kept in view",
+      "A decision log and a handoff page with the component spec, ready for engineers",
     ],
   },
 };
@@ -78,8 +78,8 @@ export const STEPS = {
 
 export const FEATURES = {
   eyebrow: "Features",
-  title: "Built for the way decisions really happen",
-  lead: "Not a note taker. A teammate that turns the conversation into a prototype, and keeps track of what was decided.",
+  title: "A product manager's habits, built in",
+  lead: "Not a note taker. It asks what you're building and for whom, keeps the open questions in view, lays out the trade-offs, and builds what the room agrees on.",
   items: {
     prototype: {
       title: "A live prototype, not a transcript",
@@ -90,12 +90,12 @@ export const FEATURES = {
       text: "A decision only turns agreed when another person supports it, or nobody objects for 30 seconds. It never decides on its own.",
     },
     options: {
-      title: "Options side by side",
-      text: "When people disagree, it lays out two or three options with their tradeoffs. The room picks one out loud.",
+      title: "Trade-offs, side by side",
+      text: "When people disagree, it lays out two or three options, each with its trade-off in one line. If the debate stalls, it asks which matters more. The room picks.",
     },
     voice: {
-      title: "Steer it by voice",
-      text: `Say its name to ask a question, or to click, type or go to a screen: “${BOT_NAME}, show option B.”`,
+      title: "Ask it what it thinks",
+      text: "Say its name and ask. It gives a clear view and the reason, then hands it back with one question. It can also click, type or go to a screen for you.",
     },
     handoff: {
       title: "A handoff page for engineers",
@@ -119,9 +119,9 @@ export const AUDIENCES = {
   eyebrow: "Who it's for",
   title: "For every meeting that should end in something real",
   items: [
-    { title: "Product teams", text: "Turn a planning call into a flow everyone can click through before anyone writes a spec." },
+    { title: "Product teams", text: "Plan with someone keeping the open questions in view, and leave with a flow everyone can click through." },
     { title: "Agencies", text: "Leave a client kickoff with a prototype, and a record of what the client agreed to." },
-    { title: "Founders", text: "Go from an idea call to something your first users and investors can try." },
+    { title: "Founders", text: "Talk an idea through with something that asks who it's for, then leave with a prototype your first users can try." },
     { title: "Design sprints", text: "Make decision day produce a prototype, with the reasons for each choice on record." },
   ],
 };
@@ -184,8 +184,12 @@ export const FAQ = {
       a: "It's built for Google Meet. Zoom and Microsoft Teams links are accepted too, but so far it has been tested most on Google Meet.",
     },
     {
+      q: "Will it push back on our ideas?",
+      a: "When it helps. It stays quiet while you talk. Ask it by name and it gives a straight view with the reason. If you're stuck on a disagreement or a question nobody picks up, it names the trade-off or suggests a way forward. It never decides for you: the room does.",
+    },
+    {
       q: "Does it talk during the meeting?",
-      a: `Only a little: when someone says its name, when the room seems stuck, or to confirm a choice between options. Its replies are short, and anyone can interrupt it.`,
+      a: `It opens with one question: what you're building and who it's for. After that, only when someone says its name, when the room seems stuck, or to confirm a choice between options. Its replies are short, and anyone can interrupt it.`,
     },
     {
       q: "Who owns the prototype?",
@@ -208,7 +212,7 @@ export const FINAL_CTA = {
 };
 
 export const FOOTER = {
-  tagline: `${PRODUCT_NAME} joins your meeting and builds the prototype while you decide.`,
+  tagline: `${PRODUCT_NAME} sits in your meeting like a product manager, and builds the prototype while you decide.`,
 };
 
 export const LEGAL = {

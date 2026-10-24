@@ -21,7 +21,7 @@ describe("the landing page", () => {
       level = next;
     }
     expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(expect.arrayContaining([
-      "Three steps, then just talk", "Built for the way decisions really happen", "Questions, answered",
+      "Three steps, then just talk", "A product manager's habits, built in", "Questions, answered",
     ]));
   });
 
@@ -92,6 +92,13 @@ describe("the landing page", () => {
     expect(first.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("the FAQ says when it pushes back, and that the room decides", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    await user.click(screen.getByRole("button", { name: "Will it push back on our ideas?" }));
+    expect(screen.getByText(/It stays quiet while you talk\..*It never decides for you: the room does\./)).toBeTruthy();
+  });
+
   it("the hero scene is decoration, described in words for screen readers", () => {
     render(<LandingPage />);
     expect(document.querySelector(".scene")?.getAttribute("aria-hidden")).toBe("true");
@@ -155,7 +162,7 @@ describe("the landing page", () => {
 
   it("names the page in the tab", () => {
     render(<LandingPage />);
-    expect(document.title).toMatch(/Your meeting ends with a working prototype/);
+    expect(document.title).toMatch(/The AI product manager that builds what you decide/);
   });
 
   it("a section link in the bar moves focus to its section", () => {
