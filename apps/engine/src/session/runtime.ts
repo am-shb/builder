@@ -5,7 +5,7 @@
 import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent, UNTITLED_APP } from "../ui/tree.ts";
 import type { Change, PatchOp, Prototype, PatchBatch, Interaction, UiNode } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
-import { touchedIds } from "../agent/handoff.ts";
+import { touchedNodeIds } from "../ui/touched.ts";
 import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
 import type { BuildTask, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
@@ -163,14 +163,15 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
   // The pick settles the losing side's earlier proposals: every open decision proposed by a backer of a
   // losing variant that affects a node any variant touches is removed (its text joins the picked
   // decision's rejectedOptions) and its drawn nodes are re-tagged to the picked decision, so promoting
-  // that decision agrees them. Re-tags only when the winner's batch landed. Returns the re-tag changes.
+  // that decision agrees them. Re-tags only nodes the conflict's variants touch, and only when the winner's batch landed. Returns the re-tag changes.
   function supersede(conflict: Conflict, winner: string, retag: boolean): Change[] {
     const screens = new Set<string>();
     const screensOf = (n: UiNode) => { if (n.type === "Screen") screens.add(n.id); n.children.forEach(screensOf); };
     screensOf(proto.root);
     const touched = new Set<string>();
-    for (const v of conflict.variants) for (const id of touchedIds(v.batch, screens)) touched.add(id);
-    const losers = new Set(conflict.variants.filter((v) => v.label !== winner).flatMap((v) => v.backers));
+    for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens)) touched.add(id);
+    const winners = new Set(conflict.variants.find((v) => v.label === winner)?.backers ?? []);
+    const losers = new Set(conflict.variants.filter((v) => v.label !== winner).flatMap((v) => v.backers).filter((b) => !winners.has(b)));
     const gone = doc.decisions.filter((d) => d.status !== "agreed" && losers.has(d.proposedBy) && d.affects.some((id) => touched.has(id)));
     if (!gone.length) return [];
     const picked = `d-${conflict.id}`;
@@ -184,11 +185,11 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
     log("runtime.superseded", { session_id: sessionId, conflict_id: conflict.id, count: gone.length });
     if (!retag) return [];
     const ops: PatchOp[] = [];
-    const walk = (n: UiNode) => { if (n.decisionId !== undefined && ids.has(n.decisionId)) ops.push({ op: "update", id: n.id, decisionId: picked }); n.children.forEach(walk); };
+    const walk = (n: UiNode) => { if (n.decisionId !== undefined && ids.has(n.decisionId) && touched.has(n.id)) ops.push({ op: "update", id: n.id, decisionId: picked }); n.children.forEach(walk); };
     walk(proto.root);
     if (!ops.length) return [];
     const t = applyPatchBatch(proto, { label: "Settled by the pick", ops });
-    if (!t.ok) return [];
+    if (!t.ok) { log("runtime.supersede_retag_failed", { session_id: sessionId, conflict_id: conflict.id, ops: ops.length }); return []; }
     proto = t.proto;
     return t.changes;
   }

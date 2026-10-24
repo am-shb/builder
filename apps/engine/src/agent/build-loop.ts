@@ -154,7 +154,7 @@ function screenIds(proto: Prototype): Set<string> {
 }
 
 // Ids a batch adds or changes (removals and screen switches leave nothing to mark).
-function touchedIds(batch: PatchBatch): string[] {
+function changedIds(batch: PatchBatch): string[] {
   const ids: string[] = [];
   for (const op of batch.ops) {
     if (op.op === "add") ids.push(op.node.id);
@@ -346,7 +346,7 @@ export function createBuildLoop(deps: {
       if (variant && decision) {
         // A winner batch that did not apply changed nothing, so it marks nothing agreed.
         const proto = view(rt).proto;
-        const touched = r.applied ? touchedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
+        const touched = r.applied ? changedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
         const affects = [...new Set([...decision.affects, ...touched])];
         rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
         promote(sessionId, rt, [decision.id], "conflict");

@@ -1670,6 +1670,7 @@ test("a pick supersedes the loser's earlier open proposal; a later reference to 
   s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "keep the special as a smaller card below")]));
   await flush();
   assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "a follow-up naming dX does not bring it back");
+  assert.deepEqual([findNode(s.proto(), "home.special")!.status, findNode(s.proto(), "home.special")!.decisionId], ["agreed", "d-c1"], "still agreed under d-c1");
 });
 
 // ---- only people whose own line picks the winner are recorded as agreeing (task 8d) ----
