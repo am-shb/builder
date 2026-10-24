@@ -1671,3 +1671,27 @@ test("a pick supersedes the loser's earlier open proposal; a later reference to 
   await flush();
   assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "a follow-up naming dX does not bring it back");
 });
+
+// ---- only people whose own line picks the winner are recorded as agreeing (task 8d) ----
+
+test("a model pick records as agreeing only the speaker whose line picks the winner", async () => {
+  const s = await setup([[consensus([conflictOp("c1", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  const ids = [await s.say("Rita", "I'd rather A"), await s.say("Mona", "let's go with B")];
+  s.loop.handoff(s.sessionId, PICK_ANY_B(ids));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c1")!;
+  assert.deepEqual(d.agreedBy, ["Sara", "Mona"], "B's backers plus Mona; Rita objected");
+});
+
+test("a loosely phrased model pick still resolves but records only the backers", async () => {
+  const s = await setup([[consensus([conflictOp("c1", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Mona", "B sounds good")]));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c1")!;
+  assert.equal(d.status, "agreed");
+  assert.deepEqual(d.agreedBy, ["Sara"]);
+});

@@ -313,7 +313,7 @@ export function createBuildLoop(deps: {
   function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], picked: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
     let choice = picked;
     try {
-      const { speakers } = groundingFor(stored, groundingIds);
+      const { lines, speakers } = groundingFor(stored, groundingIds);
       if (speakers.size === 0) {
         log("build.resolve_ungrounded", { session_id: sessionId, conflict_id: choice.conflictId, grounding: groundingIds.length });
         return { kind: "ignored" };
@@ -330,7 +330,11 @@ export function createBuildLoop(deps: {
         choice = { conflictId: open[0].id, winner: choice.winner };
       }
       const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
-      const r = rt.resolveComparison(choice.conflictId, choice.winner, [...speakers]);
+      // Only a speaker whose own grounding line picks the winner is recorded as agreeing, in the order
+      // of those lines; a loosely phrased pick still resolves but records just the backers.
+      const winner = choice.winner;
+      const pickers = [...new Set(lines.filter((e) => e.speaker && speakers.has(e.speaker) && matchSpokenPick(e.text ?? "", [winner]) === winner).map((e) => e.speaker as string))];
+      const r = rt.resolveComparison(choice.conflictId, winner, pickers);
       if (!r.ok) {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };
