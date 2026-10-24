@@ -13,6 +13,7 @@ import { createRuntime } from "../src/session/runtime.ts";
 import { createStageChannel } from "../src/stage/channel.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
+import { findNode } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { PatchBatch } from "../src/ui/schema.ts";
 
@@ -507,4 +508,63 @@ test("R3: flush waits for every session's queued saves", async () => {
   await runtime.flush();
   assert.equal(saving, 2);
   for (const id of ids) assert.equal((await store.getConsensus(id))?.doc.conflicts[0].id, "c1");
+});
+
+// ---- a pick closes the losing side's earlier proposal (task 8c) ----
+
+const openDecision = (id: string, text: string, proposedBy: string, affects: string[], status: "draft" | "pending" | "agreed" = "draft") =>
+  ({ id, text, status, proposedBy, agreedBy: status === "agreed" ? [proposedBy] : [], affects, rejectedOptions: [] as string[] });
+
+async function supersedeSetup(uuid: string) {
+  const store = await testStore();
+  const s = await store.createIntent(uuid, "https://meet.google.com/x");
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const rt = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 }, log: (msg, fields) => logs.push({ msg, fields }) })(s.id);
+  const card = (id: string, decisionId?: string) => ({ op: "add" as const, parentId: "home", node: { id, type: "Card", props: { title: id }, status: "draft" as const, ...(decisionId ? { decisionId } : {}), children: [] } });
+  assert.equal(rt.applyBatch({ label: "seed", ops: [card("home.special", "dX"), card("home.header", "dH"), card("home.mine", "dO")] }).ok, true);
+  rt.setDoc({
+    ...emptyDoc(),
+    decisions: [
+      openDecision("dX", "Feature the special at the top", "Amin", ["home.special"], "pending"),
+      openDecision("dH", "A new header", "Amin", ["home.header"]),
+      openDecision("dO", "Omid's special tweak", "Omid", ["home.special"]),
+      openDecision("dA", "Agreed special", "Amin", ["home.special"], "agreed"),
+    ],
+    conflicts: [{
+      id: "c1", topic: "Top of home", status: "open", openedAt: 1,
+      variants: [
+        { label: "A", summary: "Special on top", backers: ["Amin"], batch: { label: "A", ops: [{ op: "update", id: "home.special", props: { title: "Top special" } }] } },
+        { label: "B", summary: "Order again on top", backers: ["Omid"], batch: { label: "B", ops: [
+          { op: "add", parentId: "home", index: 0, node: { id: "home.order-again", type: "Card", props: { title: "Order again" }, status: "draft", children: [] } },
+          { op: "move", id: "home.special", parentId: "home", index: 1 },
+        ] } },
+      ],
+    }],
+  });
+  return { rt, logs };
+}
+
+test("resolving a conflict supersedes the losing backers' open proposals that touch the same nodes", async () => {
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888801");
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const doc = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc;
+  const proto = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).proto;
+  assert.deepEqual(doc.decisions.map((d) => d.id).sort(), ["d-c1", "dA", "dH", "dO"], "dX is gone; the rest stay");
+  const picked = doc.decisions.find((d) => d.id === "d-c1")!;
+  assert.deepEqual(picked.rejectedOptions, ["Special on top", "Feature the special at the top"]);
+  assert.deepEqual(picked.agreedBy, ["Omid"], "nobody is added to agreedBy");
+  const find = (id: string) => findNode(proto, id)?.decisionId;
+  assert.equal(find("home.special"), "d-c1");
+  assert.equal(find("home.header"), "dH");
+  assert.equal(find("home.mine"), "dO");
+  const sup = logs.filter((l) => l.msg === "runtime.superseded");
+  assert.equal(sup.length, 1);
+  assert.deepEqual({ ...sup[0].fields, session_id: undefined }, { session_id: undefined, conflict_id: "c1", count: 1 });
+});
+
+test("the winner's own backers keep their proposals; the other side's are superseded", async () => {
+  const { rt } = await supersedeSetup("88888888-8888-8888-8888-888888888802");
+  rt.resolveComparison("c1", "A", ["Amin"]);
+  const doc = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc;
+  assert.deepEqual(doc.decisions.map((d) => d.id).sort(), ["d-c1", "dA", "dH", "dX"], "Omid lost: dO goes; Amin's dX stays");
 });

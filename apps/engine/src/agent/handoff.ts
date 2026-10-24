@@ -138,7 +138,7 @@ export type PriorBacking = { names: string[]; affects: string[] };
 
 // Node ids a variant's patches add, update, remove or move. The App root and Screens are too broad to show
 // that a decision is about the same thing, and an update that changes no prop and no decision touches nothing.
-function touchedIds(batch: ToolPatchBatch, screens: Set<string>): Set<string> {
+export function touchedIds(batch: ToolPatchBatch | PatchBatch, screens: Set<string>): Set<string> {
   const ids = new Set<string>();
   const broad = (id: string) => id === "app" || screens.has(id);
   for (const op of batch.ops) {

@@ -1632,3 +1632,42 @@ test("prior backers are not accepted through the App root, a Screen, or an updat
   assert.deepEqual(backersOfA([upd("home.card", { props: [{ key: "title", value: "x" }] })], ["home.card"]), ["Rita"], "a real update counts");
   assert.deepEqual(backersOfA([upd("home.card", { decisionId: "d1" })], ["home.card"]), ["Rita"], "a decisionId update counts");
 });
+
+// ---- a pick closes the losing side's earlier proposal (task 8c) ----
+
+test("a pick supersedes the loser's earlier open proposal; a later reference to it does not resurrect it", async () => {
+  const s = await setup([
+    [
+      patches("Proposed: special on top", [addNode("home", "home.special", "Card", [["title", "Fall special"]], "dX")], "Amin"),
+      consensus([
+        { op: "add_decision", id: "dX", text: "Feature the fall special at the top", proposedBy: "Amin", affects: ["home.special"] },
+        { op: "mark_pending", decisionId: "dX" },
+        { op: "add_conflict", id: "c1", topic: "Top of home", variants: [
+          conflictVariant("A", "Special on top", ["Amin"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top special" }] }]),
+          conflictVariant("B", "Order again on top", ["Omid"], [addNode("home", "home.order-again", "Card", [["title", "Order again"]]), { op: "move", id: "home.special", parentId: "home", index: 1 }]),
+        ] },
+      ]),
+    ],
+    [],
+    [
+      consensus([{ op: "support", decisionId: "dX", speaker: "Amin" }]),
+      patches("Smaller special", [{ op: "update", id: "home.special", props: [{ key: "title", value: "Small special" }], decisionId: "dX" }], "Amin"),
+    ],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "special on top"), await s.say("Omid", "order again on top")]));
+  await flush();
+  assert.ok(s.doc().decisions.some((d) => d.id === "dX"), "proposed first");
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "order again, B")], {
+    topics: [{ title: "Top of home", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }],
+  }));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "dX is superseded");
+  const picked = s.doc().decisions.find((d) => d.id === "d-c1")!;
+  assert.equal(picked.status, "agreed");
+  assert.deepEqual(picked.agreedBy, ["Omid"], "nobody joins agreedBy because their proposal was superseded");
+  assert.ok(picked.rejectedOptions.includes("Feature the fall special at the top"));
+  assert.deepEqual([findNode(s.proto(), "home.special")!.status, findNode(s.proto(), "home.special")!.decisionId], ["agreed", "d-c1"]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "keep the special as a smaller card below")]));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "a follow-up naming dX does not bring it back");
+});
