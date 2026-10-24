@@ -42,7 +42,7 @@ function heldPort() {
 // would cost more than the tests themselves.
 const sharedStore = testStore();
 
-async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome } = {}) {
+async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome; failSpeech?: { on: boolean } } = {}) {
   const store = await sharedStore;
   const sessionId = randomUUID();
   await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
@@ -55,11 +55,15 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
   const handoffs: Handoff[] = [];
   const handoffHooks: ((h: Handoff) => void)[] = [];
-  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> | null } =
-    { handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); } };
+  const lateAgrees: { conflictId: string; winner: string; lineId: number }[] = [];
+  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> | null; lateAgree?(sid: string, a: { conflictId: string; winner: "A" | "B" | "C"; lineId: number }): Promise<boolean> } =
+    {
+      handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); },
+      lateAgree: async (_sid, a) => { lateAgrees.push(a); return true; },
+    };
   const said: string[] = [];
   const stops: string[] = [];
-  const speech: Speech = { say: async (_sid, text) => { said.push(text); return `u${said.length}`; }, stop: (sid) => { stops.push(sid); }, speaking: () => false };
+  const speech: Speech = { say: async (_sid, text) => { if (opts.failSpeech?.on) throw new Error("speech down"); said.push(text); return `u${said.length}`; }, stop: (sid) => { stops.push(sid); }, speaking: () => false };
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const loop = createConversationLoop({
     port, runtime, buildLoop, speech, store, clock, log: (msg, fields) => logs.push({ msg, fields }),
@@ -72,7 +76,7 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
     return e.id;
   };
   return {
-    store, sessionId, rt, loop, requests, buildLoop, handoffs, handoffHooks, said, stops, logs, sent, say,
+    opts, store, sessionId, rt, loop, requests, buildLoop, lateAgrees, handoffs, handoffHooks, said, stops, logs, sent, say,
     advance: (ms: number) => { t += ms; return t; },
     now: () => t,
     mood: () => (rt.snapshot() as Snapshot).mood,
@@ -357,10 +361,18 @@ test("update_build survives the observed slips (requestedView inside a topic, an
   assert.deepEqual(repaired?.fields?.repairs, [{ path: "", code: "unrecognized_keys" }]);
   assert.ok(!JSON.stringify(c.logs).includes("extraNote"), "repairs log paths and codes only");
 
+  // A null pick (models write null for "none") or one no shape matches is dropped, logged by path only; the
+  // topic and the rest of the hand-off are kept.
+  for (const [pick, code] of [[null, "null_dropped"], [{ conflictId: 7 }, "invalid_dropped"], [{ conflictId: "c1", winner: "D" }, "invalid_dropped"]] as const) {
+    const d = await run({ ...observed, topics: [{ ...settled, resolvedChoice: pick }] });
+    assert.equal(d.r.dropped, 0, JSON.stringify(pick));
+    assert.deepEqual(d.h?.topics[0], { title: "Progress view", proposals: [], questionsRaised: [] });
+    assert.deepEqual(d.logs.find((l) => l.msg === "llm_tool_repaired")?.fields?.repairs, [{ path: "topics.0.resolvedChoice", code }]);
+  }
+
   // Ids, enums and types stay strict.
   for (const bad of [
     { ...observed, mood: "bogus" },
-    { ...observed, topics: [{ ...settled, resolvedChoice: { conflictId: "c1", winner: "D" } }] },
     { ...observed, groundingIds: [1.5] },
     { ...observed, groundingIds: undefined },
     { ...observed, topics: [{ ...settings, proposals: undefined }] },
@@ -940,4 +952,211 @@ test("a hand-off that streams in after the call ended is not forwarded", async (
   calls[0].req.onToolCall?.(updateBuild(handoff([id])));
   await release(0, [updateBuild(handoff([id]))]);
   assert.equal(s.handoffs.length, 0);
+});
+
+// A comparison on screen with options A and B, as the runtime shows it.
+function showAB(rt: ReturnType<typeof createRuntime> extends (id: string) => infer R ? R : never) {
+  const variant = (label: string) => ({ label, summary: `Option ${label}`, backers: [], proto: { screens: [] } as never, focusIds: [] });
+  rt.showComparison({ conflictId: "c-top", topic: "Top", variants: [variant("A"), variant("B")] });
+}
+
+test("a spoken pick of a label on screen hands the pick to the build loop, grounded in that line", async () => {
+  const s = await setup([[]]);
+  showAB(s.rt);
+  const id = await s.say("Omid Omidi", "let's go with B");
+  assert.equal(s.handoffs.length, 1);
+  assert.deepEqual(s.handoffs[0], {
+    topics: [{ title: "Pick", task: "Merging option B", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-top", winner: "B" } }],
+    mood: "converging", groundingIds: [id],
+  });
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.spoken_pick")?.fields, { session_id: s.sessionId, conflict_id: "c-top", winner: "B" });
+});
+
+test("no spoken pick without a comparison, from the bot, or for a line that only asks to see an option", async () => {
+  const s = await setup([[]]);
+  await s.say("Omid Omidi", "let's go with B");
+  assert.equal(s.handoffs.length, 0, "no comparison on screen");
+  showAB(s.rt);
+  await s.say("Builder", "let's go with B");
+  await s.say("Omid Omidi", "show option B");
+  assert.equal(s.handoffs.length, 0);
+  assert.equal(s.logs.filter((l) => l.msg === "conversation.spoken_pick").length, 0);
+});
+
+test("a line that triggers a spoken pick still gets its normal model turn", async () => {
+  const s = await setup([[speak("Going with B.", "answer")]]);
+  showAB(s.rt);
+  await s.say("Omid Omidi", "Builder, let's go with B");
+  await flush();
+  assert.equal(s.handoffs.length, 1);
+  assert.equal(s.requests.length, 1, "the model is still called for that line");
+});
+
+// A pick on screen for conflict c1 (also in the doc), resolved by the fake build loop when it gets the hand-off.
+function pickSetup(s: Awaited<ReturnType<typeof setup>>, resolves = true) {
+  s.rt.setDoc(conflictDoc());
+  const variant = (label: string) => ({ label, summary: `Option ${label}`, backers: [], proto: { screens: [] } as never, focusIds: [] });
+  s.rt.showComparison({ conflictId: "c1", topic: "Where done tasks go", variants: [variant("A"), variant("B")] });
+  let taken: Promise<void> | null = null;
+  s.buildLoop.taken = () => taken;
+  s.handoffHooks.push((h) => {
+    const c = h.topics[0]?.resolvedChoice;
+    if (c && resolves) taken = new Promise<void>((r) => setTimeout(r, 10)).then(() => { s.rt.resolveComparison(c.conflictId, c.winner); taken = null; });
+  });
+}
+
+test("a spoken pick that resolves the conflict is confirmed out loud, once", async () => {
+  const s = await setup([[], []]);
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"]);
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.confirm_spoken")?.fields, { session_id: s.sessionId, conflict_id: "c1", winner: "B" });
+  assert.equal(JSON.stringify(s.logs).includes("Everyone OK"), false, "no spoken text in logs");
+});
+
+test("no spoken confirmation when the pick did not resolve anything", async () => {
+  const s = await setup([[]]);
+  pickSetup(s, false);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
+  const t = await setup([[]]);
+  await t.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(t.said, [], "no comparison on screen");
+});
+
+test("the model's own confirm_conflict for a resolution Builder already confirmed is not said again", async () => {
+  const s = await setup([[], [speak("So: B. Everyone OK?", "confirm_conflict")]]);
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  await s.say("Amir", "Sounds fine to me.");
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"]);
+});
+
+test("a confirmation whose speech fails is not marked confirmed, so the model can still confirm it", async () => {
+  const s = await setup([[], [speak("So: B. Everyone OK?", "confirm_conflict")]], { failSpeech: { on: true } });
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
+  assert.equal(s.logs.some((l) => l.msg === "conversation.confirm_spoken"), false);
+  s.opts.failSpeech!.on = false;
+  await s.say("Amir", "Sounds fine to me.");
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"], "the model's own confirmation still opens");
+});
+
+// A port that reports a truncated stream (no completed tool call) for the calls in `cut`, else runs the script.
+function cuttingPort(cut: number[], script: (i: number, text: string) => ToolCall[]): ModelPort {
+  let i = 0;
+  return {
+    async runTools(req) {
+      await Promise.resolve();
+      const n = i++;
+      const usage = { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      if (cut.includes(n)) return { toolCalls: [], ms: 1, dropped: 1, stopReason: null, truncated: true, usage };
+      const text = (req.messages as { content: string }[]).map((m) => m.content).join("\n");
+      const toolCalls = script(n, text);
+      return { toolCalls, ms: 1, dropped: 0, stopReason: "tool_use", truncated: false, usage };
+    },
+  };
+}
+
+test("a truncated conversation turn with no tool call is run again once, with the same lines", async () => {
+  const s = await setup(cuttingPort([0], (_i, text) => {
+    const ids = [...text.matchAll(/\[(\d+)\] Amir/g)].map((m) => Number(m[1]));
+    return [updateBuild(handoff(ids))];
+  }));
+  await s.say("Amir", "Let's add a quick-add box at the top.");
+  await flush();
+  await flush();
+  assert.equal(s.requests.length, 2, "exactly two model calls");
+  assert.equal(s.handoffs.length, 1, "and one hand-off");
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.turn_retried")?.fields, { session_id: s.sessionId });
+});
+
+test("a second consecutive truncation is not retried again", async () => {
+  const s = await setup(cuttingPort([0, 1, 2, 3], () => []));
+  await s.say("Amir", "Let's add a quick-add box at the top.");
+  await flush();
+  await flush();
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.logs.filter((l) => l.msg === "conversation.turn_retried").length, 1);
+  assert.equal(s.handoffs.length, 0);
+});
+
+// c1 resolved with B by Mohammad just now, and no comparison on screen.
+function resolvedSetup(s: Awaited<ReturnType<typeof setup>>) {
+  s.rt.setDoc(conflictDoc());
+  s.rt.resolveComparison("c1", "B", ["Mohammad"]);
+}
+
+test("a late agreement with a pick made seconds ago is passed to the build loop with the line id", async () => {
+  const s = await setup([[]]);
+  resolvedSetup(s);
+  s.advance(6000);
+  const id = await s.say("Amir", "Agreed, B it is");
+  await flush();
+  assert.deepEqual(s.lateAgrees, [{ conflictId: "c1", winner: "B", lineId: id }]);
+  assert.equal(s.handoffs.length, 0, "no resolvedChoice hand-off");
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.late_agree")?.fields, { session_id: s.sessionId, decision_id: "d-c1" });
+});
+
+test("no late agreement after 20 s, for another label, from the bot, or when already agreed", async () => {
+  const s = await setup([[]]);
+  resolvedSetup(s);
+  s.advance(5000);
+  await s.say("Amir", "Agreed, A it is");
+  await s.say("Builder", "B it is");
+  await s.say("Mohammad", "B it is");
+  s.advance(20_000);
+  await s.say("Amir", "Agreed, B it is");
+  await flush();
+  assert.deepEqual(s.lateAgrees, []);
+});
+
+test("every recently resolved conflict is considered, not just the first", async () => {
+  const s = await setup([[]]);
+  const doc = conflictDoc();
+  doc.conflicts.push({ ...doc.conflicts[0], id: "c2", variants: doc.conflicts[0].variants.map((v) => ({ ...v })) });
+  s.rt.setDoc(doc);
+  s.rt.resolveComparison("c1", "A", ["Mohammad"]);
+  s.rt.resolveComparison("c2", "B", ["Mohammad"]);
+  s.advance(3000);
+  const id = await s.say("Amir", "B it is");
+  await flush();
+  assert.deepEqual(s.lateAgrees, [{ conflictId: "c2", winner: "B", lineId: id }]);
+});
+
+test("nothing is spoken when the call ends while a turn waits for a pick to be taken", async () => {
+  const s = await setup(fnPort((i, text) => {
+    if (i !== 1) return [];
+    const ids = [...text.matchAll(/\[(\d+)\] Sara/g)].map((m) => Number(m[1]));
+    return [speak("So: B. Everyone OK?", "confirm_conflict"),
+      updateBuild(handoff(ids, { topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }] }))];
+  }));
+  s.rt.setDoc(conflictDoc());
+  let taken: Promise<void> | null = null;
+  s.buildLoop.taken = () => taken;
+  s.handoffHooks.push((h) => {
+    const c = h.topics[0]?.resolvedChoice;
+    if (c) taken = new Promise<void>((r) => setTimeout(r, 20)).then(() => { s.rt.resolveComparison(c.conflictId, c.winner); taken = null; });
+  });
+  await s.say("Amir", "Hmm, not sure.");
+  await flush();
+  await s.say("Sara", "Let's go with B.");
+  await flush();
+  s.loop.onBotEnded(s.sessionId);
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
 });

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { CATALOG, STYLE_OPTIONS, TEMPLATES } from "../../public/renderer/catalog.js";
+import { CATALOG, OFFERED_PROPS_OMIT, OFFERED_TYPES, STYLE_OPTIONS } from "../../public/renderer/catalog.js";
 import { PHONE_TABS } from "../../public/renderer/interact.js";
 import { ICON_ALIASES, ICON_NAMES } from "../../public/renderer/icons.js";
 import { IMAGES, IMAGE_SUBJECTS } from "../../public/renderer/images.js";
@@ -17,15 +17,26 @@ const KIND_WORDS: Record<string, string> = { s: "string", n: "number", b: "boole
 
 const kindText = (kind: Kind) => (Array.isArray(kind) ? kind.join("|") : KIND_WORDS[kind] ?? kind);
 
-/** Markdown table, one row per component grouped by catalog group, then the style options and the types that hold children. */
+// The catalog notes that mention what the model is no longer offered, reworded for the prompt.
+const OFFERED_NOTES: Record<string, string> = {
+  Screen: "One page of the app; the stage shows one at a time; children stack top to bottom in the order added",
+};
+
+// Offered values narrower than the catalog's (the renderer and normalizeProps still take the rest).
+const OFFERED_KINDS: Record<string, Record<string, Kind>> = { Grid: { columns: ["2", "3"] } };
+
+/** Markdown table, one row per offered component grouped by catalog group, then the style options and the types that hold children. */
 export function componentTable(): string {
-  const entries = Object.entries(CATALOG);
+  const entries = Object.entries(CATALOG).filter(([type]) => (OFFERED_TYPES as string[]).includes(type));
   const rows: string[] = ["| Type | props (key: kind or a|b|c) | styles | note |", "|---|---|---|---|"];
   for (const group of GROUPS) {
     for (const [type, entry] of entries) {
       if (entry.group !== group) continue;
-      const props = Object.entries(entry.props as Record<string, Kind>).map(([k, kind]) => `${k}: ${kindText(kind)}`).join(", ");
-      rows.push(`| \`${type}\` | ${props || "none"} | ${entry.styles.join(", ") || "-"} | ${entry.note} |`);
+      const omit = (OFFERED_PROPS_OMIT as Record<string, string[]>)[type] ?? [];
+      const props = Object.entries(entry.props as Record<string, Kind>)
+        .filter(([k]) => !omit.includes(k))
+        .map(([k, kind]) => `${k}: ${kindText(OFFERED_KINDS[type]?.[k] ?? kind)}`).join(", ");
+      rows.push(`| \`${type}\` | ${props || "none"} | ${entry.styles.join(", ") || "-"} | ${OFFERED_NOTES[type] ?? entry.note} |`);
     }
   }
   const styles = Object.entries(STYLE_OPTIONS).map(([k, v]) => `${k}: ${v.join("|")}`).join("; ");
@@ -33,20 +44,9 @@ export function componentTable(): string {
   return [
     ...rows,
     "",
-    "Every type except App and Screen also takes `region: string`, the region of its Screen's template to sit in.",
     `Style options (optional; the first value is the default): ${styles}.`,
     `Only these hold child nodes: ${parents}. Every other type is a leaf.`,
   ].join("\n");
-}
-
-/** Markdown table of the Screen templates: regions (the one unplaced children fall into marked main) and what usually goes where. */
-export function templatesTable(): string {
-  const rows = ["| Template | regions | suggest |", "|---|---|---|"];
-  for (const [name, t] of Object.entries(TEMPLATES)) {
-    const regions = Object.keys(t.regions).map((r) => (r === t.main ? `${r} (main)` : r)).join(", ");
-    rows.push(`| \`${name}\` | ${regions} | ${t.suggest} |`);
-  }
-  return rows.join("\n");
 }
 
 /** The theme slots and their values, first value being the house default. */
@@ -73,7 +73,6 @@ export function buildSystemPrompt(): string {
   return readFileSync(new URL("./prompts/build.md", import.meta.url), "utf8")
     .replace("{{COMPONENTS}}", () => componentTable())
     .replace("{{PHONE_NOTE}}", () => `A phone shows only its first ${PHONE_TABS} Screens as bottom tabs, so keep a phone app to ${PHONE_TABS} Screens.`)
-    .replace("{{TEMPLATES}}", () => templatesTable())
     .replace("{{ICONS}}", () => iconList())
     .replace("{{IMAGES}}", () => imageList())
     .replace("{{THEME}}", () => themeOptions());

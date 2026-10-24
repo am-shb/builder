@@ -1,0 +1,16 @@
+{
+  "participants": ["Amir Shahbandegan", "Amin Fadaeinejad", "Omid Omidi", "Mohammad Amin Shamshiri"],
+  "utterances": [
+    { "t": 6000, "speaker": "Amir Shahbandegan", "text": "Hey Builder, we're designing the mobile ordering app for Maple Café, our coffee chain." },
+    { "t": 11000, "speaker": "Amir Shahbandegan", "text": "The home screen shows today's menu as photo cards with prices: oat latte, butter croissant, breakfast plate and a grain bowl." },
+    { "t": 18000, "speaker": "Mohammad Amin Shamshiri", "text": "Make it a phone app, with Maple Café as the big title at the top." },
+    { "t": 24000, "speaker": "Omid Omidi", "text": "Looks great. I'm happy with the menu and the phone layout.", "shot": "beat1" },
+    { "t": 32000, "speaker": "Amin Fadaeinejad", "text": "The top of the home screen should sell our fall special, the maple latte. It has double the margin of anything else." },
+    { "t": 39000, "speaker": "Omid Omidi", "text": "I disagree. Sixty eight percent of our orders are repeat orders. The top should be Order again, with your usual and a one tap reorder button.", "shot": "beat2" },
+    { "t": 60000, "speaker": "Mohammad Amin Shamshiri", "text": "Looking at both, I'd go with B. Regulars pay the bills, and one tap is faster in the morning rush.", "waitFor": "comparison" },
+    { "t": 66000, "speaker": "Amir Shahbandegan", "text": "Agreed, B it is. But keep the fall special just below it." },
+    { "t": 73000, "speaker": "Amin Fadaeinejad", "text": "Fine by me, as long as the special stays above the menu.", "shot": "beat3" },
+    { "t": 84000, "speaker": "Amir Shahbandegan", "text": "That's the plan. Thanks Builder." }
+  ],
+  "tailMs": 15000
+}

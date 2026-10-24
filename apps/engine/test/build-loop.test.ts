@@ -8,12 +8,15 @@ import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../sr
 import { createBuildLoop, taskText, TASK_DONE_MS } from "../src/agent/build-loop.ts";
 import { toolJsonSchema } from "../src/agent/tool-schema.ts";
 import { enforceGrounding, HandoffSchema, sanitizeModelBatch } from "../src/agent/handoff.ts";
+import type { ConsensusUpdate } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
 import { applyBatch, emptyPrototype, findNode, fromToolBatch } from "../src/ui/tree.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
+// @ts-ignore plain JS module shared with the browser
+import { OFFERED_TYPES } from "../public/renderer/catalog.js";
 
 const flush = () => settle();
 
@@ -106,7 +109,7 @@ const addNode = (parentId: string, id: string, type: string, props: [string, unk
 
 const QUICK_ADD = [
   patches("Added: quick-add · Amir", [
-    addNode("home", "home.quick-add", "Input", [["placeholder", "Add a task"]], "d-quick-add"),
+    addNode("home", "home.quick-add", "Text", [["text", "Add a task"]], "d-quick-add"),
     addNode("home", "home.quick-add-btn", "Button", [["label", "Add"]], "d-quick-add"),
   ], "Amir"),
 ];
@@ -117,8 +120,8 @@ const conflictVariant = (label: string, summary: string, backers: string[], ops:
 const DONE_CONFLICT = consensus([{
   op: "add_conflict", id: "c-done", topic: "Where done tasks go",
   variants: [
-    conflictVariant("A", "Hide done tasks behind a toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle", [["label", "Show done"]])]),
-    conflictVariant("B", "Move done tasks to a Done tab", ["Sara"], [addNode("home", "home.tabs", "Tabs", [["tabs", ["To do", "Done"]]])]),
+    conflictVariant("A", "Hide done tasks behind a toggle", ["Amir"], [addNode("home", "home.show-done", "Badge", [["text", "Show done"]])]),
+    conflictVariant("B", "Move done tasks to a Done tab", ["Sara"], [addNode("home", "home.tabs", "Card", [["title", "Done"]])]),
   ],
 }]);
 
@@ -234,6 +237,59 @@ test("support by a speaker not in grounding lines is dropped", async () => {
   assert.deepEqual(r.ops.map((o) => o.op), ["support", "mark_pending"]);
 });
 
+test("enforceGrounding keeps conflict backers from priorBackers, and nothing else", () => {
+  const conflict = { op: "add_conflict" as const, id: "c1", topic: "T", variants: [
+    conflictVariant("A", "a", ["Amin", "Ghost", "Rita"], [addNode("home", "home.special", "Badge")]),
+    conflictVariant("B", "b", ["Omid"], []),
+  ] } as unknown as Extract<ConsensusUpdate, { op: "add_conflict" }>;
+  const r = enforceGrounding([conflict], new Set(["Omid"]), [
+    { names: ["Amin"], affects: ["home.special"] },
+    { names: ["Rita"], affects: ["home.header"] },
+  ]);
+  const op = r.ops[0] as typeof conflict;
+  assert.deepEqual(op.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+  assert.equal(r.dropped, 2, "Ghost is in neither; Rita's decision affects another part of the screen");
+
+  const r2 = enforceGrounding([
+    { op: "support", decisionId: "d1", speaker: "Amin" },
+    { op: "add_decision", id: "d2", text: "x", proposedBy: "Amin", affects: [] },
+  ], new Set(["Omid"]), [{ names: ["Amin"], affects: ["home.special"] }]);
+  assert.deepEqual(r2.ops, [], "support and add_decision still need this hand-off's speakers");
+  assert.equal(r2.dropped, 2);
+});
+
+test("a conflict recorded in a later hand-off keeps the earlier proposer as a backer of their variant", async () => {
+  const s = await setup([
+    [consensus([{ op: "add_decision", id: "d-top", text: "The special on top", proposedBy: "Amin", affects: ["home.special-a"] }])],
+    [consensus([{ op: "add_conflict", id: "c-special", topic: "Special placement", variants: [
+      conflictVariant("A", "Special on top", ["Amin"], [addNode("home", "home.special-a", "Badge", [["text", "Special"]])]),
+      conflictVariant("B", "Special at the bottom", ["Omid"], [addNode("home", "home.special-b", "Badge", [["text", "Special"]])]),
+    ] }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "the special on top")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "no, at the bottom")], {}, "Placement"));
+  await flush();
+  await s.timers.advance(30_000);
+  const c = s.doc().conflicts.find((x) => x.id === "c-special")!;
+  assert.deepEqual(c.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+});
+
+test("only an open decision's proposer, not its supporters, can back a conflict variant from an earlier hand-off", async () => {
+  const s = await setup([
+    [consensus([{ op: "add_conflict", id: "c1", topic: "Special", variants: [
+      conflictVariant("A", "Special on top", ["Amin", "Rita"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top" }] }]),
+      conflictVariant("B", "Special below", ["Omid"], [addNode("home", "home.other", "Badge", [["text", "Other"]])]),
+    ] }])],
+  ]);
+  assert.equal(s.rt.applyBatch({ label: "seed", ops: [{ op: "add", parentId: "home", node: { id: "home.special", type: "Card", props: { title: "Special" }, status: "draft", decisionId: "dX", children: [] } }] }).ok, true);
+  s.rt.setDoc({ ...emptyDoc(), decisions: [{ id: "dX", text: "Special", status: "pending", pendingSince: s.timers.now(), proposedBy: "Amin", agreedBy: ["Rita"], affects: ["home.special"], rejectedOptions: [] }] });
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "I'd put it below")]));
+  await flush();
+  const c = s.doc().conflicts.find((x) => x.id === "c1")!;
+  assert.deepEqual(c.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+});
+
 test("handoffs during a run are merged into exactly one follow-up run", async () => {
   const g = gatedPort([[], [], []]);
   const s = await setup(g.port);
@@ -341,12 +397,46 @@ test("add_conflict shows comparison with ≥2 valid variants", async () => {
   assert.equal(findNode(s.proto(), "home.tabs"), undefined, "variants are not applied to the main prototype");
 });
 
+test("a conflict variant with one unoffered add keeps its other ops, and the run counts the skip", async () => {
+  const s = await setup([[consensus([{
+    op: "add_conflict", id: "c-done", topic: "Where done tasks go",
+    variants: [
+      conflictVariant("A", "Badge", ["Amir"], [addNode("home", "home.show-done", "Badge", [["text", "Show done"]])]),
+      conflictVariant("B", "Card with a heading", ["Sara"], [
+        addNode("home", "home.done-card", "Card", [["title", "Done"]]),
+        addNode("home", "home.done-heading", "Heading", [["text", "Done"]]),
+      ]),
+    ],
+  }])]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "badge"), await s.say("Sara", "card")]));
+  await flush();
+  const conflict = s.doc().conflicts[0];
+  assert.deepEqual(conflict.variants.map((v) => v.label), ["A", "B"]);
+  assert.deepEqual(conflict.variants[1].batch.ops.map((o) => (o.op === "add" ? o.node.id : o.op)), ["home.done-card"]);
+  assert.ok(s.sent.some((e) => e.type === "comparison"), "the comparison still shows");
+  assert.equal(s.logs.find((l) => l.msg === "build.run")!.fields?.ops_unoffered, 1);
+});
+
+test("an apply_patches batch with an unoffered add and its child keeps the rest", async () => {
+  const s = await setup([[patches("Added: mixed", [
+    addNode("home", "home.title", "Heading", [["text", "Tasks"]]),
+    addNode("home.title", "home.title.sub", "Text", [["text", "sub"]]),
+    addNode("home", "home.note", "Text", [["text", "Due Fri"]]),
+  ])]]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a title and a note")]));
+  await flush();
+  assert.equal(findNode(s.proto(), "home.title"), undefined);
+  assert.equal(findNode(s.proto(), "home.title.sub"), undefined);
+  assert.ok(findNode(s.proto(), "home.note"));
+  assert.equal(s.logs.find((l) => l.msg === "build.run")!.fields?.ops_unoffered, 2);
+});
+
 test("add_conflict with fewer than 2 applicable variants records the conflict but shows no comparison", async () => {
   const s = await setup([[consensus([{
     op: "add_conflict", id: "c-x", topic: "Where done tasks go",
     variants: [
-      conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]),
-      conflictVariant("B", "Tab", ["Sara"], [addNode("missing", "missing.tabs", "Tabs")]),
+      conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]),
+      conflictVariant("B", "Tab", ["Sara"], [addNode("missing", "missing.tabs", "Card")]),
     ],
   }])]]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "toggle"), await s.say("Sara", "tab")]));
@@ -448,6 +538,52 @@ const RESOLVE_B = (groundingIds: number[]) => handoff(groundingIds, {
   topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-done", winner: "B" } }],
 });
 
+const conflictOp = (id: string, aNode: string, bNode: string) => ({
+  op: "add_conflict", id, topic: `Topic ${id}`,
+  variants: [
+    conflictVariant("A", "Option A", ["Amir"], [addNode("home", aNode, "Badge", [["text", "A"]])]),
+    conflictVariant("B", "Option B", ["Sara"], [addNode("home", bNode, "Card", [["title", "x"]])]),
+  ],
+});
+const PICK_ANY_B = (groundingIds: number[]) => handoff(groundingIds, {
+  topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "*", winner: "B" } }],
+});
+
+test("a pick with no conflict id merges B when exactly one conflict is open", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Amir", "B please")]));
+  await flush();
+  assert.ok(findNode(s.proto(), "home.b"), "B is merged");
+  assert.equal(findNode(s.proto(), "home.a"), undefined);
+  const d = s.doc().decisions.find((x) => x.id === "d-c-top")!;
+  assert.equal(d.status, "agreed");
+});
+
+test("the speaker of a pick is recorded as agreeing even when not a backer", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Mohammad Amin Shamshiri", "B please")]));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c-top")!;
+  assert.ok(d.agreedBy.includes("Mohammad Amin Shamshiri"));
+  assert.ok(d.agreedBy.includes("Sara"));
+});
+
+test("a pick with no conflict id merges nothing when two conflicts are open", async () => {
+  const s = await setup([[consensus([conflictOp("c-one", "home.a1", "home.b1"), conflictOp("c-two", "home.a2", "home.b2")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Amir", "B please")]));
+  await flush();
+  assert.deepEqual(s.doc().conflicts.map((c) => c.status), ["open", "open"]);
+  assert.equal(findNode(s.proto(), "home.b1"), undefined);
+  assert.equal(findNode(s.proto(), "home.b2"), undefined);
+  assert.deepEqual(s.logs.find((l) => l.msg === "build.resolve_ambiguous")?.fields, { session_id: s.sessionId, open: 2 });
+});
+
 test("ungrounded resolvedChoice is ignored", async () => {
   const s = await setup([[DONE_CONFLICT], [], [], [], []]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "toggle"), await s.say("Sara", "tab")]));
@@ -471,18 +607,18 @@ test("model batch cannot mark nodes agreed", async () => {
   const s = await setup([[
     // The tool format has no status: a batch or a variant that sends one is rejected whole.
     patches("Added: quick-add", [
-      { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Input", props: [], status: "agreed", decisionId: "d-quick-add" } },
+      { op: "add", parentId: "home", node: { id: "home.quick-add", type: "Text", props: [], status: "agreed", decisionId: "d-quick-add" } },
     ]),
     patches("Settled: title", [{ op: "update", id: "home.title", status: "agreed", decisionId: "d-quick-add" }]),
     consensus([{ op: "add_conflict", id: "c-y", topic: "Toggle", variants: [
-      conflictVariant("A", "Toggle", ["Amir"], [{ op: "add", parentId: "home", node: { id: "home.show-done", type: "Toggle", props: [], status: "agreed" } }]),
-      conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]),
+      conflictVariant("A", "Toggle", ["Amir"], [{ op: "add", parentId: "home", node: { id: "home.show-done", type: "Badge", props: [], status: "agreed" } }]),
+      conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Card")]),
     ] }]),
-    patches("Added: title", [addNode("home", "home.title", "Heading", [["text", "Tasks"]], "d-quick-add")]),
+    patches("Added: title", [addNode("home", "home.title", "Text", [["text", "Tasks"]], "d-quick-add")]),
     consensus([
       { op: "add_decision", id: "d-quick-add", text: "Quick-add", proposedBy: "Amir", affects: ["home.title"] },
       { op: "add_conflict", id: "c-x", topic: "Where done tasks go", variants: [
-        conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]),
+        conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]),
         conflictVariant("B", "Rename the heading", ["Sara"], [{ op: "update", id: "home.title", props: [{ key: "text", value: "Today" }] }]),
       ] },
     ]),
@@ -571,10 +707,10 @@ test("an update whose props all drop leaves an agreed node alone (known issue I2
 
 test("a variant update whose props all drop does not retag the node", async () => {
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{ op: "add_conflict", id: "c1", topic: "Heading", variants: [
       conflictVariant("A", "Red", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "color", value: "red" }] }]),
-      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Toggle")]),
+      conflictVariant("B", "Toggle", ["Sara"], [addNode("home", "home.show-done", "Badge")]),
     ] }]),
   ]]);
   s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "red"), await s.say("Sara", "toggle")]));
@@ -803,14 +939,14 @@ test("objection to an agreed decision returns its nodes to draft", async () => {
 test("rejected winning batch does not flip pre-existing nodes", async () => {
   // B updates the existing heading, then adds under a missing parent, so its whole batch is rejected.
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{
       op: "add_conflict", id: "c-done", topic: "Heading",
       variants: [
         conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
         conflictVariant("B", "Rename and tab", ["Sara"], [
           { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
-          addNode("missing", "missing.tabs", "Tabs"),
+          addNode("missing", "missing.tabs", "Card"),
         ]),
       ],
     }]),
@@ -935,6 +1071,25 @@ test("tool schemas sent to the model are strict-compatible", async () => {
     };
     walk(schema);
   }
+});
+
+test("the update_consensus schema offers only OFFERED_TYPES for variant nodes", async () => {
+  const s = await setup([[]]);
+  s.loop.handoff(s.sessionId, handoff([]));
+  await flush();
+  const tools = s.requests[0].tools as { name: string; input_schema: unknown }[];
+  const schema = tools.find((t) => t.name === "update_consensus")!.input_schema;
+  const enums: unknown[] = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    const o = v as Record<string, any>;
+    if (o.properties?.type?.enum && o.properties.id) enums.push(o.properties.type.enum);
+    Object.values(o).forEach(walk);
+  };
+  walk(schema);
+  assert.ok(enums.length >= 1, "variant nodes carry a type enum");
+  for (const e of enums) assert.deepEqual(e, OFFERED_TYPES);
 });
 
 // A port whose calls stay pending, so a test can stream tool calls into a run still in flight.
@@ -1159,7 +1314,7 @@ test("a model change to an agreed node sends it back to draft until a decision c
     AGREE_QUICK_ADD,
     [
       patches("Changed: placeholder", [
-        { op: "update", id: "home.quick-add", props: [{ key: "placeholder", value: "New task" }], decisionId: "d-placeholder" },
+        { op: "update", id: "home.quick-add", props: [{ key: "text", value: "New task" }], decisionId: "d-placeholder" },
         // Changes nothing, so it is dropped: an update cannot demote an agreed node by itself.
         { op: "update", id: "home.quick-add-btn", props: [{ key: "label", value: "Add" }] },
       ], "Lee"),
@@ -1179,7 +1334,7 @@ test("a model change to an agreed node sends it back to draft until a decision c
   s.loop.handoff(s.sessionId, handoff([await s.say("Lee", "the box should say New task")]));
   await flush();
   const input = findNode(s.proto(), "home.quick-add")!;
-  assert.deepEqual([input.status, input.decisionId, input.props.placeholder], ["draft", "d-placeholder", "New task"], "changed, so not agreed any more");
+  assert.deepEqual([input.status, input.decisionId, input.props.text], ["draft", "d-placeholder", "New task"], "changed, so not agreed any more");
   assert.equal(findNode(s.proto(), "home.quick-add-btn")!.status, "agreed", "a no-op update leaves the node alone");
   assert.deepEqual(s.patches().at(-1)!.changes.map((c) => c.id), ["home.quick-add"]);
   assert.equal(s.doc().decisions.find((d) => d.id === "d-quick-add")!.status, "agreed", "the earlier decision stands");
@@ -1202,7 +1357,7 @@ test("a model remove of an agreed node, or of anything holding one, is dropped u
   const s = await setup([
     [
       ...AGREE_QUICK_ADD,
-      patches("Added: note", [addNode("home", "home.box", "Section"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
+      patches("Added: note", [addNode("home", "home.box", "Card"), addNode("home.box", "home.box.note", "Text", [["text", "Due Fri"]], "d-note")], "Amir"),
       consensus([
         { op: "add_decision", id: "d-note", text: "A due note", proposedBy: "Amir", affects: ["home.box.note"] },
         { op: "mark_pending", decisionId: "d-note" },
@@ -1238,14 +1393,14 @@ test("a model remove of an agreed node, or of anything holding one, is dropped u
 test("the model sees resolvedChoice only for a pick merged just now; an unmerged pick becomes a redraw proposal (known issue I3)", async () => {
   // B updates the heading, then adds under a missing parent, so its whole batch is rejected at resolve time.
   const s = await setup([[
-    patches("Added: heading", [addNode("home", "home.heading", "Heading", [["text", "Tasks"]])]),
+    patches("Added: heading", [addNode("home", "home.heading", "Text", [["text", "Tasks"]])]),
     consensus([{
       op: "add_conflict", id: "c-done", topic: "Heading",
       variants: [
         conflictVariant("A", "Rename", ["Amir"], [{ op: "update", id: "home.heading", props: [{ key: "text", value: "To do" }] }]),
         conflictVariant("B", "Rename and tab", ["Sara"], [
           { op: "update", id: "home.heading", props: [{ key: "text", value: "Today" }] },
-          addNode("missing", "missing.tabs", "Tabs"),
+          addNode("missing", "missing.tabs", "Card"),
         ]),
       ],
     }]),
@@ -1286,7 +1441,7 @@ test("two conflicts raised in one run are shown one after the other (known issue
   const due = consensus([{
     op: "add_conflict", id: "c-due", topic: "Due dates",
     variants: [
-      conflictVariant("A", "A due date on every task", ["Amir"], [addNode("home", "home.due", "Input", [["label", "Due"]])]),
+      conflictVariant("A", "A due date on every task", ["Amir"], [addNode("home", "home.due", "Text", [["text", "Due"]])]),
       conflictVariant("B", "No due dates yet", ["Sara"], [addNode("home", "home.later", "Text", [["text", "Due dates later"]])]),
     ],
   }]);
@@ -1312,13 +1467,13 @@ test("two conflicts raised in one run are shown one after the other (known issue
 
 test("a batch's by must be someone heard in the grounding lines (known issue M9)", async () => {
   const s = await setup([[
-    patches("Added: quick-add", [addNode("home", "home.quick-add", "Input")], "Bob"),
+    patches("Added: quick-add", [addNode("home", "home.quick-add", "Text")], "Bob"),
     patches("Added: button", [addNode("home", "home.add", "Button", [["label", "Add"]])], "Amir"),
     consensus([{
       op: "add_conflict", id: "c-x", topic: "Where done tasks go",
       variants: [
-        { ...conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Toggle")]), batch: { label: "Option A", by: "Bob", ops: [addNode("home", "home.show-done", "Toggle")] } },
-        { ...conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Tabs")]), batch: { label: "Option B", by: "Sara", ops: [addNode("home", "home.tabs", "Tabs")] } },
+        { ...conflictVariant("A", "Toggle", ["Amir"], [addNode("home", "home.show-done", "Badge")]), batch: { label: "Option A", by: "Bob", ops: [addNode("home", "home.show-done", "Badge")] } },
+        { ...conflictVariant("B", "Tab", ["Sara"], [addNode("home", "home.tabs", "Card")]), batch: { label: "Option B", by: "Sara", ops: [addNode("home", "home.tabs", "Card")] } },
       ],
     }]),
   ]]);
@@ -1414,4 +1569,192 @@ test("a batch that streams in after the call ended is not drawn", async () => {
   await held.release(0, [QUICK_ADD[0]]);
   assert.equal(s.patches().length, 0);
   assert.equal(findNode(s.proto(), "home.quick-add"), undefined);
+});
+
+test("a spoken pick followed by a model hand-off carrying the same pick resolves once", async () => {
+  const s = await setup([[consensus([conflictOp("c-top", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  const pick = (ids: number[]) => handoff(ids, {
+    topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c-top", winner: "B" } }],
+  });
+  s.loop.handoff(s.sessionId, pick([await s.say("Omid", "let's go with B")]));
+  await flush();
+  s.loop.handoff(s.sessionId, pick([await s.say("Omid", "let's go with B")]));
+  await flush();
+  assert.equal(s.doc().decisions.filter((d) => d.id === "d-c-top").length, 1);
+  assert.equal(s.sent.filter((e) => e.type === "resolve").length, 1);
+});
+
+async function resolvedPick(s: Awaited<ReturnType<typeof setup>>) {
+  s.rt.setDoc({ ...s.doc(), conflicts: [{ id: "c1", topic: "T", status: "open", openedAt: 0, variants: [
+    { label: "A", summary: "a", backers: ["Sara"], batch: { label: "A", ops: [] } },
+    { label: "B", summary: "b", backers: ["Bob"], batch: { label: "B", ops: [] } },
+  ] }] });
+  s.rt.resolveComparison("c1", "B", ["Sara"]);
+}
+const agreedBy = (s: Awaited<ReturnType<typeof setup>>) => s.doc().decisions.find((x) => x.id === "d-c1")!.agreedBy;
+
+test("lateAgree adds exactly the speaker of a stored line that names the winner, once, within 20 s", async () => {
+  const s = await setup([[]]);
+  await resolvedPick(s);
+  await s.timers.advance(6000);
+  const id = await s.say("Amir", "Agreed, B it is");
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: id }), true);
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara", "Amir"]);
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: id }), false, "once");
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara", "Amir"]);
+});
+
+test("lateAgree adds nobody for a line that does not pick the winner, a bot line, a wrong winner or a late line", async () => {
+  const s = await setup([[]]);
+  await resolvedPick(s);
+  await s.timers.advance(6000);
+  const other = await s.say("Lee", "I don't like it, can we talk about the header?");
+  const wrong = await s.say("Lee", "A it is");
+  const bot = await s.say("Builder", "B it is");
+  for (const lineId of [other, wrong, bot]) await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId });
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "A", lineId: wrong }), false, "A is not the winner");
+  await s.timers.advance(20_000);
+  const late = await s.say("Lee", "B it is");
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: late }), false, "past 20 s");
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara"]);
+});
+
+test("a model-originated hand-off repeating the pick adds nobody to the decision", async () => {
+  const s = await setup([[], []]);
+  await resolvedPick(s);
+  const pick = handoff([await s.say("Lee", "I object to B, honestly")], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }] });
+  s.loop.handoff(s.sessionId, pick);
+  await flush();
+  await s.timers.advance(5000);
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara"]);
+});
+
+test("two spoken picks of the same option 100 ms apart both record their speaker; one of the other option adds nobody", async () => {
+  const s = await setup([[], [], [], []]);
+  s.rt.setDoc({ ...s.doc(), conflicts: [{ id: "c1", topic: "T", status: "open", openedAt: 0, variants: [
+    { label: "A", summary: "a", backers: ["Sara"], batch: { label: "A", ops: [] } },
+    { label: "B", summary: "b", backers: ["Bob"], batch: { label: "B", ops: [] } },
+  ] }] });
+  const pick = (id: number, winner: "A" | "B" = "B") => handoff([id], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner } }] });
+  s.loop.handoff(s.sessionId, pick(await s.say("Mona", "B")));
+  await s.timers.advance(100);
+  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "B it is")));
+  s.loop.handoff(s.sessionId, pick(await s.say("Rita", "A it is"), "A"));
+  await flush();
+  assert.deepEqual(agreedBy(s), ["Bob", "Mona", "Lee"]);
+  assert.deepEqual(s.logs.filter((l) => l.msg === "build.pick_joined").map((l) => ({ ...l.fields, session_id: undefined })), [{ session_id: undefined, conflict_id: "c1", count: 1 }]);
+  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "B it is")));
+  await flush();
+  assert.deepEqual(agreedBy(s), ["Bob", "Mona", "Lee"], "once");
+});
+
+test("prior backers are not accepted through the App root, a Screen, or an update that changes nothing", () => {
+  const variant = (ops: unknown[]) => [{ op: "add_conflict", id: "c1", topic: "T", variants: [
+    conflictVariant("A", "a", ["Rita"], ops), conflictVariant("B", "b", ["Omid"], [addNode("home", "home.x", "Badge")]),
+  ] }] as unknown as ConsensusUpdate[];
+  const backersOfA = (ops: unknown[], affects: string[]) => {
+    const r = enforceGrounding(variant(ops), new Set(["Omid"]), [{ names: ["Rita"], affects }], new Set(["home"]));
+    return (r.ops[0] as Extract<ConsensusUpdate, { op: "add_conflict" }>).variants[0].backers;
+  };
+  const upd = (id: string, extra: object = {}) => ({ op: "update", id, ...extra });
+  assert.deepEqual(backersOfA([upd("app", { props: [{ key: "title", value: "x" }] })], ["app"]), [], "the App root");
+  assert.deepEqual(backersOfA([upd("home", { props: [{ key: "title", value: "x" }] })], ["home"]), [], "a Screen id");
+  assert.deepEqual(backersOfA([addNode("home", "scr2", "Screen")], ["scr2"]), [], "an added Screen");
+  assert.deepEqual(backersOfA([upd("home.card")], ["home.card"]), [], "an update with no props and no decisionId");
+  assert.deepEqual(backersOfA([upd("home.card", { props: [{ key: "title", value: "x" }] })], ["home.card"]), ["Rita"], "a real update counts");
+  assert.deepEqual(backersOfA([upd("home.card", { decisionId: "d1" })], ["home.card"]), ["Rita"], "a decisionId update counts");
+  assert.deepEqual(backersOfA([{ op: "move", id: "home.card", parentId: "home", index: 0 }], ["home.card"]), [], "a move only makes room");
+});
+
+// ---- a pick closes the losing side's earlier proposal (task 8c) ----
+
+test("a pick supersedes the loser's earlier open proposal; a later reference to it does not resurrect it", async () => {
+  const s = await setup([
+    [
+      patches("Proposed: special on top", [addNode("home", "home.special", "Card", [["title", "Fall special"]], "dX")], "Amin"),
+      consensus([
+        { op: "add_decision", id: "dX", text: "Feature the fall special at the top", proposedBy: "Amin", affects: ["home.special"] },
+        { op: "mark_pending", decisionId: "dX" },
+        { op: "add_conflict", id: "c1", topic: "Top of home", variants: [
+          conflictVariant("A", "Special on top", ["Amin"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top special" }] }]),
+          conflictVariant("B", "Order again on top", ["Omid"], [addNode("home", "home.order-again", "Card", [["title", "Order again"]]), { op: "move", id: "home.special", parentId: "home", index: 1 }]),
+        ] },
+      ]),
+    ],
+    [],
+    [
+      consensus([{ op: "support", decisionId: "dX", speaker: "Amin" }]),
+      patches("Smaller special", [{ op: "update", id: "home.special", props: [{ key: "title", value: "Small special" }], decisionId: "dX" }], "Amin"),
+    ],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "special on top"), await s.say("Omid", "order again on top")]));
+  await flush();
+  assert.ok(s.doc().decisions.some((d) => d.id === "dX"), "proposed first");
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "order again, B")], {
+    topics: [{ title: "Top of home", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }],
+  }));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "dX is superseded");
+  const picked = s.doc().decisions.find((d) => d.id === "d-c1")!;
+  assert.equal(picked.status, "agreed");
+  assert.deepEqual(picked.agreedBy, ["Omid"], "nobody joins agreedBy because their proposal was superseded");
+  assert.ok(picked.rejectedOptions.includes("Feature the fall special at the top"));
+  assert.deepEqual([findNode(s.proto(), "home.special")!.status, findNode(s.proto(), "home.special")!.decisionId], ["agreed", "d-c1"]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "keep the special as a smaller card below")]));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "a follow-up naming dX does not bring it back");
+  assert.deepEqual([findNode(s.proto(), "home.special")!.status, findNode(s.proto(), "home.special")!.decisionId], ["agreed", "d-c1"], "still agreed under d-c1");
+});
+
+test("a pick never agrees a node only the losing variant touched: it keeps its superseded tag as a draft", async () => {
+  const s = await setup([
+    [
+      patches("Proposed: special", [addNode("home", "home.special", "Card", [["title", "Fall special"]], "dX")], "Amin"),
+      consensus([
+        { op: "add_decision", id: "dX", text: "Feature the fall special", proposedBy: "Amin", affects: ["home.special"] },
+        { op: "add_conflict", id: "c1", topic: "Top of home", variants: [
+          conflictVariant("A", "Special on top", ["Amin"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top special" }] }]),
+          conflictVariant("B", "Order again on top", ["Omid"], [addNode("home", "home.again", "Card", [["title", "Order again"]])]),
+        ] },
+      ]),
+    ],
+    [],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "special on top"), await s.say("Omid", "order again on top")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "let's go with B")], {
+    topics: [{ title: "Top of home", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }],
+  }));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "dX is superseded");
+  const special = findNode(s.proto(), "home.special")!;
+  assert.deepEqual([special.decisionId, special.status], ["dX", "draft"], "only A touched it: nobody agreed it");
+  const again = findNode(s.proto(), "home.again")!;
+  assert.deepEqual([again.decisionId, again.status], ["d-c1", "agreed"]);
+});
+
+// ---- only people whose own line picks the winner are recorded as agreeing (task 8d) ----
+
+test("a model pick records as agreeing only the speaker whose line picks the winner", async () => {
+  const s = await setup([[consensus([conflictOp("c1", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  const ids = [await s.say("Rita", "I'd rather A"), await s.say("Mona", "let's go with B")];
+  s.loop.handoff(s.sessionId, PICK_ANY_B(ids));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c1")!;
+  assert.deepEqual(d.agreedBy, ["Sara", "Mona"], "B's backers plus Mona; Rita objected");
+});
+
+test("a loosely phrased model pick still resolves but records only the backers", async () => {
+  const s = await setup([[consensus([conflictOp("c1", "home.a", "home.b")])], []]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amir", "a"), await s.say("Sara", "b")]));
+  await flush();
+  s.loop.handoff(s.sessionId, PICK_ANY_B([await s.say("Mona", "B sounds good")]));
+  await flush();
+  const d = s.doc().decisions.find((x) => x.id === "d-c1")!;
+  assert.equal(d.status, "agreed");
+  assert.deepEqual(d.agreedBy, ["Sara"]);
 });

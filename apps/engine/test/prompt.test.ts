@@ -1,23 +1,35 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSystemPrompt, componentTable } from "../src/agent/prompt-catalog.ts";
-import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, TEMPLATES } from "../public/renderer/catalog.js";
+import { CATALOG, OFFERED_TYPES, STYLE_OPTIONS } from "../public/renderer/catalog.js";
 import { PHONE_TABS } from "../public/renderer/interact.js";
 import { ICON_NAMES } from "../public/renderer/icons.js";
 import { IMAGES, IMAGE_SUBJECTS } from "../public/renderer/images.js";
 import { THEME_OPTIONS } from "../public/renderer/theme.js";
 
-test("the system prompt lists every component", () => {
+test("the system prompt lists the offered components and none of the others", () => {
   const prompt = buildSystemPrompt();
-  for (const type of COMPONENT_TYPES) assert.ok(prompt.includes(`\`${type}\``), `missing ${type}`);
+  for (const type of OFFERED_TYPES) assert.ok(prompt.includes(`\`${type}\``), `missing ${type}`);
+  assert.ok(prompt.includes("`ProductCard`"));
+  assert.ok(!prompt.includes("`Kanban`"));
+  const rows = componentTable().split("\n").filter((l) => /^\| `/.test(l));
+  assert.equal(rows.length, OFFERED_TYPES.length);
+});
+
+test("the prompt offers no templates or regions", () => {
+  const prompt = buildSystemPrompt();
+  assert.doesNotMatch(prompt, /template/i);
+  assert.doesNotMatch(prompt, /region/i);
 });
 
 test("each component's table row names its props and styles", () => {
   const rows = componentTable().split("\n");
-  for (const [type, entry] of Object.entries(CATALOG)) {
+  for (const type of OFFERED_TYPES) {
+    const entry = CATALOG[type];
     const row = rows.find((r) => r.startsWith(`| \`${type}\` |`));
     assert.ok(row, `no row for ${type}`);
-    for (const key of [...Object.keys(entry.props), ...entry.styles]) assert.ok(row.includes(key), `${type} row lacks ${key}`);
+    const hidden = type === "Screen" ? ["template"] : [];
+    for (const key of [...Object.keys(entry.props), ...entry.styles]) if (!hidden.includes(key)) assert.ok(row.includes(key), `${type} row lacks ${key}`);
   }
   for (const [key, values] of Object.entries(STYLE_OPTIONS)) assert.ok(componentTable().includes(`${key}: ${values.join("|")}`), key);
 });
@@ -50,29 +62,22 @@ test("the prompt leaves bringing back a reverted theme to the system", () => {
   assert.ok(!/send `set_theme` again/.test(prompt), "no rule to re-send a reverted theme");
 });
 
-test("the prompt says to make a filled tab the active one", () => {
-  assert.ok(buildSystemPrompt().includes("When you fill a tab, set the `Tabs` `active` to it in the same batch"));
+test("the prompt has no guidance for types the model is not offered", () => {
+  const prompt = buildSystemPrompt();
+  assert.ok(!prompt.includes("When you fill a tab"));
+  for (const type of ["Tabs", "Hero", "MediaCard", "Heading", "Banner", "Modal", "Drawer"]) assert.ok(!prompt.includes(type), type);
 });
 
 test("the prompt says the prototype block starts with the theme", () => {
   assert.ok(buildSystemPrompt().includes("`<prototype>`: the theme"));
 });
 
-test("the prompt lists every template with its regions and says the frame is automatic", () => {
+test("the prompt says the frame is automatic and gives the layout rules", () => {
   const prompt = buildSystemPrompt();
-  for (const [name, t] of Object.entries(TEMPLATES)) {
-    const row = prompt.split("\n").find((l) => l.startsWith(`| \`${name}\` |`));
-    assert.ok(row, `no row for template ${name}`);
-    for (const region of Object.keys(t.regions)) assert.ok(row.includes(region), `${name} row lacks ${region}`);
-    assert.ok(row.includes(t.suggest), `${name} row lacks suggest`);
-  }
   assert.ok(prompt.includes("never build navigation"));
-});
-
-test("every component-like word in a template's suggest line is a real type", () => {
-  for (const [name, t] of Object.entries(TEMPLATES)) {
-    for (const word of t.suggest.match(/\b[A-Z][A-Za-z]+\b/g) ?? []) assert.ok(COMPONENT_TYPES.includes(word), `${name} suggests unknown type ${word}`);
-  }
+  assert.match(prompt, /children stack top to bottom in the order you add them/);
+  assert.match(prompt, /`Grid` with `columns: "2"` of `ProductCard`s/);
+  assert.match(prompt, /`PageHeader` as the Screen's first child/);
 });
 
 test("the prompt states the phone tab limit from the renderer", () => {
@@ -88,8 +93,17 @@ test("the prompt lists every image subject, name and caption, and says when to u
   assert.match(prompt, /placeholder/);
 });
 
-test("the prompt says the app starts with a home Screen to update, and where region applies", () => {
+test("the prompt says the app starts with a home Screen to update", () => {
+  assert.match(buildSystemPrompt(), /starts with one empty Screen, `home`: for the first page, update it \(title, icon\) instead of adding another/);
+});
+
+test("the offered Grid takes 2 or 3 columns, matching the layout rules", () => {
+  const row = componentTable().split("\n").find((l) => l.startsWith("| `Grid` |"))!;
+  assert.ok(row.includes("columns: 2|3 |"), row);
+});
+
+test("the prompt makes each side-by-side option one stated position", () => {
   const prompt = buildSystemPrompt();
-  assert.match(prompt, /starts with one empty Screen, `home`: for the first page, update it \(title, icon, template\) instead of adding another/);
-  assert.match(prompt, /`region` only matters on direct children of a templated Screen/);
+  assert.ok(prompt.includes("one participant's stated position"));
+  assert.ok(prompt.includes("never invent"));
 });

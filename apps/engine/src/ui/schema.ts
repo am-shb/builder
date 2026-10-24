@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { THEME_OPTIONS } from "../../public/renderer/theme.js";
-import { COMPONENT_TYPES as CATALOG_TYPES } from "../../public/renderer/catalog.js";
+import { COMPONENT_TYPES as CATALOG_TYPES, OFFERED_TYPES } from "../../public/renderer/catalog.js";
 
 // The catalog (public/renderer/catalog.js) is the one list of component types.
 export const COMPONENT_TYPES = CATALOG_TYPES as [string, ...string[]];
@@ -184,7 +184,26 @@ export const ToolPatchBatch = z.strictObject({
 });
 export type ToolPatchBatch = z.infer<typeof ToolPatchBatch>;
 
-/** JSON Schema of the model-facing batch: every object closed, no $ref. */
+/**
+ * A JSON schema for the model with every component-type enum cut down to OFFERED_TYPES (ADR 0017).
+ * The local zod schemas keep accepting every catalog type, so a stray unoffered `add` reaches
+ * `fromToolBatch`, which drops just that op instead of failing the call.
+ */
+export function offeredOnly<T>(schema: T): T {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (!v || typeof v !== "object") return v;
+    const o = v as Record<string, unknown>;
+    const values = o.enum;
+    if (Array.isArray(values) && values.length === COMPONENT_TYPES.length && COMPONENT_TYPES.every((t, i) => values[i] === t)) {
+      return { ...o, enum: [...OFFERED_TYPES] };
+    }
+    return Object.fromEntries(Object.entries(o).map(([k, val]) => [k, walk(val)]));
+  };
+  return walk(schema) as T;
+}
+
+/** JSON Schema of the model-facing batch: every object closed, no $ref, node types limited to the offered ones. */
 export function patchBatchJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(ToolPatchBatch, { target: "draft-7" }) as Record<string, unknown>;
+  return offeredOnly(z.toJSONSchema(ToolPatchBatch, { target: "draft-7" }) as Record<string, unknown>);
 }

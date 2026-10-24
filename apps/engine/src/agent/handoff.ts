@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, PatchOp, Prototype, ThemeSlotName, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch } from "../ui/tree.ts";
+import { touchedNodeIds } from "../ui/touched.ts";
 import { THEME_SLOTS, themeValues } from "../../public/renderer/theme.js";
 import { markPending, Phase, recordObjection, recordSupport } from "../consensus/doc.ts";
 import type { ConsensusDoc, Conflict } from "../consensus/doc.ts";
@@ -19,13 +20,15 @@ export const Proposal = z.strictObject({
 });
 export type Proposal = z.infer<typeof Proposal>;
 
+const ResolvedChoice = z.strictObject({ conflictId: z.string(), winner: VariantLabel });
+
 export const Topic = z.strictObject({
   title: z.string(),
   task: z.string().optional(),
   screenHint: z.string().optional(),
   proposals: z.array(Proposal),
   questionsRaised: z.array(z.string()),
-  resolvedChoice: z.strictObject({ conflictId: z.string(), winner: VariantLabel }).optional(),
+  resolvedChoice: ResolvedChoice.optional(),
 });
 
 // groundingIds are events.id values of the utterances the hand-off summarises.
@@ -42,10 +45,85 @@ export type Handoff = z.infer<typeof HandoffSchema>;
 // the hand-off has its own, the last topic's copy moves up (the latest request wins, as when
 // hand-offs merge). The topics lose theirs, and a topic whose view was not kept gets it as its
 // screenHint when it has none, so no request is silently lost. The wire schema stays HandoffSchema.
-export const HandoffToolInput = z.preprocess(hoistRequestedView, HandoffSchema);
+export const HandoffToolInput = z.preprocess(repairHandoff, HandoffSchema);
+
+const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+
+function repairHandoff(v: unknown): unknown {
+  return hoistRequestedView(repairHandoffInput(v).input);
+}
+
+export type Repair = { path: string; code: "null_dropped" | "invalid_dropped" };
+
+const NULLABLE_TOPIC_KEYS = ["task", "screenHint", "requestedView"] as const;
+
+/**
+ * The update_build input with what would otherwise lose the whole hand-off taken out: an optional field the
+ * model wrote as null (models write null for "none"), and a resolvedChoice no shape matches (a bad pick must not
+ * cost the topic's proposals; dropping it picks nothing). A recognisable pick is normalised. `repairs` lists
+ * each path and what was done, for the port's llm_tool_repaired log (never the values).
+ */
+export function repairHandoffInput(v: unknown): { input: unknown; repairs: Repair[] } {
+  const repairs: Repair[] = [];
+  if (!isRecord(v)) return { input: v, repairs };
+  let out: Record<string, unknown> = v;
+  if (v.requestedView === null) {
+    const { requestedView: _null, ...rest } = v;
+    out = rest;
+    repairs.push({ path: "requestedView", code: "null_dropped" });
+  }
+  if (!Array.isArray(v.topics)) return { input: out, repairs };
+  const topics = v.topics.map((t, i) => {
+    if (!isRecord(t)) return t;
+    const topic: Record<string, unknown> = { ...t };
+    for (const key of NULLABLE_TOPIC_KEYS) {
+      if (topic[key] !== null) continue;
+      delete topic[key];
+      repairs.push({ path: `topics.${i}.${key}`, code: "null_dropped" });
+    }
+    if (topic.resolvedChoice === null) {
+      delete topic.resolvedChoice;
+      repairs.push({ path: `topics.${i}.resolvedChoice`, code: "null_dropped" });
+    } else if (topic.resolvedChoice !== undefined) {
+      const pick = normalizeResolvedChoice(topic.resolvedChoice);
+      if (ResolvedChoice.safeParse(pick).success) topic.resolvedChoice = pick;
+      else {
+        delete topic.resolvedChoice;
+        repairs.push({ path: `topics.${i}.resolvedChoice`, code: "invalid_dropped" });
+      }
+    }
+    return topic;
+  });
+  return { input: { ...out, topics }, repairs };
+}
+
+// Models write the room's pick as a JSON string, a bare label ("B", "option b"), or an object with
+// `label` for `winner` or no conflict id (a production session lost a pick to this). A recognised
+// shape becomes { conflictId, winner }, with conflictId "*" when only a label was given (the build
+// loop reads that as the one open conflict). Anything else comes back unchanged (repairHandoffInput drops it).
+export function normalizeResolvedChoice(v: unknown): unknown {
+  const label = (x: unknown) => {
+    const m = typeof x === "string" ? /^\s*(?:option\s*)?([abc])\s*$/i.exec(x) : null;
+    return m ? m[1].toUpperCase() : null;
+  };
+  if (typeof v === "string") {
+    const bare = label(v);
+    if (bare) return { conflictId: "*", winner: bare };
+    if (!v.trimStart().startsWith("{")) return v;
+    try {
+      const parsed: unknown = JSON.parse(v);
+      return isRecord(parsed) ? normalizeResolvedChoice(parsed) : v;
+    } catch {
+      return v;
+    }
+  }
+  if (!isRecord(v)) return v;
+  const winner = label(v.winner) ?? label(v.label);
+  if (!winner) return v;
+  return { conflictId: typeof v.conflictId === "string" && v.conflictId ? v.conflictId : "*", winner };
+}
 
 function hoistRequestedView(v: unknown): unknown {
-  const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
   if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && "requestedView" in t)) return v;
   let view = v.requestedView;
   if (view === undefined) {
@@ -97,13 +175,17 @@ export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<strin
   return { batch: rest, dropped: 1 };
 }
 
+/** Who proposed a still-open decision, and the node ids it affects. */
+export type PriorBacking = { names: string[]; affects: string[] };
+
 /**
  * Only people heard in the grounding lines can propose, back or object. Drops support/object ops
  * and add_decision ops whose speaker is not among them, and strips ungrounded conflict backers
- * (backers become agreed_by when a conflict resolves) and variant credits. `dropped` counts ops,
- * backers and credits removed.
+ * (backers become agreed_by when a conflict resolves) and variant credits. A conflict's variant backers
+ * may also be people who proposed a still-open decision in an earlier hand-off (grounded when recorded)
+ * that affects nodes the variant itself adds, changes or removes (`prior`; a move alone does not count). `dropped` counts ops, backers and credits removed.
  */
-export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>): { ops: ConsensusUpdate[]; dropped: number } {
+export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, prior: PriorBacking[] = [], screenIds: Set<string> = new Set()): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
   const kept: ConsensusUpdate[] = [];
   for (const op of ops) {
@@ -114,7 +196,9 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     }
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
-        const backers = v.backers.filter((b) => groundingSpeakers.has(b));
+        const touched = touchedNodeIds(v.batch, screenIds, { moves: false });
+        const earlier = new Set(prior.filter((p) => p.affects.some((a) => touched.has(a))).flatMap((p) => p.names));
+        const backers = v.backers.filter((b) => groundingSpeakers.has(b) || earlier.has(b));
         const credit = groundCredit(v.batch, groundingSpeakers);
         dropped += v.backers.length - backers.length + credit.dropped;
         return { ...v, backers, batch: credit.batch };
@@ -221,10 +305,11 @@ function nextQuestionId(doc: ConsensusDoc): string {
  */
 export function applyConsensusOps(
   input: ConsensusDoc, ops: ConsensusUpdate[], now: number, proto: Prototype,
-): { doc: ConsensusDoc; addedConflicts: string[]; propsDropped: number } {
+): { doc: ConsensusDoc; addedConflicts: string[]; propsDropped: number; unoffered: number } {
   let doc = input;
   const addedConflicts: string[] = [];
   let propsDropped = 0;
+  let unoffered = 0;
   for (const op of ops) {
     switch (op.op) {
       case "add_decision":
@@ -252,8 +337,9 @@ export function applyConsensusOps(
         const conflict: Conflict = {
           id: op.id, topic: op.topic, status: "open", openedAt: now,
           variants: op.variants.map((v) => {
-            const { batch, dropped } = fromToolBatch({ ...v.batch, decisionId: `d-${op.id}` }, {}, proto);
+            const { batch, dropped, unoffered: skipped } = fromToolBatch({ ...v.batch, decisionId: `d-${op.id}` }, {}, proto);
             propsDropped += dropped;
+            unoffered += skipped;
             return { label: v.label, summary: v.summary, backers: v.backers, batch: sanitizeModelBatch(batch, doc) };
           }),
         };
@@ -273,5 +359,5 @@ export function applyConsensusOps(
       }
     }
   }
-  return { doc, addedConflicts, propsDropped };
+  return { doc, addedConflicts, propsDropped, unoffered };
 }

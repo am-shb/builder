@@ -16,6 +16,7 @@ import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { Prototype } from "../src/ui/schema.ts";
 import { buildExportHtml, imagesUsed, RENDERER_MODULES } from "../src/handoff/export.ts";
 import { IMAGES } from "../public/renderer/images.js";
+import { HandoffToolInput, normalizeResolvedChoice, repairHandoffInput } from "../src/agent/handoff.ts";
 
 const proto: Prototype = JSON.parse(readFileSync(new URL("./fixtures/proto-todo.json", import.meta.url), "utf8"));
 const EVIL = `Use </script><img src=x onerror=alert(1)> everywhere`;
@@ -280,4 +281,47 @@ test("the live handoff references images by URL and the app serves them", async 
     assert.ok((await img.arrayBuffer()).byteLength > 1000);
     assert.equal((await fetch(`${h.base}/renderer/images/missing-1.webp`, { headers: tunnel })).status, 404);
   } finally { h.close(); }
+});
+
+test("normalizeResolvedChoice reads the shapes models write", () => {
+  const star = (winner: string) => ({ conflictId: "*", winner });
+  assert.deepEqual(normalizeResolvedChoice('{"conflictId":"c-top","winner":"B"}'), { conflictId: "c-top", winner: "B" });
+  for (const v of ["B", "b", "option B", "Option b"]) assert.deepEqual(normalizeResolvedChoice(v), star("B"), v);
+  assert.deepEqual(normalizeResolvedChoice({ conflictId: "c-top", winner: "b" }), { conflictId: "c-top", winner: "B" });
+  assert.deepEqual(normalizeResolvedChoice({ conflictId: "c-top", label: "B" }), { conflictId: "c-top", winner: "B" });
+  assert.deepEqual(normalizeResolvedChoice({ winner: "B" }), star("B"));
+  assert.equal(normalizeResolvedChoice("D"), "D");
+  assert.equal(normalizeResolvedChoice(42), 42);
+});
+
+test("HandoffToolInput accepts a resolvedChoice written as a bare label", () => {
+  const topic = { title: "t", proposals: [], questionsRaised: [], resolvedChoice: "B" };
+  const r = HandoffToolInput.safeParse({ topics: [topic], mood: "converging", groundingIds: [1] });
+  assert.ok(r.success);
+  assert.deepEqual(r.data.topics[0].resolvedChoice, { conflictId: "*", winner: "B" });
+});
+
+// Models write null for "none", and a pick no shape matches must not cost the topic's proposals.
+test("HandoffToolInput drops a null optional field and an unrecognisable resolvedChoice instead of failing the hand-off", () => {
+  const proposals = [{ text: "Order again on top", proposedBy: "Omid", supporters: [], objectors: [] }];
+  const topic = { title: "t", proposals, questionsRaised: [] };
+  const parse = (over: Record<string, unknown>, top: Record<string, unknown> = {}) =>
+    HandoffToolInput.safeParse({ topics: [{ ...topic, ...over }], mood: "converging", groundingIds: [1], ...top });
+  for (const [over, top] of [
+    [{ resolvedChoice: null }, {}], [{ resolvedChoice: { conflictId: 7 } }, {}], [{ resolvedChoice: "D" }, {}],
+    [{ screenHint: null, task: null }, {}], [{}, { requestedView: null }],
+  ] as const) {
+    const r = parse(over, top);
+    assert.ok(r.success, JSON.stringify(over) + JSON.stringify(top));
+    assert.deepEqual(r.data.topics, [topic], "the topic and its proposals survive");
+    assert.equal("requestedView" in r.data, false);
+  }
+  assert.deepEqual(repairHandoffInput({ topics: [{ ...topic, resolvedChoice: null, screenHint: null }, { ...topic, resolvedChoice: { conflictId: 7 } }], requestedView: null }).repairs, [
+    { path: "requestedView", code: "null_dropped" },
+    { path: "topics.0.screenHint", code: "null_dropped" },
+    { path: "topics.0.resolvedChoice", code: "null_dropped" },
+    { path: "topics.1.resolvedChoice", code: "invalid_dropped" },
+  ]);
+  const kept = repairHandoffInput({ topics: [{ ...topic, resolvedChoice: "b" }] });
+  assert.deepEqual(kept, { input: { topics: [{ ...topic, resolvedChoice: { conflictId: "*", winner: "B" } }] }, repairs: [] }, "a recognisable pick is kept");
 });

@@ -33,6 +33,9 @@ export type PortTool = {
   input_schema: Record<string, unknown>;
   strict?: boolean;
   schema?: z.ZodType;
+  // Local-only, like `schema`: fixes a known slip in the model's input before validation and names each fix
+  // by path and code, never by value. The fixes are logged with llm_tool_repaired.
+  repair?: (input: unknown) => { input: unknown; repairs: { path: string; code: string }[] };
 };
 
 export type RunToolsRequest = {
@@ -50,7 +53,7 @@ export type RunToolsRequest = {
 };
 // stopReason is the model's stop_reason (null if the stream was cut off); dropped counts
 // tool calls discarded as unknown, incomplete, unparseable or schema-invalid.
-export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number; stopReason: string | null; dropped: number };
+export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number; stopReason: string | null; dropped: number; truncated?: boolean };
 export type ModelPort = { runTools(req: RunToolsRequest): Promise<RunToolsResult> };
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
@@ -89,10 +92,11 @@ export function createOpenRouterPort(
       const model = MODELS[req.loop];
       const defs = req.tools as PortTool[];
       const schemas = new Map(defs.map((t) => [t.name, t.schema] as const));
+      const repairers = new Map(defs.map((t) => [t.name, t.repair] as const));
 
       // Strip our local-only `schema`, turn on eager input streaming, and put a cache
       // breakpoint on the last tool (tools render before system) and on the system prompt.
-      const tools = defs.map(({ schema: _schema, ...wire }, i) => ({
+      const tools = defs.map(({ schema: _schema, repair: _repair, ...wire }, i) => ({
         ...wire,
         eager_input_streaming: true,
         ...(i === defs.length - 1 ? { cache_control: EPHEMERAL } : {}),
@@ -117,6 +121,7 @@ export function createOpenRouterPort(
       let stopReason: string | null = null;
       let messageId: string | null = null;
       let started = false;
+      let truncated = false;
       // The SDK wraps an error thrown inside the stream listener and the catch below would take it
       // for a truncated stream, so keep the first one and rethrow it once the stream is done.
       let callbackError: { err: unknown } | null = null;
@@ -137,9 +142,11 @@ export function createOpenRouterPort(
         }
         const schema = schemas.get(block.name);
         if (schema) {
-          const checked = validateToolInput(schema, input);
-          if (!checked.ok) return drop("invalid_input", { issues: checked.issues.length, issue_details: issueDetails(checked.issues) });
-          if (checked.repairs.length) log("llm_tool_repaired", { loop: req.loop, tool: block.name, repairs: checked.repairs });
+          const fixed = repairers.get(block.name)?.(input) ?? { input, repairs: [] };
+          const checked = validateToolInput(schema, fixed.input);
+          if (!checked.ok) return drop("invalid_input", { issues: checked.issues.length, issue_details: issueDetails(checked.issues, { input: fixed.input }) });
+          const repairs = [...fixed.repairs, ...checked.repairs];
+          if (repairs.length) log("llm_tool_repaired", { loop: req.loop, tool: block.name, repairs });
           input = checked.data;
         }
         return (block.outcome = { ok: true, call: { name: block.name, input } });
@@ -201,7 +208,8 @@ export function createOpenRouterPort(
           // A non-API SDK error after events started means the stream ended or broke
           // mid-way: keep the usage seen (the call was billed) and the completed tool calls.
           if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
-          log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
+          truncated = true;
+          log("llm_stream_truncated", { loop: req.loop, model, id: messageId, error: err instanceof Error ? err.constructor.name : "unknown" });
         }
       } finally {
         clearTimeout(deadline);
@@ -229,16 +237,32 @@ export function createOpenRouterPort(
         input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
         cache_read_tokens: usage.cacheReadTokens, cache_write_tokens: usage.cacheWriteTokens, cost_usd: usage.costUsd ?? null,
       });
-      return { toolCalls, usage, ms, stopReason, dropped };
+      return { toolCalls, usage, ms, stopReason, dropped, truncated };
     },
   };
 }
 
-// Where and how a tool input failed validation: the dotted path (schema keys and array
-// indexes) and the zod issue code. Never the issue message or values, which can carry content.
-export function issueDetails(issues: readonly { path: readonly PropertyKey[]; code: string }[]): { path: string; code: string }[] {
-  return issues.map((i) => ({ path: i.path.map(String).join("."), code: i.code }));
+type IssueDetail = { path: string; code: string; expected?: string; received?: string };
+
+// Where and how a tool input failed validation: the dotted path (schema keys and array indexes), the zod
+// issue code, zod's `expected` type when it gives one, and, with the input, the type name of the value at
+// that path (typeof, "null" or "array"). Never the issue message or values, which can carry content.
+export function issueDetails(issues: readonly { path: readonly PropertyKey[]; code: string; expected?: unknown }[], from?: { input: unknown }): IssueDetail[] {
+  return issues.map((i) => {
+    const d: IssueDetail = { path: i.path.map(String).join("."), code: i.code };
+    if (typeof i.expected === "string") d.expected = i.expected;
+    if (from) d.received = typeName(valueAt(from.input, i.path));
+    return d;
+  });
 }
+
+function valueAt(input: unknown, path: readonly PropertyKey[]): unknown {
+  let at = input;
+  for (const k of path) at = at !== null && typeof at === "object" ? (at as Record<PropertyKey, unknown>)[k] : undefined;
+  return at;
+}
+
+const typeName = (v: unknown): string => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 type Issue = z.core.$ZodIssue;
 type Checked = { ok: true; data: unknown; repairs: { path: string; code: string }[] } | { ok: false; issues: Issue[] };

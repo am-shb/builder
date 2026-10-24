@@ -11,9 +11,10 @@ import { strictCompatible, toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { applyConsensusOps, enforceGrounding, groundCredit, HandoffSchema, sanitizeModelBatch, UpdateConsensusInput } from "./handoff.ts";
 import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
-import { patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
+import { offeredOnly, patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch, themeStatusOp } from "../ui/tree.ts";
+import { screenIds } from "../ui/touched.ts";
 import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
 import { buildComparisonView } from "../session/runtime.ts";
@@ -21,6 +22,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 import { errorCode } from "../error-code.ts";
+import { matchSpokenPick } from "./spoken-pick.ts";
 import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
 
 export const RUN_FLOOR_MS = 3_000;
@@ -29,6 +31,8 @@ export const PLEASED_MS = 2_000;
 export const TASK_DONE_MS = 3_000;
 const TASK_MAX = 40;
 const LABEL_MAX = 60;
+// How long after a pick a spoken agreement with it still counts.
+export const LATE_AGREE_MS = 20_000;
 
 // Built once at module load, so the text is identical on every call and the prompt cache hits.
 const SYSTEM = buildSystemPrompt();
@@ -66,7 +70,7 @@ const TOOLS: PortTool[] = [
       "summary and nextUp. Call it once per hand-off with every op in order; call it whenever any of those changed. " +
       "Only people heard in the grounding lines can propose, support or object.",
     strict: true,
-    input_schema: toolJsonSchema(UpdateConsensusInput),
+    input_schema: offeredOnly(toolJsonSchema(UpdateConsensusInput)),
     schema: UpdateConsensusInput,
   },
 ];
@@ -143,7 +147,7 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
 }
 
 // Ids a batch adds or changes (removals and screen switches leave nothing to mark).
-function touchedIds(batch: PatchBatch): string[] {
+function changedIds(batch: PatchBatch): string[] {
   const ids: string[] = [];
   for (const op of batch.ops) {
     if (op.op === "add") ids.push(op.node.id);
@@ -297,31 +301,68 @@ export function createBuildLoop(deps: {
     ensureTick(sessionId, st);
   }
 
+  // Adds the speaker of a stored line to a resolved pick's decision: only a person (not Builder) whose line picks
+  // that conflict's winner, while the decision is at most LATE_AGREE_MS old. Idempotent. Returns whether it changed.
+  function agreeLate(sessionId: string, rt: SessionRuntime, conflictId: string, winner: "A" | "B" | "C", line: StoredEvent): boolean {
+    if (ended.has(sessionId) || line.kind !== "utterance" || !line.text || !line.speaker || line.speaker === botName) return false;
+    if (matchSpokenPick(line.text, [winner]) !== winner) return false;
+    const doc = view(rt).doc;
+    const decision = doc.decisions.find((d) => d.id === `d-${conflictId}`);
+    const conflict = doc.conflicts.find((c) => c.id === conflictId);
+    if (!decision || conflict?.status !== "resolved" || conflict.winner !== winner) return false;
+    if (decision.decidedAt === undefined || clock() - decision.decidedAt > LATE_AGREE_MS) return false;
+    if (decision.agreedBy.includes(line.speaker)) return false;
+    const speaker = line.speaker;
+    rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => (d.id === decision.id ? { ...d, agreedBy: [...d.agreedBy, speaker] } : d)) });
+    return true;
+  }
+
   // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
   // when a person (not Builder) in this session's grounding lines is behind the hand-off.
-  function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], choice: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
+  function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], picked: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
+    let choice = picked;
     try {
-      const { speakers } = groundingFor(stored, groundingIds);
+      const { lines, speakers } = groundingFor(stored, groundingIds);
       if (speakers.size === 0) {
         log("build.resolve_ungrounded", { session_id: sessionId, conflict_id: choice.conflictId, grounding: groundingIds.length });
         return { kind: "ignored" };
       }
       const rt = runtime(sessionId);
       const before = view(rt).doc;
+      // "*", or an id that names no conflict, means the only open conflict.
+      if (!before.conflicts.some((c) => c.id === choice.conflictId)) {
+        const open = before.conflicts.filter((c) => c.status === "open");
+        if (open.length !== 1) {
+          log("build.resolve_ambiguous", { session_id: sessionId, open: open.length });
+          return { kind: "ignored" };
+        }
+        choice = { conflictId: open[0].id, winner: choice.winner };
+      }
       const conflict = before.conflicts.find((c) => c.id === choice.conflictId);
-      const r = rt.resolveComparison(choice.conflictId, choice.winner);
+      // Only a speaker whose own grounding line picks the winner is recorded as agreeing, in the order
+      // of those lines; a loosely phrased pick still resolves but records just the backers.
+      const winner = choice.winner;
+      const pickers = [...new Set(lines.filter((e) => e.speaker && speakers.has(e.speaker) && matchSpokenPick(e.text ?? "", [winner]) === winner).map((e) => e.speaker as string))];
+      const r = rt.resolveComparison(choice.conflictId, winner, pickers);
       if (!r.ok) {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };
       }
-      if (conflict?.status !== "open") return { kind: "settled" };
+      if (conflict?.status !== "open") {
+        // Already picked, maybe a moment ago by someone else ("B" / "B it is"): a grounding line that picks the
+        // same winner agrees with it, under the same checks as a late agreement.
+        let joined = 0;
+        if (conflict?.winner === winner) for (const line of lines) if (agreeLate(sessionId, rt, choice.conflictId, winner, line)) joined++;
+        if (joined) log("build.pick_joined", { session_id: sessionId, conflict_id: choice.conflictId, count: joined });
+        return { kind: "settled" };
+      }
       const variant = conflict.variants.find((v) => v.label === choice.winner);
       const after = view(rt).doc;
       const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
       if (variant && decision) {
         // A winner batch that did not apply changed nothing, so it marks nothing agreed.
         const proto = view(rt).proto;
-        const touched = r.applied ? touchedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
+        const touched = r.applied ? changedIds(variant.batch).filter((id) => findNode(proto, id)) : [];
         const affects = [...new Set([...decision.affects, ...touched])];
         rt.setDoc({ ...after, decisions: after.decisions.map((d) => (d.id === decision.id ? { ...d, affects } : d)) });
         promote(sessionId, rt, [decision.id], "conflict");
@@ -394,12 +435,13 @@ export function createBuildLoop(deps: {
 
   // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
   // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
-  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses).
+  // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses);
+  // `unoffered` counts adds of a type the model is not offered, skipped one by one (ADR 0017).
   function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
     const credit = groundCredit(input, speakers);
     const snap = view(rt);
-    const { batch, dropped } = fromToolBatch(credit.batch, {}, snap.proto);
-    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped };
+    const { batch, dropped, unoffered } = fromToolBatch(credit.batch, {}, snap.proto);
+    return { batch: sanitizeModelBatch(batch, snap.doc, { proto: snap.proto, reopened }), creditDropped: credit.dropped, propsDropped: dropped, unoffered };
   }
 
   // Ids and counts only: never the props themselves.
@@ -407,7 +449,7 @@ export function createBuildLoop(deps: {
     if (count > 0) log("build.props_dropped", { session_id: sessionId, count, ...(source ? { source } : {}) });
   }
 
-  type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number };
+  type PatchCounts = { applied: number; rejected: number; empty: number; creditDropped: number; unoffered: number };
 
   // Applies one prepared batch and counts what happened. True when it changed the screen.
   function applyPrepared(sessionId: string, rt: SessionRuntime, batch: PatchBatch, opsGiven: number, counts: PatchCounts): boolean {
@@ -439,7 +481,11 @@ export function createBuildLoop(deps: {
       if (parsed.success) ops.push(...parsed.data.ops);
       else consensusInvalid++;
     }
-    const grounded = enforceGrounding(ops, speakers);
+    // The proposers of decisions still open in the doc were grounded when those were recorded.
+    const priorBackers = view(rt).doc.decisions
+      .filter((d) => d.status === "draft" || d.status === "pending")
+      .map((d) => ({ names: [d.proposedBy], affects: d.affects }));
+    const grounded = enforceGrounding(ops, speakers, priorBackers, screenIds(view(rt).proto));
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
     const planned = applyConsensusOps(current, grounded.ops, clock(), view(rt).proto).doc;
@@ -449,21 +495,23 @@ export function createBuildLoop(deps: {
 
     // Deferred patches before the ops, so decisions and conflicts can reference the nodes they add.
     for (const input of deferred) {
-      const { batch, creditDropped, propsDropped } = prepareBatch(input, rt, speakers, reopening);
+      const { batch, creditDropped, propsDropped, unoffered } = prepareBatch(input, rt, speakers, reopening);
       patchCounts.creditDropped += creditDropped;
+      patchCounts.unoffered += unoffered;
       logPropsDropped(sessionId, propsDropped);
       applyPrepared(sessionId, rt, batch, input.ops.length, patchCounts);
     }
     const counts = {
       patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty,
       consensus_invalid: consensusInvalid, ops: grounded.ops.length, grounding_dropped: grounded.dropped + patchCounts.creditDropped,
-      promoted: 0, reopened: 0, conflicts: 0,
+      promoted: 0, reopened: 0, conflicts: 0, ops_unoffered: 0,
     };
 
     if (grounded.ops.length) {
       // Applied to the doc as it is now, so a promotion made during the run is kept.
       const before = view(rt).doc;
-      const { doc, addedConflicts, propsDropped } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
+      const { doc, addedConflicts, propsDropped, unoffered } = applyConsensusOps(before, grounded.ops, clock(), view(rt).proto);
+      patchCounts.unoffered += unoffered;
       rt.setDoc(doc);
       logPropsDropped(sessionId, propsDropped, "conflict");
       const wasAgreed = (id: string) => before.decisions.find((b) => b.id === id)?.status === "agreed";
@@ -497,6 +545,7 @@ export function createBuildLoop(deps: {
         else log("build.comparison_queued", { session_id: sessionId, conflict_id: id });
       }
     }
+    counts.ops_unoffered = patchCounts.unoffered;
     return counts;
   }
 
@@ -515,7 +564,7 @@ export function createBuildLoop(deps: {
     const running = new Set(taskIds);
     st.tasks = st.tasks.map((t) => (running.has(t.id) ? { ...t, state: "now" } : t));
     pushTasks(sessionId, st);
-    const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0 };
+    const patchCounts: PatchCounts = { applied: 0, rejected: 0, empty: 0, creditDropped: 0, unoffered: 0 };
     const deferred: ToolPatchBatch[] = [];
     let opsApplied = 0;
     let droppedCalls = 0;
@@ -567,12 +616,13 @@ export function createBuildLoop(deps: {
           }
           // A batch this run's reopenings could change (it removes an agreed node) waits for them.
           const agreedIds = new Set(view(live).doc.decisions.filter((d) => d.status === "agreed").map((d) => d.id));
-          const { batch, creditDropped, propsDropped } = prepareBatch(parsed.data, live, speakers, new Set());
+          const { batch, creditDropped, propsDropped, unoffered } = prepareBatch(parsed.data, live, speakers, new Set());
           if (batch.ops.length !== prepareBatch(parsed.data, live, speakers, agreedIds).batch.ops.length) {
             deferred.push(parsed.data);
             return;
           }
           patchCounts.creditDropped += creditDropped;
+          patchCounts.unoffered += unoffered;
           logPropsDropped(sessionId, propsDropped);
           if (!applyPrepared(sessionId, live, batch, parsed.data.ops.length, patchCounts)) return;
           lastPatchMs = clock() - startedAt;
@@ -603,7 +653,7 @@ export function createBuildLoop(deps: {
       };
       // A refusal or no usable call leaves the doc as it is (batches already streamed stay on screen),
       // and so does a call that ended while the model was working: the handoff is already final.
-      const streamedCounts = { patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty };
+      const streamedCounts = { patches_applied: patchCounts.applied, patches_rejected: patchCounts.rejected, patches_empty: patchCounts.empty, ops_unoffered: patchCounts.unoffered };
       if (ended.has(sessionId)) log("build.run", { ...base, ...streamedCounts, discarded: "ended" });
       else if (result.stopReason === "refusal" || result.toolCalls.length === 0) log("build.run", { ...base, ...streamedCounts });
       else {
@@ -728,6 +778,21 @@ export function createBuildLoop(deps: {
     // resolved (and the winner merged) only then. Commands and speech in the same turn wait for this.
     taken(sessionId: string): Promise<void> | null {
       return sessions.get(sessionId)?.intake ?? null;
+    },
+
+    // A person's line agreeing with a pick made seconds ago ("Agreed, B it is" once the comparison has closed).
+    // Adds that one speaker to the pick's decision, only if the stored line is theirs, names that winner and the
+    // decision is at most LATE_AGREE_MS old. Idempotent. Returns whether the decision changed.
+    async lateAgree(sessionId: string, a: { conflictId: string; winner: "A" | "B" | "C"; lineId: number }): Promise<boolean> {
+      try {
+        if (ended.has(sessionId)) return false;
+        const line = (await store.listEvents(sessionId)).find((e) => e.kind === "utterance" && e.id === a.lineId);
+        if (ended.has(sessionId) || !line) return false;
+        return agreeLate(sessionId, runtime(sessionId), a.conflictId, a.winner, line);
+      } catch (err) {
+        log("build.late_agree_failed", { session_id: sessionId, error: errorCode(err) });
+        return false;
+      }
     },
 
     idle(sessionId: string): boolean {

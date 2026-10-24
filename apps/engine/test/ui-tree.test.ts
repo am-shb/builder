@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { emptyPrototype, applyBatch, findNode, fromToolBatch, themeStatusOp, withAgreedTheme } from "../src/ui/tree.ts";
 import { Prototype, patchBatchJsonSchema, ToolPatchBatch } from "../src/ui/schema.ts";
+// @ts-ignore plain JS module shared with the browser
+import { OFFERED_TYPES } from "../public/renderer/catalog.js";
 import type { UiNode, PatchOp } from "../src/ui/schema.ts";
 
 const leaf = (id: string, type: UiNode["type"] = "Text", children: UiNode[] = []): UiNode =>
@@ -145,16 +147,16 @@ test("ToolPatchBatch takes props written as an object or a JSON string as pairs,
 test("fromToolBatch converts props pairs to a record and the result applies via applyBatch", () => {
   const { batch } = fromToolBatch({ label: "Added: form", by: "Amir", ops: [
     { op: "add", parentId: "app", node: { id: "form", type: "Screen", props: [{ key: "title", value: "Form" }] } },
-    { op: "add", parentId: "form", node: { id: "form.size", type: "Select", props: [{ key: "label", value: "Size" }, { key: "options", value: ["S", "M"] }] } },
-    { op: "update", id: "form.size", props: [{ key: "value", value: "M" }] },
+    { op: "add", parentId: "form", node: { id: "form.size", type: "Table", props: [{ key: "columns", value: ["Size"] }, { key: "rows", value: ["S", "M"] }] } },
+    { op: "update", id: "form.size", props: [{ key: "span", value: "2" }] },
   ] });
   const add = batch.ops[1]!;
   assert.ok(add.op === "add");
-  assert.deepEqual(add.node.props, { label: "Size", options: ["S", "M"] });
+  assert.deepEqual(add.node.props, { columns: ["Size"], rows: ["S", "M"] });
   assert.deepEqual(add.node.children, []);
   const r = applyBatch(emptyPrototype("X"), batch);
   assert.ok(r.ok);
-  assert.deepEqual(findNode(r.proto, "form.size")!.props, { label: "Size", options: ["S", "M"], value: "M" });
+  assert.deepEqual(findNode(r.proto, "form.size")!.props, { columns: ["Size"], rows: ["S", "M"], span: "2" });
 });
 
 test("fromToolBatch drops __proto__/constructor/prototype keys", () => {
@@ -412,15 +414,63 @@ test("the new expense fixture applies cleanly", () => {
   const batches = JSON.parse(readFileSync(new URL("./fixtures/expense-batches.new.json", import.meta.url), "utf8")) as unknown[];
   assert.ok(batches.length > 0);
   let proto = emptyPrototype("Ledger");
+  let droppedTotal = 0;
   for (const raw of batches) {
     const parsed = ToolPatchBatch.parse(raw);
-    const { batch: converted, dropped } = fromToolBatch(parsed, {}, proto);
-    assert.equal(dropped, 0, `no dropped props in "${parsed.label}"`);
+    const { batch: converted, dropped, unoffered } = fromToolBatch(parsed, {}, proto);
+    droppedTotal += dropped;
+    assert.equal(unoffered, 0, `every type in "${parsed.label}" is offered`);
     const r = applyBatch(proto, converted);
     assert.ok(r.ok, `batch "${parsed.label}" applies`);
     proto = r.proto;
   }
   assert.ok(findNode(proto, "home.recent"));
-  assert.equal(findNode(proto, "home")?.props.template, "dashboard");
-  assert.equal(findNode(proto, "home.stat-spent")?.props.region, "stats");
+  // This fixture was written for templates; the model is no longer offered them, so they are dropped and counted.
+  assert.equal(droppedTotal, 7, "one template and six regions");
+  assert.equal(findNode(proto, "home")?.props.template, undefined);
+  assert.equal(findNode(proto, "home.stat-spent")?.props.region, undefined);
+});
+
+describe("the offered catalog (ADR 0017)", () => {
+  const add = (id: string, type: string, parentId = "home", props: [string, string][] = []) =>
+    ({ op: "add" as const, parentId, node: { id, type, props: props.map(([key, value]) => ({ key, value })) } });
+
+  test("an unoffered add and its children are skipped, region and template are dropped", () => {
+    const { batch, dropped, unoffered } = fromToolBatch({ label: "x", ops: [
+      add("home.menu", "Grid"),
+      add("home.h", "Heading", "home", [["text", "Hi"]]),
+      add("home.h.x", "Text", "home.h"),
+      { op: "update", id: "home.h", props: [{ key: "text", value: "Yo" }] },
+      { op: "update", id: "home", props: [{ key: "template", value: "dashboard" }, { key: "title", value: "Menu" }] },
+      add("home.card", "Card", "home", [["region", "main"], ["title", "Todays"]]),
+    ] }, {}, emptyPrototype("A"));
+    assert.equal(unoffered, 2);
+    assert.equal(dropped, 2);
+    assert.deepEqual(batch.ops.map((o) => (o.op === "add" ? o.node.id : o.op === "update" ? o.id : o.op)), ["home.menu", "home", "home.card"]);
+    const update = batch.ops[1] as Extract<PatchOp, { op: "update" }>;
+    assert.deepEqual(update.props, { title: "Menu" });
+    const card = batch.ops[2] as Extract<PatchOp, { op: "add" }>;
+    assert.deepEqual(card.node.props, { title: "Todays" });
+  });
+
+  test("a Screen update that only sets a template is skipped", () => {
+    const { batch } = fromToolBatch({ label: "x", ops: [{ op: "update", id: "home", props: [{ key: "template", value: "feed" }] }] }, {}, emptyPrototype("A"));
+    assert.deepEqual(batch.ops, []);
+  });
+
+  test("the tool schema offers only OFFERED_TYPES, while the local schema still accepts every type", () => {
+    const types: unknown[][] = [];
+    const walk = (s: unknown) => {
+      if (Array.isArray(s)) return s.forEach(walk);
+      if (!s || typeof s !== "object") return;
+      const o = s as Record<string, unknown>;
+      const props = o.properties as Record<string, { enum?: unknown[] }> | undefined;
+      if (props?.type?.enum && props.id) types.push(props.type.enum);
+      Object.values(o).forEach(walk);
+    };
+    walk(patchBatchJsonSchema());
+    assert.equal(types.length, 1);
+    assert.deepEqual(types[0], OFFERED_TYPES);
+    assert.ok(ToolPatchBatch.safeParse({ label: "x", ops: [add("home.h", "Heading")] }).success);
+  });
 });

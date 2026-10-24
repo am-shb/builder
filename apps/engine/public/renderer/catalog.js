@@ -176,6 +176,20 @@ export const CATALOG = {
 
 export const COMPONENT_TYPES = Object.keys(CATALOG);
 
+/**
+ * The types the build model is offered (ADR 0017), in catalog order. The renderer and the stored-tree
+ * schema keep every type in CATALOG so old sessions still draw; only the prompt table and the tool
+ * schema sent to the model list these.
+ */
+export const OFFERED_TYPES = [
+  "App", "Screen", "PageHeader", "Card", "Grid",
+  "StatCard", "Table", "ChartCard", "List", "ListItem",
+  "Text", "ProductCard", "Image", "Badge", "Button",
+];
+
+/** Props of an offered type that the model is not told about (the renderer and normalizeProps still take them). */
+export const OFFERED_PROPS_OMIT = { Screen: ["template"] };
+
 /** @param {unknown} v @returns {string|undefined} */
 function toStr(v) {
   if (typeof v === "string") return v;

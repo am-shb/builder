@@ -313,10 +313,10 @@
                 "parentId": "home",
                 "node": {
                   "id": "home.input",
-                  "type": "Input",
+                  "type": "Text",
                   "props": [
                     {
-                      "key": "placeholder",
+                      "key": "text",
                       "value": "Add a task"
                     }
                   ],
@@ -536,10 +536,10 @@
                           "parentId": "home",
                           "node": {
                             "id": "home.show-done",
-                            "type": "Toggle",
+                            "type": "Badge",
                             "props": [
                               {
-                                "key": "label",
+                                "key": "text",
                                 "value": "Show done"
                               }
                             ]
@@ -562,14 +562,11 @@
                           "parentId": "home",
                           "node": {
                             "id": "home.tabs",
-                            "type": "Tabs",
+                            "type": "Card",
                             "props": [
                               {
-                                "key": "tabs",
-                                "value": [
-                                  "To do",
-                                  "Done"
-                                ]
+                                "key": "title",
+                                "value": "Done"
                               }
                             ]
                           }

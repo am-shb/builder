@@ -3,8 +3,9 @@
 // The runtime in memory is what the session runs on. Saving to the database happens in the background, one
 // write at a time per session and in order, so the last write is always the latest state.
 import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent, UNTITLED_APP } from "../ui/tree.ts";
-import type { Prototype, PatchBatch, Interaction } from "../ui/schema.ts";
+import type { Change, PatchOp, Prototype, PatchBatch, Interaction, UiNode } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
+import { screenIds, touchedNodeIds } from "../ui/touched.ts";
 import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
 import type { BuildTask, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
@@ -23,6 +24,8 @@ export type UiState = {
 };
 
 export type Log = (msg: string, fields?: Record<string, unknown>) => void;
+
+type ApplyBatch = typeof applyPatchBatch;
 
 export type SessionRuntime = ReturnType<typeof makeRuntime>;
 
@@ -86,15 +89,19 @@ export function handleStageMessage(
 
 type Saved = { doc: ConsensusDoc; proto: Prototype } | undefined;
 
-export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveConsensus">; channel: StageSink; clock?: () => number; log?: Log }) {
+// `applyBatch` is the prototype's patch function; tests replace it to make one write fail.
+export function createRuntime(deps: {
+  store: Pick<Store, "getConsensus" | "saveConsensus">; channel: StageSink; clock?: () => number; log?: Log; applyBatch?: ApplyBatch;
+}) {
   const clock = deps.clock ?? Date.now;
+  const apply = deps.applyBatch ?? applyPatchBatch;
   const log: Log = deps.log ?? (() => {});
   const runtimes = new Map<string, SessionRuntime>();
   const loading = new Map<string, Promise<SessionRuntime>>();
   const make = (sessionId: string, saved: Saved) => {
     let rt = runtimes.get(sessionId);
     if (!rt) {
-      rt = makeRuntime(sessionId, saved, deps.store, deps.channel, clock, log);
+      rt = makeRuntime(sessionId, saved, deps.store, deps.channel, clock, log, apply);
       runtimes.set(sessionId, rt);
     }
     return rt;
@@ -119,7 +126,10 @@ export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveC
   return lookup;
 }
 
-function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveConsensus">, channel: StageSink, clock: () => number, log: Log) {
+function makeRuntime(
+  sessionId: string, saved: Saved, store: Pick<Store, "saveConsensus">, channel: StageSink, clock: () => number, log: Log,
+  applyPatchBatch: ApplyBatch,
+) {
   let proto: Prototype = saved?.proto ?? emptyPrototype(UNTITLED_APP);
   let doc: ConsensusDoc = saved?.doc ?? emptyDoc();
   // After a restart the room still sees the comparison it was choosing from (known issue M2).
@@ -158,6 +168,45 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
     writes = writes.then(() => store.saveConsensus(sessionId, d, p))
       .catch((err) => log("runtime.persist_failed", { session_id: sessionId, error: errorCode(err) }));
   };
+
+  // The pick settles the losing side's earlier proposals: every open decision proposed by a backer of a
+  // losing variant that affects a node any variant adds, changes or removes is removed (its text joins the picked
+  // decision's rejectedOptions). Its drawn nodes that the WINNING variant's batch touches are re-tagged to
+  // the picked decision, so promoting that decision agrees them; only when the winner's batch landed.
+  // A node only a losing variant touched keeps the removed decision's id and stays a draft: the renderer
+  // tolerates a decisionId with no decision, and nobody picked that node. Returns the re-tag changes.
+  function supersede(conflict: Conflict, winner: string, retag: boolean): Change[] {
+    const screens = screenIds(proto);
+    const touched = new Set<string>();
+    // A move alone (making room) does not make a proposal about that node part of the choice.
+    for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens, { moves: false })) touched.add(id);
+    const won = conflict.variants.find((v) => v.label === winner);
+    const winnerTouched = won ? touchedNodeIds(won.batch, screens) : new Set<string>();
+    const winners = new Set(won?.backers ?? []);
+    const losers = new Set(conflict.variants.filter((v) => v.label !== winner).flatMap((v) => v.backers).filter((b) => !winners.has(b)));
+    const gone = doc.decisions.filter((d) => d.status !== "agreed" && losers.has(d.proposedBy) && d.affects.some((id) => touched.has(id)));
+    if (!gone.length) return [];
+    const picked = `d-${conflict.id}`;
+    const ids = new Set(gone.map((d) => d.id));
+    doc = {
+      ...doc,
+      decisions: doc.decisions.filter((d) => !ids.has(d.id)).map((d) => d.id !== picked ? d : {
+        ...d, rejectedOptions: [...d.rejectedOptions, ...gone.map((g) => g.text).filter((t) => !d.rejectedOptions.includes(t))],
+      }),
+    };
+    log("runtime.superseded", { session_id: sessionId, conflict_id: conflict.id, count: gone.length });
+    if (!retag) return [];
+    const ops: PatchOp[] = [];
+    const walk = (n: UiNode) => { if (n.decisionId !== undefined && ids.has(n.decisionId) && winnerTouched.has(n.id)) ops.push({ op: "update", id: n.id, decisionId: picked }); n.children.forEach(walk); };
+    walk(proto.root);
+    if (!ops.length) return [];
+    // Only decisionIds change, on nodes the applied winner batch touched, so this should not fail; if it does, the
+    // nodes keep their old tags as drafts.
+    const t = applyPatchBatch(proto, { label: "Settled by the pick", ops });
+    if (!t.ok) { log("runtime.supersede_retag_failed", { session_id: sessionId, conflict_id: conflict.id, ops: ops.length }); return []; }
+    proto = t.proto;
+    return t.changes;
+  }
 
   return {
     // Resolves once every change made so far is saved (or its failure logged).
@@ -242,7 +291,7 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
     // conflict in the doc. An unappliable batch still resolves the doc; `applied`
     // says whether the winner's batch landed on the prototype in this call. A conflict
     // already resolved is settled: nothing is applied, changed or sent again.
-    resolveComparison(conflictId: string, winner: "A" | "B" | "C"): { ok: boolean; applied?: boolean; error?: string } {
+    resolveComparison(conflictId: string, winner: "A" | "B" | "C", pickers: string[] = []): { ok: boolean; applied?: boolean; error?: string } {
       const conflict = doc.conflicts.find((c) => c.id === conflictId);
       const variant = conflict?.variants.find((v) => v.label === winner);
       if (!conflict || !variant) {
@@ -253,15 +302,20 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
 
       const r = applyPatchBatch(proto, variant.batch);
       if (!r.ok) log("runtime.winner_batch_rejected", { session_id: sessionId, conflict_id: conflictId, winner });
-      doc = resolveConflict(doc, conflictId, winner, clock()).doc;
+      doc = resolveConflict(doc, conflictId, winner, clock(), pickers).doc;
       if (r.ok) proto = r.proto;
+      // The losing side's earlier proposals about the same nodes are settled by the pick: the room
+      // chose the other layout. Their nodes the winner's batch touched are re-tagged to the picked decision,
+      // so promoting it can flip them agreed (only those); it never adds anyone to agreedBy.
+      const retagged = supersede(conflict, winner, r.ok);
+      const changes = [...(r.ok ? r.changes : []), ...retagged];
       // Only this conflict's comparison closes (the stage plays it out on "resolve"); then the next
       // open conflict, if any, takes the screen. Another conflict's comparison stays (known issue M1).
       const shown = comparison;
       if (!shown || shown.conflictId === conflictId) comparison = nextComparison(proto, doc);
       persist();
       send({ type: "resolve", conflictId, winner });
-      if (r.ok) send({ type: "patch", proto, changes: r.changes });
+      if (changes.length) send({ type: "patch", proto, changes });
       send({ type: "doc", doc });
       if (comparison && comparison !== shown) send({ type: "comparison", view: comparison });
       return { ok: true, applied: r.ok };

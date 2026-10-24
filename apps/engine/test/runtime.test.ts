@@ -13,6 +13,7 @@ import { createRuntime } from "../src/session/runtime.ts";
 import { createStageChannel } from "../src/stage/channel.ts";
 import type { StageEvent } from "../src/stage/channel.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
+import { applyBatch, findNode } from "../src/ui/tree.ts";
 import type { ConsensusDoc } from "../src/consensus/doc.ts";
 import type { PatchBatch } from "../src/ui/schema.ts";
 
@@ -507,4 +508,117 @@ test("R3: flush waits for every session's queued saves", async () => {
   await runtime.flush();
   assert.equal(saving, 2);
   for (const id of ids) assert.equal((await store.getConsensus(id))?.doc.conflicts[0].id, "c1");
+});
+
+// ---- a pick closes the losing side's earlier proposal (task 8c) ----
+
+const openDecision = (id: string, text: string, proposedBy: string, affects: string[], status: "draft" | "pending" | "agreed" = "draft") =>
+  ({ id, text, status, proposedBy, agreedBy: status === "agreed" ? [proposedBy] : [], affects, rejectedOptions: [] as string[] });
+
+async function supersedeSetup(uuid: string, opts: { aOps?: PatchBatch["ops"]; bOps?: PatchBatch["ops"]; bBackers?: string[]; apply?: typeof applyBatch } = {}) {
+  const store = await testStore();
+  const s = await store.createIntent(uuid, "https://meet.google.com/x");
+  const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const rt = createRuntime({ store, channel: { send() {}, sendAudio() {}, clients: () => 0 }, log: (msg, fields) => logs.push({ msg, fields }), ...(opts.apply ? { applyBatch: opts.apply } : {}) })(s.id);
+  const card = (id: string, decisionId?: string) => ({ op: "add" as const, parentId: "home", node: { id, type: "Card", props: { title: id }, status: "draft" as const, ...(decisionId ? { decisionId } : {}), children: [] } });
+  assert.equal(rt.applyBatch({ label: "seed", ops: [card("home.special", "dX"), card("home.header", "dH"), card("home.mine", "dO"), card("home.extra", "dX")] }).ok, true);
+  rt.setDoc({
+    ...emptyDoc(),
+    decisions: [
+      openDecision("dX", "Feature the special at the top", "Amin", ["home.special"], "pending"),
+      openDecision("dH", "A new header", "Amin", ["home.header"]),
+      openDecision("dO", "Omid's special tweak", "Omid", ["home.special"]),
+      openDecision("dA", "Agreed special", "Amin", ["home.special"], "agreed"),
+    ],
+    conflicts: [{
+      id: "c1", topic: "Top of home", status: "open", openedAt: 1,
+      variants: [
+        { label: "A", summary: "Special on top", backers: ["Amin"], batch: { label: "A", ops: opts.aOps ?? [{ op: "update", id: "home.special", props: { title: "Top special" } }] } },
+        { label: "B", summary: "Order again on top", backers: opts.bBackers ?? ["Omid"], batch: { label: "B", ops: opts.bOps ?? [
+          { op: "add", parentId: "home", index: 0, node: { id: "home.order-again", type: "Card", props: { title: "Order again" }, status: "draft", children: [] } },
+          { op: "move", id: "home.special", parentId: "home", index: 1 },
+        ] } },
+      ],
+    }],
+  });
+  return { rt, logs };
+}
+
+test("resolving a conflict supersedes the losing backers' open proposals that touch the same nodes", async () => {
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888801");
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const doc = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc;
+  const proto = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).proto;
+  assert.deepEqual(doc.decisions.map((d) => d.id).sort(), ["d-c1", "dA", "dH", "dO"], "dX is gone; the rest stay");
+  const picked = doc.decisions.find((d) => d.id === "d-c1")!;
+  assert.deepEqual(picked.rejectedOptions, ["Special on top", "Feature the special at the top"]);
+  assert.deepEqual(picked.agreedBy, ["Omid"], "nobody is added to agreedBy");
+  const find = (id: string) => findNode(proto, id)?.decisionId;
+  assert.equal(find("home.special"), "d-c1");
+  assert.equal(find("home.extra"), "dX", "a node the conflict does not touch keeps its tag");
+  assert.equal(find("home.header"), "dH");
+  assert.equal(find("home.mine"), "dO");
+  const sup = logs.filter((l) => l.msg === "runtime.superseded");
+  assert.equal(sup.length, 1);
+  assert.deepEqual({ ...sup[0].fields, session_id: undefined }, { session_id: undefined, conflict_id: "c1", count: 1 });
+});
+
+test("the winner's own backers keep their proposals; the other side's are superseded", async () => {
+  const { rt } = await supersedeSetup("88888888-8888-8888-8888-888888888802");
+  rt.resolveComparison("c1", "A", ["Amin"]);
+  const doc = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc;
+  assert.deepEqual(doc.decisions.map((d) => d.id).sort(), ["d-c1", "dA", "dH", "dX"], "Omid lost: dO goes; Amin's dX stays");
+});
+
+test("someone who backs the winning variant too keeps their open proposal", async () => {
+  const { rt } = await supersedeSetup("88888888-8888-8888-8888-888888888803", { bBackers: ["Omid", "Amin"] });
+  rt.resolveComparison("c1", "B", ["Omid"]);
+  const doc = (rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>).doc;
+  assert.ok(doc.decisions.some((d) => d.id === "dX"), "Amin backs both A and B: dX stays");
+});
+
+test("when the winner's batch does not apply, the proposal is removed but its nodes are not re-tagged", async () => {
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888804", { bOps: [{ op: "remove", id: "nope" }, { op: "move", id: "home.special", parentId: "home", index: 0 }] });
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: false });
+  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.ok(!snap.doc.decisions.some((d) => d.id === "dX"));
+  assert.equal(findNode(snap.proto, "home.special")?.decisionId, "dX");
+  assert.ok(logs.some((l) => l.msg === "runtime.superseded"));
+});
+
+test("a node only the losing variant touches is not re-tagged: it keeps its superseded decision's id, as a draft", async () => {
+  const again = { op: "add" as const, parentId: "home", node: { id: "home.again", type: "Card" as const, props: { title: "Order again" }, status: "draft" as const, decisionId: "d-c1", children: [] } };
+  const { rt } = await supersedeSetup("88888888-8888-8888-8888-888888888805", { bOps: [again] });
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.ok(!snap.doc.decisions.some((d) => d.id === "dX"), "A touched home.special, so Amin's dX is still superseded");
+  // The decision is gone but the node keeps its id: the renderer tolerates a dangling decisionId, and the
+  // node stays a draft, because only B's own nodes are agreed by the pick.
+  const special = findNode(snap.proto, "home.special")!;
+  assert.deepEqual([special.decisionId, special.status], ["dX", "draft"]);
+  assert.equal(findNode(snap.proto, "home.again")?.decisionId, "d-c1");
+});
+
+test("a re-tag that fails to apply is logged by ids and counts, and the pick still resolves", async () => {
+  const failRetag: typeof applyBatch = (proto, batch) => batch.label === "Settled by the pick" ? { ok: false, error: "test" } : applyBatch(proto, batch);
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888806", { apply: failRetag });
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.equal(snap.doc.conflicts[0].status, "resolved");
+  assert.equal(findNode(snap.proto, "home.special")?.decisionId, "dX", "not re-tagged");
+  const failed = logs.filter((l) => l.msg === "runtime.supersede_retag_failed");
+  assert.equal(failed.length, 1);
+  assert.deepEqual({ ...failed[0].fields, session_id: undefined }, { session_id: undefined, conflict_id: "c1", ops: 1 });
+});
+
+test("a proposal about a node the variants only move is not superseded", async () => {
+  const again = { op: "add" as const, parentId: "home", node: { id: "home.again", type: "Card" as const, props: { title: "Order again" }, status: "draft" as const, children: [] } };
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888807", {
+    aOps: [{ op: "move", id: "home.special", parentId: "home", index: 0 }], bOps: [again],
+  });
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.ok(snap.doc.decisions.some((d) => d.id === "dX"), "A only moved home.special to make room: Amin's dX stays open");
+  assert.equal(findNode(snap.proto, "home.special")?.decisionId, "dX");
+  assert.ok(!logs.some((l) => l.msg === "runtime.superseded"));
 });

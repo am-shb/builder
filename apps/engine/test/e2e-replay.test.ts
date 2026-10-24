@@ -14,7 +14,7 @@ import { noopStageSink } from "../src/stage/channel.ts";
 import { createRoutedFakePort } from "../src/agent/llm.ts";
 import type { Speech } from "../src/agent/conversation-loop.ts";
 import { findNode } from "../src/ui/tree.ts";
-import { replay } from "../scripts/replay.ts";
+import { asrText, replay } from "../scripts/replay.ts";
 import type { Fixture } from "../scripts/replay.ts";
 
 const flush = () => settle(30);
@@ -50,7 +50,8 @@ function virtualTime(start = 1_700_000_000_000) {
   };
 }
 
-test("todo-app session replays end to end", async () => {
+// Clean text, and the lowercase unpunctuated lines Recall's low-latency transcript really gives.
+for (const asr of [false, true]) test(`todo-app session replays end to end${asr ? " (low-latency transcript text)" : ""}`, async () => {
   const secret = "whsec_" + Buffer.from("e2e-replay-secret-not-real").toString("base64");
   const config = loadConfig({
     RECALL_REGION: "us-west-2", RECALL_API_KEY: "fake-key", RECALL_WEBHOOK_VERIFICATION_SECRET: secret,
@@ -90,14 +91,16 @@ test("todo-app session replays end to end", async () => {
     }
     await flush();
   };
-  const result = await replay(fixture, { baseUrl: base, sessionId: session.id, secret, sleep });
+  const result = await replay(fixture, { baseUrl: base, sessionId: session.id, secret, sleep, asr });
   assert.equal(result.posted, fixture.participants.length + fixture.utterances.length);
 
   // Speech: exactly the four allowed reasons, in order.
   const spoke = logs.filter((l) => l.msg === "speak").map((l) => l.fields!.reason);
   assert.deepEqual(spoke, ["opening", "confirm_conflict", "answer", "stuck"]);
   assert.equal(said.length, 4);
-  assert.equal(logs.filter((l) => l.msg === "speak.blocked").length, 0);
+  // Builder confirms the spoken pick itself, so the model's own confirm_conflict finds nothing left to confirm.
+  const blocked = logs.filter((l) => l.msg === "speak.blocked").map((l) => `${l.fields!.reason}:${l.fields!.why}`);
+  assert.deepEqual(blocked, ["confirm_conflict:reason_not_open"]);
 
   // Consensus: three decisions agreed by support or silence, and the conflict resolved with B.
   await runtime(session.id).saved();
@@ -123,10 +126,10 @@ test("todo-app session replays end to end", async () => {
   // The voice command ran on the stage (visible, so Builder stayed quiet about it).
   assert.ok(logs.some((l) => l.msg === "conversation.command" && l.fields!.ok === true && l.fields!.visible === true));
 
-  // Cost: every scripted call was recorded, 12 conversation and 7 build.
+  // Cost: every scripted call was recorded, 12 conversation and 8 build (the spoken pick starts a run of its own).
   const calls = await store.listModelCalls(session.id);
   assert.equal(calls.filter((c) => c.loop === "conversation").length, 12);
-  assert.equal(calls.filter((c) => c.loop === "build").length, 7);
+  assert.equal(calls.filter((c) => c.loop === "build").length, 8);
   assert.ok(await store.sessionCost(session.id) > 0);
 
   // Handoff page lists the decisions; the export is self-contained.
@@ -138,7 +141,7 @@ test("todo-app session replays end to end", async () => {
 
   // Logs never carry transcript text or Builder's lines.
   const logged = JSON.stringify(logs);
-  for (const u of fixture.utterances) assert.ok(!logged.includes(u.text), "no transcript text in logs");
+  for (const u of fixture.utterances) assert.ok(!logged.includes(u.text) && !logged.includes(asrText(u.text)), "no transcript text in logs");
   for (const line of said) assert.ok(!logged.includes(line), "no spoken text in logs");
 });
 
@@ -153,4 +156,78 @@ test("the routed fake port sends each call to its own loop's script", async () =
   const second = await port.runTools({ ...req, loop: "build" });
   assert.equal(second.toolCalls[0].name, "update_consensus");
   assert.ok(second.usage.inputTokens > 0, "nonzero usage so cost accounting has something to record");
+});
+
+// ---- local replay: plain lines into /speech, optionally waiting for the stage ----
+function tinyServer(handler: (req: http.IncomingMessage, body: string) => unknown) {
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(handler(req, body))); });
+  });
+  servers.add(server);
+  return new Promise<string>((r) => server.listen(0, "127.0.0.1", () => r(`http://127.0.0.1:${(server.address() as { port: number }).port}`)));
+}
+
+test("local replay posts unsigned lines to /speech", async () => {
+  const seen: { url?: string; sig: unknown; body: any }[] = [];
+  const base = await tinyServer((req, body) => { seen.push({ url: req.url, sig: req.headers["webhook-signature"], body: JSON.parse(body) }); return { ok: true }; });
+  const f: Fixture = { participants: ["Ada"], utterances: [{ t: 10, speaker: "Ada", text: "hello there" }, { t: 20, speaker: "Ada", text: "half", partial: true }] };
+  const result = await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, sleep: async () => {} });
+  assert.equal(result.posted, 3);
+  assert.deepEqual(seen.map((s) => s.url), Array(3).fill("/api/sessions/s1/speech"));
+  assert.deepEqual(seen.map((s) => s.body.kind), ["join", "utterance", "partial"]);
+  assert.deepEqual(seen[1].body, { kind: "utterance", speaker: "Ada", text: "hello there" });
+  assert.ok(seen.every((s) => s.sig === undefined));
+});
+
+test("asr replay sends every line lowercase and without punctuation, locally and as webhook words", async () => {
+  assert.equal(asrText("Let's go with B, the Done tab."), "let's go with b the done tab");
+  assert.equal(asrText("Hey Builder, what have we agreed so far?"), "hey builder what have we agreed so far");
+  const seen: any[] = [];
+  const base = await tinyServer((_req, body) => { seen.push(JSON.parse(body)); return { ok: true }; });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "Okay. I think B is better!" }, { t: 1, speaker: "Ada", text: "Half-way", partial: true }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, asr: true, sleep: async () => {} });
+  assert.deepEqual(seen.map((b) => b.text), ["okay i think b is better", "half way"]);
+  seen.length = 0;
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "whsec_" + Buffer.from("x").toString("base64"), asr: true, sleep: async () => {} });
+  assert.deepEqual(seen.map((b) => b.data.data.words.map((w: { text: string }) => w.text).join(" ")), ["okay i think b is better", "half way"]);
+});
+
+test("waitFor comparison polls the stage state before posting the line", async () => {
+  const order: string[] = [];
+  let polls = 0;
+  const base = await tinyServer((req) => {
+    if (req.url!.startsWith("/state")) { polls++; order.push("poll"); return { comparison: polls > 2 ? { conflictId: "c1" } : null }; }
+    order.push("post");
+    return { ok: true };
+  });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "go with B", waitFor: "comparison" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, stateUrl: `${base}/state?token=x`, sleep: async () => {} });
+  assert.deepEqual(order, ["poll", "poll", "poll", "post"]);
+});
+
+test("waitFor no-comparison waits for it to clear; a timeout throws", async () => {
+  let polls = 0;
+  const base = await tinyServer((req) => req.url!.startsWith("/state") ? { comparison: ++polls > 1 ? null : { conflictId: "c1" } } : { ok: true });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", waitFor: "no-comparison" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, stateUrl: `${base}/state`, sleep: async () => {} });
+  assert.equal(polls, 2);
+
+  const never = await tinyServer(() => ({ comparison: null }));
+  const g: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", waitFor: "comparison" }] };
+  await assert.rejects(
+    replay(g, { baseUrl: never, sessionId: "s1", secret: "", local: true, stateUrl: `${never}/state`, sleep: async () => {}, waitTimeoutMs: 700 }),
+    /waitFor comparison timed out/,
+  );
+});
+
+test("a shot is taken 8 s of scripted time after its line, divided by speed", async () => {
+  const base = await tinyServer(() => ({ ok: true }));
+  const slept: number[] = [];
+  const shots: string[] = [];
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "ok", shot: "beat1" }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, speed: 2, sleep: async (ms) => { slept.push(ms); }, onShot: async (n) => { shots.push(n); } });
+  assert.deepEqual(shots, ["beat1"]);
+  assert.ok(slept.includes(4000));
 });

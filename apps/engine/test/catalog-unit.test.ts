@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 // @ts-ignore plain JS module shared with the browser
-import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, normalizeProps, parseCells, pillTone, TEMPLATES, templateRegion } from "../public/renderer/catalog.js";
+import { CATALOG, COMPONENT_TYPES, STYLE_OPTIONS, normalizeProps, parseCells, pillTone, TEMPLATES, templateRegion, OFFERED_TYPES, OFFERED_PROPS_OMIT } from "../public/renderer/catalog.js";
 
 const GROUPS = ["frames", "data", "content", "input", "feedback", "conversation"];
 const KINDS = ["s", "n", "b", "ss", "ns"];
@@ -122,4 +122,15 @@ test("templateRegion", () => {
   assert.equal(templateRegion("landing", "zzz"), "features");
   assert.equal(templateRegion(undefined, "stats"), null);
   assert.equal(templateRegion("bogus", "stats"), null);
+});
+
+test("OFFERED_TYPES is the 15 components the model is offered, in catalog order", () => {
+  assert.deepEqual(OFFERED_TYPES, [
+    "App", "Screen", "PageHeader", "Card", "Grid",
+    "StatCard", "Table", "ChartCard", "List", "ListItem",
+    "Text", "ProductCard", "Image", "Badge", "Button",
+  ]);
+  for (const t of OFFERED_TYPES) assert.ok(COMPONENT_TYPES.includes(t), t);
+  assert.deepEqual(OFFERED_TYPES, COMPONENT_TYPES.filter((t: string) => OFFERED_TYPES.includes(t)), "catalog order");
+  assert.deepEqual(OFFERED_PROPS_OMIT, { Screen: ["template"] });
 });
