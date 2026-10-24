@@ -140,6 +140,10 @@ async function oneRun(dir: string, speed: number): Promise<Report> {
       await page.goto(session.handoff_url);
       await sleep(500);
       await page.screenshot(path.join(dir, "handoff.png"));
+      // The first screen is only the prototype; the decisions are further down.
+      await page.eval(`document.getElementById("decisions")?.scrollIntoView()`);
+      await sleep(200);
+      await page.screenshot(path.join(dir, "handoff-decisions.png"));
     }, { width: 1280, height: 720 });
 
     const cost = ((await (await fetch(`${base}/api/sessions/${session.id}/cost`)).json()) as { cost_usd: number }).cost_usd;
