@@ -14,7 +14,7 @@ import { noopStageSink } from "../src/stage/channel.ts";
 import { createRoutedFakePort } from "../src/agent/llm.ts";
 import type { Speech } from "../src/agent/conversation-loop.ts";
 import { findNode } from "../src/ui/tree.ts";
-import { replay } from "../scripts/replay.ts";
+import { asrText, replay } from "../scripts/replay.ts";
 import type { Fixture } from "../scripts/replay.ts";
 
 const flush = () => settle(30);
@@ -50,7 +50,8 @@ function virtualTime(start = 1_700_000_000_000) {
   };
 }
 
-test("todo-app session replays end to end", async () => {
+// Clean text, and the lowercase unpunctuated lines Recall's low-latency transcript really gives.
+for (const asr of [false, true]) test(`todo-app session replays end to end${asr ? " (low-latency transcript text)" : ""}`, async () => {
   const secret = "whsec_" + Buffer.from("e2e-replay-secret-not-real").toString("base64");
   const config = loadConfig({
     RECALL_REGION: "us-west-2", RECALL_API_KEY: "fake-key", RECALL_WEBHOOK_VERIFICATION_SECRET: secret,
@@ -90,7 +91,7 @@ test("todo-app session replays end to end", async () => {
     }
     await flush();
   };
-  const result = await replay(fixture, { baseUrl: base, sessionId: session.id, secret, sleep });
+  const result = await replay(fixture, { baseUrl: base, sessionId: session.id, secret, sleep, asr });
   assert.equal(result.posted, fixture.participants.length + fixture.utterances.length);
 
   // Speech: exactly the four allowed reasons, in order.
@@ -140,7 +141,7 @@ test("todo-app session replays end to end", async () => {
 
   // Logs never carry transcript text or Builder's lines.
   const logged = JSON.stringify(logs);
-  for (const u of fixture.utterances) assert.ok(!logged.includes(u.text), "no transcript text in logs");
+  for (const u of fixture.utterances) assert.ok(!logged.includes(u.text) && !logged.includes(asrText(u.text)), "no transcript text in logs");
   for (const line of said) assert.ok(!logged.includes(line), "no spoken text in logs");
 });
 
@@ -178,6 +179,19 @@ test("local replay posts unsigned lines to /speech", async () => {
   assert.deepEqual(seen.map((s) => s.body.kind), ["join", "utterance", "partial"]);
   assert.deepEqual(seen[1].body, { kind: "utterance", speaker: "Ada", text: "hello there" });
   assert.ok(seen.every((s) => s.sig === undefined));
+});
+
+test("asr replay sends every line lowercase and without punctuation, locally and as webhook words", async () => {
+  assert.equal(asrText("Let's go with B, the Done tab."), "let's go with b the done tab");
+  assert.equal(asrText("Hey Builder, what have we agreed so far?"), "hey builder what have we agreed so far");
+  const seen: any[] = [];
+  const base = await tinyServer((_req, body) => { seen.push(JSON.parse(body)); return { ok: true }; });
+  const f: Fixture = { participants: [], utterances: [{ t: 0, speaker: "Ada", text: "Okay. I think B is better!" }, { t: 1, speaker: "Ada", text: "Half-way", partial: true }] };
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "", local: true, asr: true, sleep: async () => {} });
+  assert.deepEqual(seen.map((b) => b.text), ["okay i think b is better", "half way"]);
+  seen.length = 0;
+  await replay(f, { baseUrl: base, sessionId: "s1", secret: "whsec_" + Buffer.from("x").toString("base64"), asr: true, sleep: async () => {} });
+  assert.deepEqual(seen.map((b) => b.data.data.words.map((w: { text: string }) => w.text).join(" ")), ["okay i think b is better", "half way"]);
 });
 
 test("waitFor comparison polls the stage state before posting the line", async () => {

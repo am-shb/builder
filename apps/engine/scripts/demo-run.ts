@@ -1,10 +1,11 @@
 // Plays the Maple Café meeting into a local-mode server and records what happened.
 //
-//   node scripts/demo-run.ts [--runs n] [--out dir] [--speed n]
+//   node scripts/demo-run.ts [--runs n] [--out dir] [--speed n] [--clean-text]
 //
 // Per run: starts `node src/server.ts --local` on a free port (TTS off, its own throwaway database), creates a
 // session, opens the stage in headless Chrome at 1280x720, replays test/fixtures/sessions/maple-cafe.json, saves a
-// screenshot per beat plus the handoff page, and writes report.json. The server's own models answer, so with
+// screenshot per beat plus the handoff page, and writes report.json. Lines go in the way Recall's low-latency
+// transcript gives them (lowercase, no punctuation), as in a real meeting; --clean-text sends the fixture's own text. The server's own models answer, so with
 // OPENROUTER_API_KEY set this costs real money; with it empty the stage stays empty and the cost is 0.
 // Prints only counts and paths, never transcript text.
 import { spawn } from "node:child_process";
@@ -19,6 +20,11 @@ import { withChrome } from "../test/helpers/chrome.ts";
 
 const ENGINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = path.join(ENGINE, "test/fixtures/sessions/maple-cafe.json");
+
+/** Whether lines go in as Recall's low-latency transcript gives them: yes, unless --clean-text. */
+export function useAsr(args: readonly string[]): boolean {
+  return !args.includes("--clean-text");
+}
 
 /** Wait for the comparison only when the agent is on (a key is set); without one no comparison can appear. */
 export function shouldWait(env: Record<string, string | undefined>): boolean {
@@ -113,7 +119,7 @@ async function startServer(dir: string, port: number) {
   return handle;
 }
 
-async function oneRun(dir: string, speed: number): Promise<Report> {
+async function oneRun(dir: string, speed: number, asr: boolean): Promise<Report> {
   mkdirSync(dir, { recursive: true });
   const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Fixture;
   // Without a key the agent is off and no comparison can appear, so there is nothing to wait for.
@@ -133,7 +139,7 @@ async function oneRun(dir: string, speed: number): Promise<Report> {
       await page.goto(session.stage_url);
       // A waitFor that times out is a finding (the comparison never showed), not a reason to lose the run.
       await replay(fixture, {
-        baseUrl: base, sessionId: session.id, secret: "", local: true, stateUrl, speed,
+        baseUrl: base, sessionId: session.id, secret: "", local: true, stateUrl, speed, asr,
         onShot: async (name) => { await page.screenshot(path.join(dir, `${name}.png`)); },
       }).catch((err) => { replayError = (err as Error).message; });
       await page.screenshot(path.join(dir, "final.png"));
@@ -176,11 +182,13 @@ async function main() {
   if (!shouldWait(process.env)) {
     console.log("no OPENROUTER_API_KEY: the agent is off, so the stage stays empty");
   }
+  const asr = useAsr(args);
+  console.log(asr ? "lines: as the low-latency transcript gives them (lowercase, no punctuation)" : "lines: the fixture's own text (--clean-text)");
   const failed: number[] = [];
   for (let i = 1; i <= runs; i++) {
     const dir = runs > 1 ? path.join(out, `run-${i}`) : out;
     let r: Report;
-    try { r = await oneRun(dir, speed); } catch (err) {
+    try { r = await oneRun(dir, speed, asr); } catch (err) {
       failed.push(i);
       console.log(`run ${i}/${runs}: failed: ${(err as Error).message}\n  ${dir}`);
       continue;

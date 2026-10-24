@@ -1,9 +1,10 @@
 // Replays a scripted meeting into a running server as signed Recall realtime webhooks.
 //
 //   node scripts/replay.ts test/fixtures/sessions/todo-app.json --session <id> [--base-url http://localhost:3000]
-//        [--speed 4] [--live-models] [--local] [--state-url <stage state url with token>]
+//        [--speed 4] [--live-models] [--local] [--asr] [--state-url <stage state url with token>]
 //
 // --local posts plain lines to /api/sessions/<id>/speech of a `--local` server (no signature, no secret).
+// --asr sends every line the way Recall's low-latency transcript does: lowercase, no punctuation.
 //
 // It only sends: it binds no port. The secret comes from RECALL_WEBHOOK_VERIFICATION_SECRET (the same
 // one the target server verifies with). It is only needed without --local. With --live-models the server's own models answer, so the
@@ -47,7 +48,14 @@ export type ReplayOptions = {
   onShot?: (name: string) => Promise<void>;
   // How long a `waitFor` polls (real time) before it throws. Default 45 s.
   waitTimeoutMs?: number;
+  // Send every line as Recall's low-latency transcript gives it (asrText): lowercase, no punctuation.
+  asr?: boolean;
 };
+
+/** A line as Recall's low-latency transcript gives it: lowercase words, apostrophes kept, no other punctuation. */
+export function asrText(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s'\u2019]/gu, " ").replace(/\s+/g, " ").trim();
+}
 
 const SHOT_DELAY_MS = 8000;
 const POLL_MS = 500;
@@ -107,10 +115,11 @@ export async function replay(fixture: Fixture, opts: ReplayOptions): Promise<{ p
     await sleep(Math.max(0, u.t - at) / speed);
     at = Math.max(at, u.t);
     if (u.waitFor) await waitFor(u.waitFor);
-    if (opts.local) await postLocal(u.partial ? "partial" : "utterance", u.speaker, u.text);
+    const text = opts.asr ? asrText(u.text) : u.text;
+    if (opts.local) await postLocal(u.partial ? "partial" : "utterance", u.speaker, text);
     else await post(u.partial ? "transcript.partial_data" : "transcript.data", {
       participant: { name: u.speaker },
-      words: u.text.split(/\s+/).filter(Boolean).map((text) => ({ text })),
+      words: text.split(/\s+/).filter(Boolean).map((w) => ({ text: w })),
     });
     if (u.shot) {
       await sleep(SHOT_DELAY_MS / speed);
@@ -131,7 +140,7 @@ async function main() {
   const file = args[0]?.startsWith("--") ? undefined : args[0];
   const sessionId = flag("--session");
   if (!file || !sessionId) {
-    console.error("usage: node scripts/replay.ts <fixture.json> --session <id> [--base-url url] [--speed n] [--live-models] [--local] [--state-url url]");
+    console.error("usage: node scripts/replay.ts <fixture.json> --session <id> [--base-url url] [--speed n] [--live-models] [--local] [--asr] [--state-url url]");
     process.exit(2);
   }
   if (existsSync(".env")) process.loadEnvFile(".env");
@@ -143,7 +152,7 @@ async function main() {
   const fixture = JSON.parse(readFileSync(file, "utf8")) as Fixture;
   if (liveModels) console.log("live models: the server's own models answer; this costs real money");
   const started = Date.now();
-  const { posted } = await replay(fixture, { baseUrl, sessionId, secret, speed: Number(flag("--speed") ?? 1), liveModels, local, stateUrl: flag("--state-url") });
+  const { posted } = await replay(fixture, { baseUrl, sessionId, secret, speed: Number(flag("--speed") ?? 1), liveModels, local, asr: args.includes("--asr"), stateUrl: flag("--state-url") });
   console.log(`replayed ${posted} events into ${baseUrl} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
