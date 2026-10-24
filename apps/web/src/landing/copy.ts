@@ -135,12 +135,14 @@ export const TRUST = {
   title: "Visible in the room, careful with your data",
   lead: "A meeting is a shared space. It behaves like a guest who says what it is doing.",
   items: [
-    { title: "It announces itself", text: `${BOT_NAME} joins by name, has to be admitted like any guest, and posts a pinned chat message saying it is transcribing.` },
-    { title: "People decide, not the model", text: "Every agreement has to be backed by what people actually said. Anything not agreed is marked as a proposal." },
-    { title: "Each organization's data is its own", text: "Every session belongs to one organization, and every request is checked against it. One organization can't see another's sessions." },
-    { title: "Limits on every meeting", text: "Each session has a time and a spending limit. When one is reached, it says why in the chat, leaves, and keeps what was built." },
-    { title: "Clear about data", text: "It asks for the transcript, not an audio or video recording. Transcripts, prompts and model output are never written to logs." },
+    { tag: "In the meeting", title: "It announces itself", text: `${BOT_NAME} joins by name, has to be admitted like any guest, and posts a pinned chat message saying it is transcribing.` },
+    { tag: "Decisions", title: "People decide, not the model", text: "Every agreement has to be backed by what people actually said. Anything not agreed stays a draft." },
+    { tag: "Your data", title: "Each organization's data is its own", text: "Every session belongs to one organization, and every request is checked against it. One organization can't see another's sessions." },
+    { tag: "Spending", title: "Limits on every meeting", text: "Each session has a time and a spending limit. When one is reached, it says why in the chat, leaves, and keeps what was built." },
+    { tag: "Recording", title: "Clear about data", text: "It asks for the transcript, not an audio or video recording. Transcripts, prompts and model output are never written to logs." },
   ],
+  logTitle: "What it promises",
+  logNote: "True today, in every meeting",
   privacyLink: "How we handle data",
 };
 
@@ -162,7 +164,6 @@ export const PRICING = {
       blurb: "For a team that meets every week.",
       points: ["Meeting hours included each month", "Extra minutes billed per minute", "A monthly spending limit you set"],
       cta: { label: "Join the waitlist", href: "pro" },
-      featured: true,
     },
     {
       name: "Team",

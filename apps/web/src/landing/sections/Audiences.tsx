@@ -12,9 +12,13 @@ export function Audiences() {
         {C.items.map((item, i) => {
           const Icon = ICONS[i]!;
           return (
-            <Card as="li" key={item.title} delay={i * 80} className="p-6 sm:p-7">
-              <span aria-hidden="true" className="grid size-11 place-items-center rounded-2xl bg-accent-tint text-accent-ink">
-                <Icon className="size-5" />
+            <Card as="li" key={item.title} delay={i * 80} className="group p-6 sm:p-7">
+              {/* The mark's idea: a dashed frame behind a solid one, holding the icon. */}
+              <span aria-hidden="true" className="relative block h-13 w-14">
+                <span className="absolute top-0 left-0 size-10 rounded-[14px] border-[1.5px] border-dashed border-primary/50 transition-transform duration-300 motion-safe:group-hover:-translate-x-0.5 motion-safe:group-hover:-translate-y-0.5" />
+                <span className="absolute right-0 bottom-0 grid size-10 place-items-center rounded-[14px] bg-primary text-on-primary shadow-glow">
+                  <Icon className="size-5" />
+                </span>
               </span>
               <h3 className="display display-md mt-5 mb-0">{item.title}</h3>
               <p className="mt-3 mb-0 text-ink-2 text-pretty">{item.text}</p>

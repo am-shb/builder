@@ -42,7 +42,9 @@ Option 3.
   otherwise. `robots.txt` allows the landing paths and asks crawlers to skip the app's.
 - **Design.** The landing page uses the Boardroom tokens, fonts and color mode (ADR 0015), with larger type and more
   motion. Motion is CSS and a few small hooks, with no animation library. Everything that moves stops under
-  `prefers-reduced-motion`, and the hero animation pauses when it is off screen. New colors are tokens in
+  `prefers-reduced-motion`, and the hero animation pauses when it is off screen. Motion that runs longer than five
+  seconds can be stopped (WCAG 2.2.2): the hero's loop has a Pause button, and the features' small visuals play once
+  and rest. New colors are tokens in
   `globals.css`, like every other color.
 - **Packages.** One new: `@fontsource-variable/fraunces`, the display font for large headings (ADR 0015). The phone
   menu and the FAQ use the Radix primitives already installed, and the motion needs no library.

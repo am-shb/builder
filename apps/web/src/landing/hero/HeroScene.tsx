@@ -34,11 +34,11 @@ const TASKS = [
   { title: "Book user interviews", due: "Due Oct 30" },
 ];
 
-export function HeroScene({ className }: { className?: string }) {
+export function HeroScene({ className, paused = false }: { className?: string; paused?: boolean }) {
   const [ref, inView] = useInView<HTMLDivElement>({ rootMargin: "80px" });
   const visible = usePageVisible();
   const reduced = useReducedMotion();
-  const playing = inView && visible;
+  const playing = inView && visible && !paused;
   const step = useSceneTimeline(TIMES, LOOP_AT, { playing, still: reduced ? S.overdue : null });
   const at = (s: number) => step >= s && step < S.outro;
   const due = step >= S.agreed ? "agreed" : step >= S.draft ? "draft" : "hidden";

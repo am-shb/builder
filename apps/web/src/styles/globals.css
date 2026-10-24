@@ -80,7 +80,9 @@
   --glow-b: rgb(25 166 122 / 0.14);
   --glow-c: rgb(180 83 9 / 0.07);
   --grid-line: rgb(13 92 76 / 0.07);
-  --frost: rgb(244 246 245 / 0.78);
+  --frost: rgb(244 246 245 / 0.9);
+  --band: #0d5c4c;
+  --band-ink: #ffffff;
   color-scheme: light;
 }
 
@@ -141,7 +143,9 @@
     --glow-b: rgb(139 240 205 / 0.07);
     --glow-c: rgb(240 164 58 / 0.05);
     --grid-line: rgb(255 255 255 / 0.045);
-    --frost: rgb(15 21 19 / 0.72);
+    --frost: rgb(15 21 19 / 0.88);
+    --band: #15392f;
+    --band-ink: #eef3f1;
     color-scheme: dark;
   }
 }
@@ -201,7 +205,9 @@
   --glow-b: rgb(139 240 205 / 0.07);
   --glow-c: rgb(240 164 58 / 0.05);
   --grid-line: rgb(255 255 255 / 0.045);
-  --frost: rgb(15 21 19 / 0.72);
+  --frost: rgb(15 21 19 / 0.88);
+  --band: #15392f;
+  --band-ink: #eef3f1;
   color-scheme: dark;
 }
 
@@ -250,6 +256,8 @@
   --color-p-c-bg: var(--p-c-bg);
   --color-p-c-ink: var(--p-c-ink);
   --color-frost: var(--frost);
+  --color-band: var(--band);
+  --color-band-ink: var(--band-ink);
 
   --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
   --font-display: var(--font-display);

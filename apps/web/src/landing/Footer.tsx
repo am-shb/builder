@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Mark } from "../components/Mark.tsx";
-import { CONTACT_EMAIL, FOOTER, mailto, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
+import { FOOTER, mailto, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
 import { goToSection } from "./LandingNav.tsx";
 import { WRAP } from "./layout.tsx";
 
@@ -11,8 +11,8 @@ export function Footer({ home = false }: { home?: boolean }) {
   return (
     <footer className="border-t border-hair pt-14 pb-10">
       <div className={WRAP}>
-        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
-          <div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+          <div className="col-span-2 md:col-span-1">
             <a href="/" className="flex w-fit min-h-11 items-center gap-2.5 rounded-xl text-ink no-underline">
               <Mark />
               <span className="text-[17px] font-[650] tracking-[-0.01em]">{PRODUCT_NAME}</span>
@@ -38,7 +38,6 @@ export function Footer({ home = false }: { home?: boolean }) {
         </div>
         <div className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-hair pt-6 text-sm text-ink-3">
           <p className="m-0">© {year} {PRODUCT_NAME}</p>
-          <p className="m-0"><a href={mailto(`About ${PRODUCT_NAME}`)} className="text-ink-3 no-underline hover:text-ink hover:underline">{CONTACT_EMAIL}</a></p>
         </div>
       </div>
     </footer>

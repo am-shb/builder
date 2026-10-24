@@ -1,13 +1,17 @@
-import { ArrowRight, Play, Video } from "lucide-react";
+import { ArrowRight, Pause, Play, Video } from "lucide-react";
+import { useState } from "react";
 import { buttonVariants } from "../../components/Button.tsx";
 import { cn } from "../../lib/cn.ts";
 import { HERO, SIGN_UP } from "../copy.ts";
 import { goToSection } from "../LandingNav.tsx";
+import { useReducedMotion } from "../useReducedMotion.ts";
 import { HeroScene } from "./HeroScene.tsx";
 
 const delay = (ms: number) => ({ animationDelay: `${ms}ms` });
 
 export function Hero() {
+  const [paused, setPaused] = useState(false);
+  const reduced = useReducedMotion();
   return (
     <section aria-labelledby="hero-title" className="relative">
       <div aria-hidden="true" className="dot-texture pointer-events-none absolute inset-x-0 -top-16 -z-10 h-[520px] md:h-[680px]" />
@@ -16,7 +20,7 @@ export function Hero() {
       <div className="mx-auto grid max-w-[1320px] items-center gap-y-14 px-4 pt-8 pb-16 sm:px-6 md:gap-y-16 md:pt-14 md:pb-20 lg:px-10 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:gap-x-[clamp(3rem,5vw,6rem)] xl:pt-[clamp(3rem,8vh,6.5rem)] xl:pb-[clamp(4rem,10vh,8rem)] 2xl:max-w-[1440px]">
         <div className="@container w-full min-w-0 max-xl:mx-auto max-xl:max-w-[780px] max-xl:text-center">
           <p className="rise-in m-0 inline-flex items-center gap-2 rounded-full border border-dashed border-primary/45 bg-surface/60 py-1.5 pr-3.5 pl-2.5 text-[13.5px] font-semibold text-accent-ink" style={delay(0)}>
-            <span className="size-2 rounded-full bg-live animate-breathe" aria-hidden="true" />
+            <span className={cn("size-2 rounded-full bg-live animate-breathe", paused && "[animation-play-state:paused]")} aria-hidden="true" />
             {HERO.eyebrow}
           </p>
           {/* display-xl's line height and tracking, at a size taken from the column (cqi): "Your meeting ends with" is
@@ -52,7 +56,18 @@ export function Hero() {
         </div>
         <div className="rise-in-fade relative mx-auto w-full min-w-0 max-w-[720px] xl:max-w-none" style={delay(200)}>
           <p className="sr-only">{HERO.sceneSummary}</p>
-          <HeroScene />
+          <HeroScene paused={paused} />
+          {/* The scene loops, so it can be stopped (WCAG 2.2.2). In the hero's bottom padding, so the layout stays put. */}
+          {!reduced && (
+            <button
+              type="button"
+              onClick={() => setPaused((p) => !p)}
+              className="absolute right-1 -bottom-13 flex min-h-11 items-center gap-2 rounded-full px-3 text-sm font-semibold text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
+            >
+              {paused ? <Play aria-hidden="true" className="size-4 fill-current" /> : <Pause aria-hidden="true" className="size-4 fill-current" />}
+              {paused ? "Play animation" : "Pause animation"}
+            </button>
+          )}
         </div>
       </div>
     </section>

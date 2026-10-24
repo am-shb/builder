@@ -97,7 +97,7 @@ export function LandingNav({ home = false }: { home?: boolean }) {
       <header
         className={cn(
           "sticky top-0 z-40 transition-[background-color,box-shadow] duration-300 ease-out",
-          atTop ? "bg-transparent" : "bg-frost shadow-[0_1px_0_var(--hair)] backdrop-blur-xl backdrop-saturate-150",
+          atTop ? "bg-transparent" : "bg-frost shadow-[0_1px_0_var(--hair)] backdrop-blur-md",
         )}
       >
         <nav aria-label="Main" className="mx-auto flex h-16 max-w-[1320px] 2xl:max-w-[1440px] items-center gap-1 px-4 sm:px-6 lg:h-[72px] lg:px-10">

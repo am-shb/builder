@@ -109,6 +109,23 @@ describe("the landing page", () => {
     }
   });
 
+  it("the hero's loop can be paused and played again (WCAG 2.2.2)", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    const scene = document.querySelector(".scene")!;
+    expect(scene.hasAttribute("data-paused")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Pause animation" }));
+    expect(scene.hasAttribute("data-paused")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Play animation" }));
+    expect(scene.hasAttribute("data-paused")).toBe(false);
+  });
+
+  it("with reduced motion there is nothing to pause, so no pause button", () => {
+    useScreen({ ...PHONE, reducedMotion: true });
+    render(<LandingPage />);
+    expect(screen.queryByRole("button", { name: /animation/ })).toBeNull();
+  });
+
   it("without reduced motion, the hero starts from the beginning", () => {
     render(<LandingPage />);
     const shown = [...document.querySelectorAll(".scene [data-on]")].map((el) => el.textContent ?? "");

@@ -9,9 +9,7 @@ export function HowItWorks() {
   return (
     <Section id="how-it-works" className="bg-plate/40">
       <SectionHeader id="how-it-works" eyebrow={C.eyebrow} title={C.title} lead={C.lead} />
-      <ol className="relative mt-14 mb-0 grid list-none gap-5 p-0 md:mt-16 lg:grid-cols-3 lg:gap-6">
-        {/* The thread between the steps, on wide screens. */}
-        <li aria-hidden="true" className="pointer-events-none absolute top-[2.85rem] right-[16%] left-[16%] hidden border-t-2 border-dashed border-primary/30 lg:block" />
+      <ol className="mt-14 mb-0 grid list-none gap-5 p-0 md:mt-16 lg:grid-cols-3 lg:gap-6">
         {C.items.map((step, i) => (
           <Reveal as="li" key={step.title} delay={i * 120} className="step relative flex min-w-0 flex-col rounded-panel bg-surface p-6 shadow-elevated ring-1 ring-hair sm:p-7">
             <span aria-hidden="true" className="step-num relative grid size-12 place-items-center rounded-full bg-surface text-[17px] font-bold text-accent-ink">

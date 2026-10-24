@@ -3,7 +3,8 @@
 //   npm run landing-layout -w @builder/web -- 1440    only cases whose label contains "1440"
 // At each width (and at 125% and 150% zoom, as fewer CSS pixels) it scrolls through the page so every part is shown,
 // then fails on: sideways scrolling; any two visible texts overlapping; any text off the screen; the hero's headline
-// leaving its column, running past three lines, or any hero text touching the scene. Each width runs twice: with
+// leaving its column, running past three lines, or any hero text touching the scene; and any pill-shaped button or
+// link whose words wrap. Each width runs twice: with
 // reduced motion (the still frames) and with motion, in the hero's busiest moment. Every request but the dev
 // server's is blocked. Never run by `npm test`.
 import { existsSync } from "node:fs";
@@ -99,6 +100,20 @@ try {
       const navItems = [...document.querySelectorAll("header nav a, header nav button")].filter(shown);
       for (let i = 0; i < navItems.length; i++) for (let j = i + 1; j < navItems.length; j++) {
         if (hit(navItems[i]!.getBoundingClientRect(), navItems[j]!.getBoundingClientRect())) out.push(`header ${name(navItems[i]!)} overlaps ${name(navItems[j]!)}`);
+      }
+
+      // Every pill (a button or a link drawn as one) fits its words on one line.
+      for (const pill of [...document.querySelectorAll("a.rounded-full, button.rounded-full")].filter(shown)) {
+        // Only its visible words: not its icon, not a label for screen readers.
+        const walker = document.createTreeWalker(pill, NodeFilter.SHOW_TEXT);
+        const tops = new Set<number>();
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent!.trim() || !shown(node.parentElement!)) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const r of range.getClientRects()) if (r.width > 1) tops.add(Math.round(r.top / 6));
+        }
+        if (tops.size > 1) out.push(`${name(pill)} wraps onto ${tops.size} lines`);
       }
 
       // The hero: the headline stays in its column, at most three lines; no hero text touches the scene.

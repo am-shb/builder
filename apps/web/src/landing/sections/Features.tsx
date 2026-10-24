@@ -13,7 +13,7 @@ export function Features() {
   const f = C.items;
   return (
     <Section id="features">
-      <SectionHeader id="features" eyebrow={C.eyebrow} title={C.title} lead={C.lead} />
+      <SectionHeader id="features" eyebrow={C.eyebrow} title={C.title} lead={C.lead} align="start-lg" />
       <div ref={ref} data-live={live || undefined} className="bento mt-14 grid gap-4 md:mt-16 md:grid-cols-2 lg:grid-cols-6 lg:gap-5">
         <Feature outer="lg:col-span-4" title={f.prototype.title} text={f.prototype.text} art={<PrototypeArt />} wide />
         <Feature outer="lg:col-span-2" title={f.grounded.title} text={f.grounded.text} art={<GroundedArt />} delay={80} />
@@ -31,7 +31,7 @@ function Feature({ title, text, art, outer, wide, banner, delay }: {
 }) {
   return (
     <Card outer={outer} delay={delay} className={cn("group flex flex-col overflow-hidden p-6 sm:p-7", banner && "lg:flex-row lg:items-center lg:gap-10")}>
-      <div aria-hidden="true" className={cn("art relative mb-6 overflow-hidden rounded-plate bg-plate/70 ring-1 ring-hair", wide ? "h-52 sm:h-60" : "h-44", banner && "lg:order-2 lg:mb-0 lg:h-36 lg:w-[46%] lg:shrink-0")}>
+      <div aria-hidden="true" className={cn("art relative mb-6 overflow-hidden rounded-plate bg-plate/70 ring-1 ring-hair", wide ? "h-48 sm:h-52" : "h-40", banner && "lg:order-2 lg:mb-0 lg:h-36 lg:w-[46%] lg:shrink-0")}>
         {art}
       </div>
       <div className={cn("min-w-0", banner && "lg:flex-1")}>

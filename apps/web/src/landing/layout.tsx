@@ -16,19 +16,21 @@ export function Section({ id, className, children }: { id: string; className?: s
 
 // A section's small label, its heading (the display font, like the hero's) and one line under it.
 export function SectionHeader({ id, eyebrow, title, lead, align = "center", className }: {
-  id: string; eyebrow: string; title: string; lead?: string; align?: "center" | "start"; className?: string;
+  id: string; eyebrow: string; title: string; lead?: string; align?: "center" | "start" | "start-lg"; className?: string;
 }) {
+  // "start-lg": centered on small screens, at the start from 1024px.
   return (
-    <Reveal className={cn("max-w-[46rem]", align === "center" ? "mx-auto text-center" : "", className)}>
-      <p className={cn("m-0 inline-flex items-center gap-2 text-sm font-semibold text-accent-ink", align === "center" && "justify-center")}>
+    <Reveal className={cn("max-w-[46rem]", align === "center" && "mx-auto text-center", align === "start-lg" && "max-lg:mx-auto max-lg:text-center", className)}>
+      <p className="m-0 inline-flex items-center gap-2 text-sm font-semibold text-accent-ink">
         <span aria-hidden="true" className="relative inline-block size-3">
           <span className="absolute inset-0 rounded-[4px] border-[1.5px] border-dashed border-primary/70" />
           <span className="absolute top-[3px] left-[3px] size-[9px] rounded-[3px] bg-primary" />
         </span>
         {eyebrow}
       </p>
-      <h2 id={`${id}-title`} className="display display-lg mt-4 mb-0">{title}</h2>
-      {lead && <p className={cn("mt-5 mb-0 text-lead text-pretty text-ink-2", align === "center" && "mx-auto max-w-[38em]")}>{lead}</p>}
+      {/* display-lg's settings, capped at 3rem here so no section head is larger than the hero's headline. */}
+      <h2 id={`${id}-title`} className="display display-lg mt-4 mb-0 text-[clamp(1.875rem,3.6vw,3rem)]">{title}</h2>
+      {lead && <p className={cn("mt-5 mb-0 text-lead text-pretty text-ink-2", align !== "start" && "mx-auto max-w-[38em]", align === "start-lg" && "lg:mx-0")}>{lead}</p>}
     </Reveal>
   );
 }
@@ -75,10 +77,19 @@ export function Card({ className, outer, children, as = "article", delay }: {
 }
 
 // Sets the pointer's position on the card under it, for the spotlight. One listener for the whole page.
+// At most once a frame, however fast the pointer moves.
+let spotlightFrame = 0;
+let spotlightEvent: { target: EventTarget | null; clientX: number; clientY: number } | null = null;
 export function trackSpotlight(e: { target: EventTarget | null; clientX: number; clientY: number }) {
-  const card = (e.target as Element | null)?.closest?.<HTMLElement>(".spotlight");
-  if (!card) return;
-  const box = card.getBoundingClientRect();
-  card.style.setProperty("--mx", `${e.clientX - box.left}px`);
-  card.style.setProperty("--my", `${e.clientY - box.top}px`);
+  spotlightEvent = { target: e.target, clientX: e.clientX, clientY: e.clientY };
+  if (spotlightFrame) return;
+  spotlightFrame = requestAnimationFrame(() => {
+    spotlightFrame = 0;
+    const ev = spotlightEvent;
+    const card = (ev?.target as Element | null)?.closest?.<HTMLElement>(".spotlight");
+    if (!ev || !card) return;
+    const box = card.getBoundingClientRect();
+    card.style.setProperty("--mx", `${ev.clientX - box.left}px`);
+    card.style.setProperty("--my", `${ev.clientY - box.top}px`);
+  });
 }
