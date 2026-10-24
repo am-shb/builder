@@ -50,7 +50,7 @@ export type RunToolsRequest = {
 };
 // stopReason is the model's stop_reason (null if the stream was cut off); dropped counts
 // tool calls discarded as unknown, incomplete, unparseable or schema-invalid.
-export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number; stopReason: string | null; dropped: number };
+export type RunToolsResult = { toolCalls: ToolCall[]; usage: Usage; ms: number; stopReason: string | null; dropped: number; truncated?: boolean };
 export type ModelPort = { runTools(req: RunToolsRequest): Promise<RunToolsResult> };
 
 type Log = (msg: string, fields?: Record<string, unknown>) => void;
@@ -117,6 +117,7 @@ export function createOpenRouterPort(
       let stopReason: string | null = null;
       let messageId: string | null = null;
       let started = false;
+      let truncated = false;
       // The SDK wraps an error thrown inside the stream listener and the catch below would take it
       // for a truncated stream, so keep the first one and rethrow it once the stream is done.
       let callbackError: { err: unknown } | null = null;
@@ -201,7 +202,8 @@ export function createOpenRouterPort(
           // A non-API SDK error after events started means the stream ended or broke
           // mid-way: keep the usage seen (the call was billed) and the completed tool calls.
           if (!started || !(err instanceof Anthropic.AnthropicError) || err instanceof Anthropic.APIError) throw err;
-          log("llm_stream_truncated", { loop: req.loop, model, id: messageId });
+          truncated = true;
+          log("llm_stream_truncated", { loop: req.loop, model, id: messageId, error: err instanceof Error ? err.constructor.name : "unknown" });
         }
       } finally {
         clearTimeout(deadline);
@@ -229,7 +231,7 @@ export function createOpenRouterPort(
         input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
         cache_read_tokens: usage.cacheReadTokens, cache_write_tokens: usage.cacheWriteTokens, cost_usd: usage.costUsd ?? null,
       });
-      return { toolCalls, usage, ms, stopReason, dropped };
+      return { toolCalls, usage, ms, stopReason, dropped, truncated };
     },
   };
 }

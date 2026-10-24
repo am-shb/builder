@@ -1042,3 +1042,98 @@ test("a confirmation whose speech fails is not marked confirmed, so the model ca
   await flush();
   assert.deepEqual(s.said, ["So: B. Everyone OK?"], "the model's own confirmation still opens");
 });
+
+// A port that reports a truncated stream (no completed tool call) for the calls in `cut`, else runs the script.
+function cuttingPort(cut: number[], script: (i: number, text: string) => ToolCall[]): ModelPort {
+  let i = 0;
+  return {
+    async runTools(req) {
+      await Promise.resolve();
+      const n = i++;
+      const usage = { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      if (cut.includes(n)) return { toolCalls: [], ms: 1, dropped: 1, stopReason: null, truncated: true, usage };
+      const text = (req.messages as { content: string }[]).map((m) => m.content).join("\n");
+      const toolCalls = script(n, text);
+      return { toolCalls, ms: 1, dropped: 0, stopReason: "tool_use", truncated: false, usage };
+    },
+  };
+}
+
+test("a truncated conversation turn with no tool call is run again once, with the same lines", async () => {
+  const s = await setup(cuttingPort([0], (_i, text) => {
+    const ids = [...text.matchAll(/\[(\d+)\] Amir/g)].map((m) => Number(m[1]));
+    return [updateBuild(handoff(ids))];
+  }));
+  await s.say("Amir", "Let's add a quick-add box at the top.");
+  await flush();
+  await flush();
+  assert.equal(s.requests.length, 2, "exactly two model calls");
+  assert.equal(s.handoffs.length, 1, "and one hand-off");
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.turn_retried")?.fields, { session_id: s.sessionId });
+});
+
+test("a second consecutive truncation is not retried again", async () => {
+  const s = await setup(cuttingPort([0, 1, 2, 3], () => []));
+  await s.say("Amir", "Let's add a quick-add box at the top.");
+  await flush();
+  await flush();
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.logs.filter((l) => l.msg === "conversation.turn_retried").length, 1);
+  assert.equal(s.handoffs.length, 0);
+});
+
+// c1 resolved with B by Mohammad just now, and no comparison on screen.
+function resolvedSetup(s: Awaited<ReturnType<typeof setup>>) {
+  s.rt.setDoc(conflictDoc());
+  s.rt.resolveComparison("c1", "B", ["Mohammad"]);
+}
+
+test("a late agreement with a pick made seconds ago is handed off, grounded in that line", async () => {
+  const s = await setup([[]]);
+  resolvedSetup(s);
+  s.advance(6000);
+  const id = await s.say("Amir", "Agreed, B it is");
+  assert.equal(s.handoffs.length, 1);
+  assert.deepEqual(s.handoffs[0].topics[0].resolvedChoice, { conflictId: "c1", winner: "B" });
+  assert.deepEqual(s.handoffs[0].groundingIds, [id]);
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.late_agree")?.fields, { session_id: s.sessionId, decision_id: "d-c1" });
+  assert.equal(s.logs.some((l) => l.msg === "conversation.spoken_pick"), false);
+});
+
+test("no late agreement after 20 s, for another label, from the bot, or when already agreed", async () => {
+  const s = await setup([[]]);
+  resolvedSetup(s);
+  s.advance(5000);
+  await s.say("Amir", "Agreed, A it is");
+  await s.say("Builder", "B it is");
+  await s.say("Mohammad", "B it is");
+  assert.equal(s.handoffs.length, 0, "wrong label, the bot, and someone who already agrees");
+  s.advance(20_000);
+  await s.say("Amir", "Agreed, B it is");
+  assert.equal(s.handoffs.length, 0, "past 20 s");
+  assert.equal(s.logs.filter((l) => l.msg === "conversation.late_agree").length, 0);
+});
+
+test("a late agreement is handed off once per speaker", async () => {
+  const s = await setup([[]]);
+  resolvedSetup(s);
+  s.handoffHooks.push((h) => {
+    const rt = s.rt;
+    const doc = (rt.snapshot() as Snapshot).doc;
+    if (h.topics[0].resolvedChoice) rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => d.id === "d-c1" ? { ...d, agreedBy: [...d.agreedBy, "Amir"] } : d) });
+  });
+  s.advance(3000);
+  await s.say("Amir", "B it is");
+  await s.say("Amir", "yes, B");
+  assert.equal(s.handoffs.length, 1);
+});
+
+test("no confirmation is spoken when the call ends while the pick is being taken", async () => {
+  const s = await setup([[]]);
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  s.loop.onBotEnded(s.sessionId);
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
+});

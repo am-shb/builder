@@ -143,6 +143,14 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
 }
 
 // Ids a batch adds or changes (removals and screen switches leave nothing to mark).
+// Ids of the Screens in a prototype.
+function screenIds(proto: Prototype): Set<string> {
+  const ids = new Set<string>();
+  const walk = (n: UiNode) => { if (n.type === "Screen") ids.add(n.id); n.children.forEach(walk); };
+  walk(proto.root);
+  return ids;
+}
+
 function touchedIds(batch: PatchBatch): string[] {
   const ids: string[] = [];
   for (const op of batch.ops) {
@@ -324,7 +332,19 @@ export function createBuildLoop(deps: {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };
       }
-      if (conflict?.status !== "open") return { kind: "settled" };
+      if (conflict?.status !== "open") {
+        // Someone agreeing with a pick that is already made: heard in these lines, they agree with its decision.
+        if (conflict?.winner === choice.winner) {
+          const now = view(rt).doc;
+          const id = `d-${choice.conflictId}`;
+          const decision = now.decisions.find((d) => d.id === id);
+          const added = [...speakers].filter((n) => decision && !decision.agreedBy.includes(n));
+          if (decision && added.length) {
+            rt.setDoc({ ...now, decisions: now.decisions.map((d) => (d.id === id ? { ...d, agreedBy: [...d.agreedBy, ...added] } : d)) });
+          }
+        }
+        return { kind: "settled" };
+      }
       const variant = conflict.variants.find((v) => v.label === choice.winner);
       const after = view(rt).doc;
       const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
@@ -454,7 +474,7 @@ export function createBuildLoop(deps: {
     const priorBackers = view(rt).doc.decisions
       .filter((d) => d.status === "draft" || d.status === "pending")
       .map((d) => ({ names: [d.proposedBy, ...d.agreedBy], affects: d.affects }));
-    const grounded = enforceGrounding(ops, speakers, priorBackers);
+    const grounded = enforceGrounding(ops, speakers, priorBackers, screenIds(view(rt).proto));
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
     const planned = applyConsensusOps(current, grounded.ops, clock(), view(rt).proto).doc;

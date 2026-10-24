@@ -43,6 +43,9 @@ export const FALLBACK_OPENING = "Hi, I'm Builder. I'll listen and sketch; say my
 
 const SYSTEM = readFileSync(new URL("./prompts/conversation.md", import.meta.url), "utf8");
 
+// How long after a pick a spoken agreement with it still counts.
+const LATE_AGREE_MS = 20_000;
+
 export const SPEAK_REASONS = ["opening", "answer", "stuck", "confirm_conflict", "command_feedback"] as const;
 export type SpeakReason = (typeof SPEAK_REASONS)[number];
 
@@ -486,7 +489,11 @@ export function createConversationLoop(deps: {
     if (fresh) fresh.shown = true;
     try {
       try {
-        await modelTurn(sessionId, st, turn, now);
+        // A broken stream that completed no tool call is run again, once, on the same lines.
+        if (await modelTurn(sessionId, st, turn, now)) {
+          log("conversation.turn_retried", { session_id: sessionId });
+          await modelTurn(sessionId, st, turn, clock());
+        }
       } catch (err) {
         log("conversation.turn_failed", { session_id: sessionId, trigger: turn.trigger.split(":")[0], error: errorCode(err) });
       }
@@ -504,7 +511,7 @@ export function createConversationLoop(deps: {
     }
   }
 
-  async function modelTurn(sessionId: string, st: SessionState, turn: Turn, now: number) {
+  async function modelTurn(sessionId: string, st: SessionState, turn: Turn, now: number): Promise<boolean> {
     const snap = view(sessionId);
     const open = openReasons(st, turn, snap.doc, now);
     const work: TurnWork = { handled: new Set(), handoffs: 0, commands: 0, handoffMs: null, queued: null };
@@ -524,7 +531,7 @@ export function createConversationLoop(deps: {
     // The call ended while the model was thinking: its answer is too late to act on.
     if (ended.has(sessionId)) {
       log("conversation.turn_discarded", { session_id: sessionId, reason: "ended", tool_calls: result.toolCalls.length });
-      return;
+      return false;
     }
     const spoke = await apply(sessionId, st, turn, result, work, now);
     log("conversation.turn", {
@@ -533,6 +540,7 @@ export function createConversationLoop(deps: {
       lines: st.lines.length, handoffs: work.handoffs, commands: work.commands, spoke,
       queued_ms: turn.queuedMs, handoff_ms: work.handoffMs,
     });
+    return result.truncated === true && result.toolCalls.length === 0;
   }
 
   function pollSessions(now: number) {
@@ -570,7 +578,7 @@ export function createConversationLoop(deps: {
       const now = clock();
       const c = doc.conflicts.find((x) => x.id === conflictId);
       if (!c || c.status !== "resolved" || c.winner !== winner || !freshResolutions(st, doc, now).includes(conflictId)) return;
-      if (speech.speaking(sessionId)) return;
+      if (ended.has(sessionId) || speech.speaking(sessionId)) return;
       st.confirmed.add(conflictId);
       let said = false;
       try {
@@ -585,13 +593,35 @@ export function createConversationLoop(deps: {
     }
   }
 
+  // "Agreed, B it is" a few seconds after the room's pick closed the comparison: the speaker agrees with that
+  // decision. Handed to the build loop as the same pick, grounded in this line; it adds them to the decision.
+  const lateAgree = (sessionId: string, doc: ConsensusDoc, eventId: number, speaker: string, text: string) => {
+    const now = clock();
+    for (const c of doc.conflicts) {
+      const decision = doc.decisions.find((d) => d.id === `d-${c.id}`);
+      if (c.status !== "resolved" || !c.winner || !decision || decision.decidedAt === undefined) continue;
+      if (now - decision.decidedAt > LATE_AGREE_MS || decision.agreedBy.includes(speaker)) continue;
+      if (matchSpokenPick(text, [c.winner]) !== c.winner) continue;
+      log("conversation.late_agree", { session_id: sessionId, decision_id: decision.id });
+      buildLoop.handoff(sessionId, {
+        topics: [{ title: "Pick", task: `Agreement with option ${c.winner}`, proposals: [], questionsRaised: [], resolvedChoice: { conflictId: c.id, winner: c.winner } }],
+        mood: "converging", groundingIds: [eventId],
+      });
+      return;
+    }
+  };
+
   // A person's line that plainly picks an option shown on screen goes straight to the build loop, grounded in
   // that line, without waiting for the model to notice. The line still gets its normal turn. Never throws.
   const spokenPick = (sessionId: string, eventId: number, speaker: string | null, text: string) => {
     if (!speaker) return;
     try {
-      const comparison = view(sessionId).comparison;
-      if (!comparison) return;
+      const snap = view(sessionId);
+      const comparison = snap.comparison;
+      if (!comparison) {
+        lateAgree(sessionId, snap.doc, eventId, speaker, text);
+        return;
+      }
       const winner = matchSpokenPick(text, comparison.variants.map((v) => v.label));
       if (!winner) return;
       log("conversation.spoken_pick", { session_id: sessionId, conflict_id: comparison.conflictId, winner });

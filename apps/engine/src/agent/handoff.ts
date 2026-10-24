@@ -136,13 +136,21 @@ export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<strin
 /** Who stands behind a still-open decision, and the node ids it affects. */
 export type PriorBacking = { names: string[]; affects: string[] };
 
-const nodeIds = (n: { id: string; children?: unknown[] }): string[] => [n.id, ...(n.children ?? []).flatMap((c) => nodeIds(c as { id: string; children?: unknown[] }))];
-// Node ids a variant's patches add, update, remove or move.
-function touchedIds(batch: ToolPatchBatch): Set<string> {
+// Node ids a variant's patches add, update, remove or move. The App root and Screens are too broad to show
+// that a decision is about the same thing, and an update that changes no prop and no decision touches nothing.
+function touchedIds(batch: ToolPatchBatch, screens: Set<string>): Set<string> {
   const ids = new Set<string>();
+  const broad = (id: string) => id === "app" || screens.has(id);
   for (const op of batch.ops) {
-    if (op.op === "add") for (const id of nodeIds(op.node)) ids.add(id);
-    else if (op.op === "update" || op.op === "remove" || op.op === "move") ids.add(op.id);
+    if (op.op === "add") {
+      const collect = (n: { id: string; type?: string; children?: unknown[] }) => {
+        if (n.type !== "Screen" && !broad(n.id)) ids.add(n.id);
+        for (const c of n.children ?? []) collect(c as typeof n);
+      };
+      collect(op.node);
+    } else if (op.op === "update") {
+      if ((op.props !== undefined || op.decisionId !== undefined) && !broad(op.id)) ids.add(op.id);
+    } else if ((op.op === "remove" || op.op === "move") && !broad(op.id)) ids.add(op.id);
   }
   return ids;
 }
@@ -154,7 +162,7 @@ function touchedIds(batch: ToolPatchBatch): Set<string> {
  * may also be people who proposed or backed a still-open decision in an earlier hand-off (grounded when
  * recorded) that affects nodes the variant itself touches (`prior`). `dropped` counts ops, backers and credits removed.
  */
-export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, prior: PriorBacking[] = []): { ops: ConsensusUpdate[]; dropped: number } {
+export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, prior: PriorBacking[] = [], screenIds: Set<string> = new Set()): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
   const kept: ConsensusUpdate[] = [];
   for (const op of ops) {
@@ -165,7 +173,7 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     }
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
-        const touched = touchedIds(v.batch);
+        const touched = touchedIds(v.batch, screenIds);
         const earlier = new Set(prior.filter((p) => p.affects.some((a) => touched.has(a))).flatMap((p) => p.names));
         const backers = v.backers.filter((b) => groundingSpeakers.has(b) || earlier.has(b));
         const credit = groundCredit(v.batch, groundingSpeakers);

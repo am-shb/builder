@@ -1570,3 +1570,42 @@ test("a spoken pick followed by a model hand-off carrying the same pick resolves
   assert.equal(s.doc().decisions.filter((d) => d.id === "d-c-top").length, 1);
   assert.equal(s.sent.filter((e) => e.type === "resolve").length, 1);
 });
+
+test("a hand-off repeating a pick already made adds its grounded speaker to the decision, once", async () => {
+  const s = await setup([[], []]);
+  s.rt.setDoc({ ...s.doc(), conflicts: [{ id: "c1", topic: "T", status: "open", openedAt: 0, variants: [
+    { label: "A", summary: "a", backers: ["Sara"], batch: { label: "A", ops: [] } },
+    { label: "B", summary: "b", backers: ["Bob"], batch: { label: "B", ops: [] } },
+  ] }] });
+  s.rt.resolveComparison("c1", "B", ["Sara"]);
+  const pick = (id: number, winner: "A" | "B") => handoff([id], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner } }] });
+  s.loop.handoff(s.sessionId, pick(await s.say("Amir", "Agreed, B it is"), "B"));
+  await flush();
+  const d = () => s.doc().decisions.find((x) => x.id === "d-c1")!;
+  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"]);
+  s.loop.handoff(s.sessionId, pick(await s.say("Amir", "yes B"), "B"));
+  await flush();
+  await s.timers.advance(30_000);
+  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"], "not twice");
+  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "A it is"), "A"));
+  await flush();
+  await s.timers.advance(30_000);
+  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"], "a different winner than the decision's adds nobody");
+});
+
+test("prior backers are not accepted through the App root, a Screen, or an update that changes nothing", () => {
+  const variant = (ops: unknown[]) => [{ op: "add_conflict", id: "c1", topic: "T", variants: [
+    conflictVariant("A", "a", ["Rita"], ops), conflictVariant("B", "b", ["Omid"], [addNode("home", "home.x", "Badge")]),
+  ] }] as unknown as ConsensusUpdate[];
+  const backersOfA = (ops: unknown[], affects: string[]) => {
+    const r = enforceGrounding(variant(ops), new Set(["Omid"]), [{ names: ["Rita"], affects }], new Set(["home"]));
+    return (r.ops[0] as Extract<ConsensusUpdate, { op: "add_conflict" }>).variants[0].backers;
+  };
+  const upd = (id: string, extra: object = {}) => ({ op: "update", id, ...extra });
+  assert.deepEqual(backersOfA([upd("app", { props: [{ key: "title", value: "x" }] })], ["app"]), [], "the App root");
+  assert.deepEqual(backersOfA([upd("home", { props: [{ key: "title", value: "x" }] })], ["home"]), [], "a Screen id");
+  assert.deepEqual(backersOfA([addNode("home", "scr2", "Screen")], ["scr2"]), [], "an added Screen");
+  assert.deepEqual(backersOfA([upd("home.card")], ["home.card"]), [], "an update with no props and no decisionId");
+  assert.deepEqual(backersOfA([upd("home.card", { props: [{ key: "title", value: "x" }] })], ["home.card"]), ["Rita"], "a real update counts");
+  assert.deepEqual(backersOfA([upd("home.card", { decisionId: "d1" })], ["home.card"]), ["Rita"], "a decisionId update counts");
+});

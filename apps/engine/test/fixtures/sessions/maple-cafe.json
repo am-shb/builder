@@ -4,7 +4,7 @@
     { "t": 6000, "speaker": "Amir Shahbandegan", "text": "Hey Builder, we're designing the mobile ordering app for Maple Café, our coffee chain." },
     { "t": 11000, "speaker": "Amir Shahbandegan", "text": "The home screen shows today's menu as photo cards with prices: oat latte, butter croissant, breakfast plate and a grain bowl." },
     { "t": 18000, "speaker": "Mohammad Amin Shamshiri", "text": "Make it a phone app, with the Maple Café name at the top." },
-    { "t": 24000, "speaker": "Omid Omidi", "text": "Looks great. I'm happy with that menu.", "shot": "beat1" },
+    { "t": 24000, "speaker": "Omid Omidi", "text": "Looks great. I'm happy with the menu and the phone layout.", "shot": "beat1" },
     { "t": 32000, "speaker": "Amin Fadaeinejad", "text": "The top of the home screen should sell our fall special, the maple latte. It has double the margin of anything else." },
     { "t": 39000, "speaker": "Omid Omidi", "text": "I disagree. Sixty eight percent of our orders are repeat orders. The top should be Order again, with your usual and a one tap reorder button." },
     { "t": 47000, "speaker": "Amin Fadaeinejad", "text": "But nobody finds the special if it's buried.", "shot": "beat2" },
