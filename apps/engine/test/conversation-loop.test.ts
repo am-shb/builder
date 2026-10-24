@@ -55,8 +55,12 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
   const port: ModelPort = { runTools(req) { requests.push(req); return inner.runTools(req); } };
   const handoffs: Handoff[] = [];
   const handoffHooks: ((h: Handoff) => void)[] = [];
-  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> | null } =
-    { handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); } };
+  const lateAgrees: { conflictId: string; winner: string; lineId: number }[] = [];
+  const buildLoop: { handoff(sid: string, h: Handoff): void; taken?(sid: string): Promise<void> | null; lateAgree?(sid: string, a: { conflictId: string; winner: "A" | "B" | "C"; lineId: number }): Promise<boolean> } =
+    {
+      handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); },
+      lateAgree: async (_sid, a) => { lateAgrees.push(a); return true; },
+    };
   const said: string[] = [];
   const stops: string[] = [];
   const speech: Speech = { say: async (_sid, text) => { if (opts.failSpeech?.on) throw new Error("speech down"); said.push(text); return `u${said.length}`; }, stop: (sid) => { stops.push(sid); }, speaking: () => false };
@@ -72,7 +76,7 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
     return e.id;
   };
   return {
-    opts, store, sessionId, rt, loop, requests, buildLoop, handoffs, handoffHooks, said, stops, logs, sent, say,
+    opts, store, sessionId, rt, loop, requests, buildLoop, lateAgrees, handoffs, handoffHooks, said, stops, logs, sent, say,
     advance: (ms: number) => { t += ms; return t; },
     now: () => t,
     mood: () => (rt.snapshot() as Snapshot).mood,
@@ -1088,16 +1092,15 @@ function resolvedSetup(s: Awaited<ReturnType<typeof setup>>) {
   s.rt.resolveComparison("c1", "B", ["Mohammad"]);
 }
 
-test("a late agreement with a pick made seconds ago is handed off, grounded in that line", async () => {
+test("a late agreement with a pick made seconds ago is passed to the build loop with the line id", async () => {
   const s = await setup([[]]);
   resolvedSetup(s);
   s.advance(6000);
   const id = await s.say("Amir", "Agreed, B it is");
-  assert.equal(s.handoffs.length, 1);
-  assert.deepEqual(s.handoffs[0].topics[0].resolvedChoice, { conflictId: "c1", winner: "B" });
-  assert.deepEqual(s.handoffs[0].groundingIds, [id]);
+  await flush();
+  assert.deepEqual(s.lateAgrees, [{ conflictId: "c1", winner: "B", lineId: id }]);
+  assert.equal(s.handoffs.length, 0, "no resolvedChoice hand-off");
   assert.deepEqual(s.logs.find((l) => l.msg === "conversation.late_agree")?.fields, { session_id: s.sessionId, decision_id: "d-c1" });
-  assert.equal(s.logs.some((l) => l.msg === "conversation.spoken_pick"), false);
 });
 
 test("no late agreement after 20 s, for another label, from the bot, or when already agreed", async () => {
@@ -1107,31 +1110,43 @@ test("no late agreement after 20 s, for another label, from the bot, or when alr
   await s.say("Amir", "Agreed, A it is");
   await s.say("Builder", "B it is");
   await s.say("Mohammad", "B it is");
-  assert.equal(s.handoffs.length, 0, "wrong label, the bot, and someone who already agrees");
   s.advance(20_000);
   await s.say("Amir", "Agreed, B it is");
-  assert.equal(s.handoffs.length, 0, "past 20 s");
-  assert.equal(s.logs.filter((l) => l.msg === "conversation.late_agree").length, 0);
+  await flush();
+  assert.deepEqual(s.lateAgrees, []);
 });
 
-test("a late agreement is handed off once per speaker", async () => {
+test("every recently resolved conflict is considered, not just the first", async () => {
   const s = await setup([[]]);
-  resolvedSetup(s);
-  s.handoffHooks.push((h) => {
-    const rt = s.rt;
-    const doc = (rt.snapshot() as Snapshot).doc;
-    if (h.topics[0].resolvedChoice) rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => d.id === "d-c1" ? { ...d, agreedBy: [...d.agreedBy, "Amir"] } : d) });
-  });
+  const doc = conflictDoc();
+  doc.conflicts.push({ ...doc.conflicts[0], id: "c2", variants: doc.conflicts[0].variants.map((v) => ({ ...v })) });
+  s.rt.setDoc(doc);
+  s.rt.resolveComparison("c1", "A", ["Mohammad"]);
+  s.rt.resolveComparison("c2", "B", ["Mohammad"]);
   s.advance(3000);
-  await s.say("Amir", "B it is");
-  await s.say("Amir", "yes, B");
-  assert.equal(s.handoffs.length, 1);
+  const id = await s.say("Amir", "B it is");
+  await flush();
+  assert.deepEqual(s.lateAgrees, [{ conflictId: "c2", winner: "B", lineId: id }]);
 });
 
-test("no confirmation is spoken when the call ends while the pick is being taken", async () => {
-  const s = await setup([[]]);
-  pickSetup(s);
-  await s.say("Sara", "let's go with B");
+test("nothing is spoken when the call ends while a turn waits for a pick to be taken", async () => {
+  const s = await setup(fnPort((i, text) => {
+    if (i !== 1) return [];
+    const ids = [...text.matchAll(/\[(\d+)\] Sara/g)].map((m) => Number(m[1]));
+    return [speak("So: B. Everyone OK?", "confirm_conflict"),
+      updateBuild(handoff(ids, { topics: [{ title: "Done tasks", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }] }))];
+  }));
+  s.rt.setDoc(conflictDoc());
+  let taken: Promise<void> | null = null;
+  s.buildLoop.taken = () => taken;
+  s.handoffHooks.push((h) => {
+    const c = h.topics[0]?.resolvedChoice;
+    if (c) taken = new Promise<void>((r) => setTimeout(r, 20)).then(() => { s.rt.resolveComparison(c.conflictId, c.winner); taken = null; });
+  });
+  await s.say("Amir", "Hmm, not sure.");
+  await flush();
+  await s.say("Sara", "Let's go with B.");
+  await flush();
   s.loop.onBotEnded(s.sessionId);
   await new Promise((r) => setTimeout(r, 40));
   await flush();

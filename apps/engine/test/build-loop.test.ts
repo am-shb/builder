@@ -1571,26 +1571,49 @@ test("a spoken pick followed by a model hand-off carrying the same pick resolves
   assert.equal(s.sent.filter((e) => e.type === "resolve").length, 1);
 });
 
-test("a hand-off repeating a pick already made adds its grounded speaker to the decision, once", async () => {
-  const s = await setup([[], []]);
+async function resolvedPick(s: Awaited<ReturnType<typeof setup>>) {
   s.rt.setDoc({ ...s.doc(), conflicts: [{ id: "c1", topic: "T", status: "open", openedAt: 0, variants: [
     { label: "A", summary: "a", backers: ["Sara"], batch: { label: "A", ops: [] } },
     { label: "B", summary: "b", backers: ["Bob"], batch: { label: "B", ops: [] } },
   ] }] });
   s.rt.resolveComparison("c1", "B", ["Sara"]);
-  const pick = (id: number, winner: "A" | "B") => handoff([id], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner } }] });
-  s.loop.handoff(s.sessionId, pick(await s.say("Amir", "Agreed, B it is"), "B"));
+}
+const agreedBy = (s: Awaited<ReturnType<typeof setup>>) => s.doc().decisions.find((x) => x.id === "d-c1")!.agreedBy;
+
+test("lateAgree adds exactly the speaker of a stored line that names the winner, once, within 20 s", async () => {
+  const s = await setup([[]]);
+  await resolvedPick(s);
+  await s.timers.advance(6000);
+  const id = await s.say("Amir", "Agreed, B it is");
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: id }), true);
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara", "Amir"]);
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: id }), false, "once");
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara", "Amir"]);
+});
+
+test("lateAgree adds nobody for a line that does not pick the winner, a bot line, a wrong winner or a late line", async () => {
+  const s = await setup([[]]);
+  await resolvedPick(s);
+  await s.timers.advance(6000);
+  const other = await s.say("Lee", "I don't like it, can we talk about the header?");
+  const wrong = await s.say("Lee", "A it is");
+  const bot = await s.say("Builder", "B it is");
+  for (const lineId of [other, wrong, bot]) await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId });
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "A", lineId: wrong }), false, "A is not the winner");
+  await s.timers.advance(20_000);
+  const late = await s.say("Lee", "B it is");
+  assert.equal(await s.loop.lateAgree(s.sessionId, { conflictId: "c1", winner: "B", lineId: late }), false, "past 20 s");
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara"]);
+});
+
+test("a model-originated hand-off repeating the pick adds nobody to the decision", async () => {
+  const s = await setup([[], []]);
+  await resolvedPick(s);
+  const pick = handoff([await s.say("Lee", "I object to B, honestly")], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }] });
+  s.loop.handoff(s.sessionId, pick);
   await flush();
-  const d = () => s.doc().decisions.find((x) => x.id === "d-c1")!;
-  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"]);
-  s.loop.handoff(s.sessionId, pick(await s.say("Amir", "yes B"), "B"));
-  await flush();
-  await s.timers.advance(30_000);
-  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"], "not twice");
-  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "A it is"), "A"));
-  await flush();
-  await s.timers.advance(30_000);
-  assert.deepEqual(d().agreedBy, ["Bob", "Sara", "Amir"], "a different winner than the decision's adds nobody");
+  await s.timers.advance(5000);
+  assert.deepEqual(agreedBy(s), ["Bob", "Sara"]);
 });
 
 test("prior backers are not accepted through the App root, a Screen, or an update that changes nothing", () => {

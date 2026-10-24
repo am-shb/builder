@@ -21,6 +21,7 @@ import type { Log, SessionRuntime } from "../session/runtime.ts";
 import type { BuildTask, StageEvent } from "../stage/channel.ts";
 import type { Store, StoredEvent } from "../store.ts";
 import { errorCode } from "../error-code.ts";
+import { matchSpokenPick } from "./spoken-pick.ts";
 import { DEFAULT_THEME_VALUES, THEME_SLOTS } from "../../public/renderer/theme.js";
 
 export const RUN_FLOOR_MS = 3_000;
@@ -29,6 +30,8 @@ export const PLEASED_MS = 2_000;
 export const TASK_DONE_MS = 3_000;
 const TASK_MAX = 40;
 const LABEL_MAX = 60;
+// How long after a pick a spoken agreement with it still counts.
+export const LATE_AGREE_MS = 20_000;
 
 // Built once at module load, so the text is identical on every call and the prompt cache hits.
 const SYSTEM = buildSystemPrompt();
@@ -142,7 +145,6 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
   ].join("\n\n");
 }
 
-// Ids a batch adds or changes (removals and screen switches leave nothing to mark).
 // Ids of the Screens in a prototype.
 function screenIds(proto: Prototype): Set<string> {
   const ids = new Set<string>();
@@ -151,6 +153,7 @@ function screenIds(proto: Prototype): Set<string> {
   return ids;
 }
 
+// Ids a batch adds or changes (removals and screen switches leave nothing to mark).
 function touchedIds(batch: PatchBatch): string[] {
   const ids: string[] = [];
   for (const op of batch.ops) {
@@ -332,19 +335,7 @@ export function createBuildLoop(deps: {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };
       }
-      if (conflict?.status !== "open") {
-        // Someone agreeing with a pick that is already made: heard in these lines, they agree with its decision.
-        if (conflict?.winner === choice.winner) {
-          const now = view(rt).doc;
-          const id = `d-${choice.conflictId}`;
-          const decision = now.decisions.find((d) => d.id === id);
-          const added = [...speakers].filter((n) => decision && !decision.agreedBy.includes(n));
-          if (decision && added.length) {
-            rt.setDoc({ ...now, decisions: now.decisions.map((d) => (d.id === id ? { ...d, agreedBy: [...d.agreedBy, ...added] } : d)) });
-          }
-        }
-        return { kind: "settled" };
-      }
+      if (conflict?.status !== "open") return { kind: "settled" };
       const variant = conflict.variants.find((v) => v.label === choice.winner);
       const after = view(rt).doc;
       const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
@@ -767,6 +758,31 @@ export function createBuildLoop(deps: {
     // resolved (and the winner merged) only then. Commands and speech in the same turn wait for this.
     taken(sessionId: string): Promise<void> | null {
       return sessions.get(sessionId)?.intake ?? null;
+    },
+
+    // A person's line agreeing with a pick made seconds ago ("Agreed, B it is" once the comparison has closed).
+    // Adds that one speaker to the pick's decision, only if the stored line is theirs, names that winner and the
+    // decision is at most LATE_AGREE_MS old. Idempotent. Returns whether the decision changed.
+    async lateAgree(sessionId: string, a: { conflictId: string; winner: "A" | "B" | "C"; lineId: number }): Promise<boolean> {
+      try {
+        if (ended.has(sessionId)) return false;
+        const line = (await store.listEvents(sessionId)).find((e) => e.kind === "utterance" && e.id === a.lineId);
+        if (ended.has(sessionId) || !line?.text || !line.speaker || line.speaker === botName) return false;
+        if (matchSpokenPick(line.text, [a.winner]) !== a.winner) return false;
+        const rt = runtime(sessionId);
+        const doc = view(rt).doc;
+        const decision = doc.decisions.find((d) => d.id === `d-${a.conflictId}`);
+        const conflict = doc.conflicts.find((c) => c.id === a.conflictId);
+        if (!decision || conflict?.status !== "resolved" || conflict.winner !== a.winner) return false;
+        if (decision.decidedAt === undefined || clock() - decision.decidedAt > LATE_AGREE_MS) return false;
+        if (decision.agreedBy.includes(line.speaker)) return false;
+        const speaker = line.speaker;
+        rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => (d.id === decision.id ? { ...d, agreedBy: [...d.agreedBy, speaker] } : d)) });
+        return true;
+      } catch (err) {
+        log("build.late_agree_failed", { session_id: sessionId, error: errorCode(err) });
+        return false;
+      }
     },
 
     idle(sessionId: string): boolean {

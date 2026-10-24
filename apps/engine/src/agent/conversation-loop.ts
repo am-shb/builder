@@ -12,6 +12,7 @@ import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
 import { HandoffSchema, HandoffToolInput } from "./handoff.ts";
 import type { Handoff } from "./handoff.ts";
 import { matchSpokenPick } from "./spoken-pick.ts";
+import { LATE_AGREE_MS } from "./build-loop.ts";
 import { ADDRESS_RE, createStuckDetector } from "./stuck.ts";
 import type { StuckDetector, StuckEvent } from "./stuck.ts";
 import { findNode } from "../ui/tree.ts";
@@ -42,9 +43,6 @@ export const MAX_COMMAND_FOLLOW_UPS = 2;
 export const FALLBACK_OPENING = "Hi, I'm Builder. I'll listen and sketch; say my name if you need me.";
 
 const SYSTEM = readFileSync(new URL("./prompts/conversation.md", import.meta.url), "utf8");
-
-// How long after a pick a spoken agreement with it still counts.
-const LATE_AGREE_MS = 20_000;
 
 export const SPEAK_REASONS = ["opening", "answer", "stuck", "confirm_conflict", "command_feedback"] as const;
 export type SpeakReason = (typeof SPEAK_REASONS)[number];
@@ -224,7 +222,7 @@ function describeCommand(c: CommandRecord, now: number): string {
 export function createConversationLoop(deps: {
   port: ModelPort;
   runtime: (sessionId: string) => SessionRuntime;
-  buildLoop: { handoff(sessionId: string, h: Handoff): void; taken?(sessionId: string): Promise<void> | null };
+  buildLoop: { handoff(sessionId: string, h: Handoff): void; taken?(sessionId: string): Promise<void> | null; lateAgree?(sessionId: string, a: { conflictId: string; winner: "A" | "B" | "C"; lineId: number }): Promise<boolean> };
   speech: Speech;
   store: Store;
   clock: () => number;
@@ -405,6 +403,8 @@ export function createConversationLoop(deps: {
 
   // Says a line that passed the gate, then updates the window, the stuck detector and the mood.
   async function deliver(sessionId: string, st: SessionState, text: string, reason: SpeakReason, addressedAt: number | null): Promise<boolean> {
+    // Anything that waited before getting here (a pick being taken, a queue) may have outlived the call.
+    if (ended.has(sessionId)) return false;
     try {
       await speech.say(sessionId, text);
     } catch (err) {
@@ -578,7 +578,7 @@ export function createConversationLoop(deps: {
       const now = clock();
       const c = doc.conflicts.find((x) => x.id === conflictId);
       if (!c || c.status !== "resolved" || c.winner !== winner || !freshResolutions(st, doc, now).includes(conflictId)) return;
-      if (ended.has(sessionId) || speech.speaking(sessionId)) return;
+      if (speech.speaking(sessionId)) return;
       st.confirmed.add(conflictId);
       let said = false;
       try {
@@ -602,11 +602,10 @@ export function createConversationLoop(deps: {
       if (c.status !== "resolved" || !c.winner || !decision || decision.decidedAt === undefined) continue;
       if (now - decision.decidedAt > LATE_AGREE_MS || decision.agreedBy.includes(speaker)) continue;
       if (matchSpokenPick(text, [c.winner]) !== c.winner) continue;
-      log("conversation.late_agree", { session_id: sessionId, decision_id: decision.id });
-      buildLoop.handoff(sessionId, {
-        topics: [{ title: "Pick", task: `Agreement with option ${c.winner}`, proposals: [], questionsRaised: [], resolvedChoice: { conflictId: c.id, winner: c.winner } }],
-        mood: "converging", groundingIds: [eventId],
-      });
+      // The build loop re-reads the line and the clock itself; this is only the cheap pre-filter.
+      void buildLoop.lateAgree?.(sessionId, { conflictId: c.id, winner: c.winner, lineId: eventId }).then((added) => {
+        if (added) log("conversation.late_agree", { session_id: sessionId, decision_id: decision.id });
+      }, (err) => log("conversation.late_agree_failed", { session_id: sessionId, error: errorCode(err) }));
       return;
     }
   };
