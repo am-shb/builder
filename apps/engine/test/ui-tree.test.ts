@@ -431,7 +431,7 @@ test("the new expense fixture applies cleanly", () => {
   assert.equal(findNode(proto, "home.stat-spent")?.props.region, undefined);
 });
 
-describe("the offered catalog (ADR 0017)", () => {
+describe("the offered catalog (ADR 0018)", () => {
   const add = (id: string, type: string, parentId = "home", props: [string, string][] = []) =>
     ({ op: "add" as const, parentId, node: { id, type, props: props.map(([key, value]) => ({ key, value })) } });
 

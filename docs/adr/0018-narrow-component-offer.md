@@ -1,4 +1,4 @@
-# 0017: Offer the build model 15 components and no templates
+# 0018: Offer the build model 15 components and no templates
 
 - **Status:** accepted
 - **Date:** 2026-10-23
