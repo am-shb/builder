@@ -396,6 +396,18 @@
   mask-image: radial-gradient(110% 90% at 0 0, #000, transparent 70%);
 }
 
+/* Soft light behind the landing hero's scene and the sign-in card. Each spot fades out well inside the box, and the
+   box itself fades at its edges, so the light never ends in a visible line. */
+@layer components {
+  .hero-glow {
+    background:
+      radial-gradient(38% 40% at 58% 46%, var(--glow-a), transparent 100%),
+      radial-gradient(30% 34% at 32% 68%, var(--glow-b), transparent 100%),
+      radial-gradient(24% 26% at 74% 26%, var(--glow-c), transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+  }
+}
+
 /* Motion that answers a state: the live dot breathes, the joining ring turns. Off under reduced motion. */
 @keyframes breathe {
   50% {

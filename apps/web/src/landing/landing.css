@@ -156,16 +156,6 @@
     background-size: 16px 16px;
   }
 
-  /* Soft light behind the hero scene. Each spot fades out well inside the box, and the box itself fades at its
-     edges, so the light never ends in a visible line. */
-  .hero-glow {
-    background:
-      radial-gradient(38% 40% at 58% 46%, var(--glow-a), transparent 100%),
-      radial-gradient(30% 34% at 32% 68%, var(--glow-b), transparent 100%),
-      radial-gradient(24% 26% at 74% 26%, var(--glow-c), transparent 100%);
-    mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
-  }
-
   /* A card lifts a little on hover, and with a mouse a soft light follows the pointer across it. */
   .card-lift {
     transition: transform 280ms var(--ease-out), box-shadow 280ms var(--ease-out);
