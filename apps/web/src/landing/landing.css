@@ -1,8 +1,14 @@
 /* The landing page's motion (ADR 0017). Colors come from the tokens in globals.css. Everything that moves here stops
    under prefers-reduced-motion: the hero shows its last frame, reveals are already in place. */
 @layer base {
+  /* Moving to a section stops just under the sticky header; the section's own padding gives its heading room. */
   html:has(.landing) {
-    scroll-padding-top: 88px;
+    scroll-padding-top: 64px;
+  }
+  @media (min-width: 1024px) {
+    html:has(.landing) {
+      scroll-padding-top: 72px;
+    }
   }
   @media (prefers-reduced-motion: no-preference) {
     html:has(.landing) {
@@ -78,13 +84,6 @@
       radial-gradient(30% 34% at 32% 68%, var(--glow-b), transparent 100%),
       radial-gradient(24% 26% at 74% 26%, var(--glow-c), transparent 100%);
     mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
-  }
-
-  /* Sections below the hero are laid out and painted only when they come near the screen, so the first screen is
-     ready sooner on a slow phone. The size is a guess until a section has been shown once. */
-  .below-fold {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 1100px;
   }
 
   /* A card lifts a little on hover, and with a mouse a soft light follows the pointer across it. */
