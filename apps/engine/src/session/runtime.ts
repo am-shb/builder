@@ -5,7 +5,7 @@
 import { applyBatch as applyPatchBatch, emptyPrototype, findNode, findParent, UNTITLED_APP } from "../ui/tree.ts";
 import type { Change, PatchOp, Prototype, PatchBatch, Interaction, UiNode } from "../ui/schema.ts";
 import { emptyDoc, resolveConflict } from "../consensus/doc.ts";
-import { touchedNodeIds } from "../ui/touched.ts";
+import { screenIds, touchedNodeIds } from "../ui/touched.ts";
 import type { Conflict, ConsensusDoc } from "../consensus/doc.ts";
 import type { Store } from "../store.ts";
 import type { BuildTask, ComparisonView, StageEvent, StageSink } from "../stage/channel.ts";
@@ -176,9 +176,7 @@ function makeRuntime(
   // A node only a losing variant touched keeps the removed decision's id and stays a draft: the renderer
   // tolerates a decisionId with no decision, and nobody picked that node. Returns the re-tag changes.
   function supersede(conflict: Conflict, winner: string, retag: boolean): Change[] {
-    const screens = new Set<string>();
-    const screensOf = (n: UiNode) => { if (n.type === "Screen") screens.add(n.id); n.children.forEach(screensOf); };
-    screensOf(proto.root);
+    const screens = screenIds(proto);
     const touched = new Set<string>();
     // A move alone (making room) does not make a proposal about that node part of the choice.
     for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens, { moves: false })) touched.add(id);
@@ -307,7 +305,8 @@ function makeRuntime(
       doc = resolveConflict(doc, conflictId, winner, clock(), pickers).doc;
       if (r.ok) proto = r.proto;
       // The losing side's earlier proposals about the same nodes are settled by the pick: the room
-      // chose the other layout. Never adds anyone to agreedBy.
+      // chose the other layout. Their nodes the winner's batch touched are re-tagged to the picked decision,
+      // so promoting it can flip them agreed (only those); it never adds anyone to agreedBy.
       const retagged = supersede(conflict, winner, r.ok);
       const changes = [...(r.ok ? r.changes : []), ...retagged];
       // Only this conflict's comparison closes (the stage plays it out on "resolve"); then the next

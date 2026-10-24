@@ -14,6 +14,7 @@ import type { ConsensusUpdate, Handoff, Proposal } from "./handoff.ts";
 import { offeredOnly, patchBatchJsonSchema, ToolPatchBatch } from "../ui/schema.ts";
 import type { PatchBatch, PatchOp, Prototype, UiNode } from "../ui/schema.ts";
 import { findNode, fromToolBatch, themeStatusOp } from "../ui/tree.ts";
+import { screenIds } from "../ui/touched.ts";
 import { tickAgreement } from "../consensus/doc.ts";
 import type { ConsensusDoc, Decision } from "../consensus/doc.ts";
 import { buildComparisonView } from "../session/runtime.ts";
@@ -143,14 +144,6 @@ function userTurn(h: Handoff, grounding: StoredEvent[], doc: ConsensusDoc, proto
     `<consensus_doc>\n${JSON.stringify(doc)}\n</consensus_doc>`,
     `<prototype current_screen="${proto.currentScreen}">\n${themeLine(proto)}\n${JSON.stringify(proto.root)}\n</prototype>`,
   ].join("\n\n");
-}
-
-// Ids of the Screens in a prototype.
-function screenIds(proto: Prototype): Set<string> {
-  const ids = new Set<string>();
-  const walk = (n: UiNode) => { if (n.type === "Screen") ids.add(n.id); n.children.forEach(walk); };
-  walk(proto.root);
-  return ids;
 }
 
 // Ids a batch adds or changes (removals and screen switches leave nothing to mark).

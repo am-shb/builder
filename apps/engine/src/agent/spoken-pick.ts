@@ -38,7 +38,7 @@ const CLAUSES = /[.!?;,:]|\s(?:because|but|so|and)\s/;
 export function matchSpokenPick(text: string, labels: readonly string[]): "A" | "B" | "C" | null {
   if (/\?[\s.!?]*$/.test(text)) return null;
   if (/^\s*A[.!]*\s*$/.test(text)) return labels.includes("A") ? "A" : null;
-  const lower = text.toLowerCase().replace(/['’]/g, "");
+  const lower = text.toLowerCase().replace(/['\u2019]/g, "");
   if (HEDGE.test(lower)) return null;
   const picked = new Set<string>();
   for (const raw of lower.split(CLAUSES)) {

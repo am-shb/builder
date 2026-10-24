@@ -1,4 +1,12 @@
-import type { PatchBatch, ToolPatchBatch } from "./schema.ts";
+import type { PatchBatch, Prototype, ToolPatchBatch, UiNode } from "./schema.ts";
+
+// Ids of the Screens in a prototype: too broad to count as touched.
+export function screenIds(proto: Prototype): Set<string> {
+  const ids = new Set<string>();
+  const walk = (n: UiNode) => { if (n.type === "Screen") ids.add(n.id); n.children.forEach(walk); };
+  walk(proto.root);
+  return ids;
+}
 
 // Node ids a variant's patches add, update, remove or move. The App root and Screens are too broad to show
 // that a decision is about the same thing, and an update that changes no prop and no decision touches nothing.

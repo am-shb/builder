@@ -160,7 +160,7 @@
 /* Wide children (a table, a chart, a segmented control, the steps bar) cannot fit half a phone: they take the whole row.
    The important beats an inline span 1, which would otherwise leave them in one cell. */
 .b-app .b-phone .b-grid.is-cols-2 > :is(.b-table, .b-chartcard, .b-segmented, .b-steps) { grid-column: 1 / -1 !important; }
-/* Other grids are one column, so any inline span is cancelled (a 2-column Grid keeps its spans, which line 81 clamps). */
+/* Other grids are one column, so any inline span is cancelled (a 2-column Grid keeps its spans, which the .b-grid.is-cols-2 > [data-span] rule clamps). */
 .b-app .b-phone .b-grid:not(.is-cols-2) > * { grid-column: auto !important; }
 
 .b-screen {
