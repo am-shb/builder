@@ -8,6 +8,7 @@ import type { ModelPort, RunToolsRequest, RunToolsResult, ToolCall } from "../sr
 import { createBuildLoop, taskText, TASK_DONE_MS } from "../src/agent/build-loop.ts";
 import { toolJsonSchema } from "../src/agent/tool-schema.ts";
 import { enforceGrounding, HandoffSchema, sanitizeModelBatch } from "../src/agent/handoff.ts";
+import type { ConsensusUpdate } from "../src/agent/handoff.ts";
 import type { Handoff } from "../src/agent/handoff.ts";
 import { applyBatch, emptyPrototype, findNode, fromToolBatch } from "../src/ui/tree.ts";
 import { emptyDoc } from "../src/consensus/doc.ts";
@@ -240,7 +241,7 @@ test("enforceGrounding keeps conflict backers from priorBackers, and nothing els
   const conflict = { op: "add_conflict" as const, id: "c1", topic: "T", variants: [
     conflictVariant("A", "a", ["Amin", "Ghost"], []),
     conflictVariant("B", "b", ["Omid"], []),
-  ] };
+  ] } as unknown as Extract<ConsensusUpdate, { op: "add_conflict" }>;
   const r = enforceGrounding([conflict], new Set(["Omid"]), new Set(["Amin"]));
   const op = r.ops[0] as typeof conflict;
   assert.deepEqual(op.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);

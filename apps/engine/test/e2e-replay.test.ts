@@ -97,7 +97,9 @@ test("todo-app session replays end to end", async () => {
   const spoke = logs.filter((l) => l.msg === "speak").map((l) => l.fields!.reason);
   assert.deepEqual(spoke, ["opening", "confirm_conflict", "answer", "stuck"]);
   assert.equal(said.length, 4);
-  assert.equal(logs.filter((l) => l.msg === "speak.blocked").length, 0);
+  // Builder confirms the spoken pick itself, so the model's own confirm_conflict finds nothing left to confirm.
+  const blocked = logs.filter((l) => l.msg === "speak.blocked").map((l) => `${l.fields!.reason}:${l.fields!.why}`);
+  assert.deepEqual(blocked, ["confirm_conflict:reason_not_open"]);
 
   // Consensus: three decisions agreed by support or silence, and the conflict resolved with B.
   await runtime(session.id).saved();
