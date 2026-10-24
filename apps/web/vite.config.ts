@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import { cspPlugin } from "./build/csp.ts";
+import { metaPlugin } from "./build/meta.ts";
 
 // Tests read dates and money in US English whatever the machine's locale, so they pass the same everywhere. Set here,
 // before the test workers start, since a process reads its locale once at startup.
@@ -12,7 +13,7 @@ if (process.env.VITEST) {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cspPlugin()],
+  plugins: [react(), tailwindcss(), metaPlugin(), cspPlugin()],
   // Fixed port: the api's CLERK_AUTHORIZED_PARTIES lists this origin for local work, so it must not move.
   server: { port: 5173, strictPort: true },
   preview: { port: 4173, strictPort: true },

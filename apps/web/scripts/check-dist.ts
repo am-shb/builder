@@ -49,3 +49,18 @@ if (heavy.length) {
   process.exit(1);
 }
 console.log(`dist: the landing page's ${seen.size} chunks load neither Clerk nor zod`);
+
+// The share tags, the share image, the home-screen icon and robots.txt ship (ADR 0017).
+for (const tag of ['property="og:image"', 'name="twitter:card"', 'name="description"', 'rel="apple-touch-icon"']) {
+  if (!html.includes(tag)) {
+    console.error(`dist/index.html has no ${tag} tag`);
+    process.exit(1);
+  }
+}
+for (const file of ["og.png", "apple-touch-icon.png", "robots.txt", "favicon.svg"]) {
+  if (!statSync(join(dist, file), { throwIfNoEntry: false })) {
+    console.error(`dist is missing ${file}`);
+    process.exit(1);
+  }
+}
+console.log("dist: share tags, share image, icons and robots.txt ship");

@@ -55,5 +55,12 @@ Option 3.
   landing page. Signed out on any other member page still goes to sign-in.
 - The landing copy may only describe what the code does (AGENTS.md). Pricing follows ADR 0009, with no prices until
   billing exists.
-- When the product name is decided, the page, the tags and the share image follow `PRODUCT_NAME`. The share image has
-  to be made again with `scripts/og-image.ts`.
+- When the product name is decided, the page, the tags and the share image follow `PRODUCT_NAME`. The share image and
+  the home-screen icon have to be made again: `npm run share-images -w @builder/web`.
+- `npm run landing-layout -w @builder/web` checks the page in Chrome at 360 to 2560px and at 125% and 150% zoom: no
+  sideways scrolling, no two texts overlapping, nothing off screen, and the hero's headline within its column on at
+  most three lines. `npm run screenshots -w @builder/web -- landing` takes the page at six widths in both modes and runs
+  axe with color contrast.
+- The words live in `src/landing/copy.ts`. Questions, the Pro waitlist and Team enquiries go to `CONTACT_EMAIL` there,
+  a placeholder until the product has an address. The demo video goes in `public/` and is named by `DEMO_VIDEO`.
+- `/privacy` and `/terms` are placeholders that say only what is true today. They must be replaced before launch.

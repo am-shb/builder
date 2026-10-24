@@ -2,13 +2,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { LandingPage } from "./LandingPage.tsx";
+import { LegalPage } from "./LegalPage.tsx";
 import type { LandingPath } from "./paths.ts";
 
-// `path` picks the page once /privacy and /terms have their own; until then every landing path shows the home page.
-export function mountLanding(root: HTMLElement, _path: LandingPath) {
+export function mountLanding(root: HTMLElement, path: LandingPath) {
   createRoot(root).render(
     <StrictMode>
-      <LandingPage />
+      {path === "/privacy" ? <LegalPage kind="privacy" /> : path === "/terms" ? <LegalPage kind="terms" /> : <LandingPage />}
     </StrictMode>,
   );
 }

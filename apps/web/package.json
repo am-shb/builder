@@ -12,6 +12,8 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test && npm run build && node scripts/check-dist.ts",
     "screenshots": "node scripts/screenshots.ts",
+    "share-images": "node scripts/share-images.ts",
+    "landing-layout": "node scripts/landing-layout.ts",
     "save-session": "node scripts/save-session.ts"
   },
   "dependencies": {

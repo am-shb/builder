@@ -80,6 +80,75 @@
     mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
   }
 
+  /* A card lifts a little on hover, and with a mouse a soft light follows the pointer across it. */
+  .card-lift {
+    transition: transform 280ms var(--ease-out), box-shadow 280ms var(--ease-out);
+  }
+  .spotlight::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--glow-a), transparent 70%);
+    transition: opacity 300ms var(--ease-out);
+  }
+  .spotlight > * {
+    position: relative;
+    z-index: 1;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .spotlight:hover::before {
+      opacity: 1;
+    }
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .card-lift:hover {
+      transform: translateY(-4px);
+    }
+  }
+
+  /* How it works: a step's number is a dashed ring until the step comes into view, then a solid one; the stage in the
+     third step settles the same way. */
+  .step-ring-solid,
+  .build-solid {
+    transition: opacity 500ms var(--ease-out) 450ms;
+  }
+  .build-solid {
+    transition-delay: 1100ms;
+  }
+  .step-ring-dashed,
+  .build-dashed {
+    transition: opacity 500ms var(--ease-out) 450ms;
+    opacity: 0;
+  }
+  .build-dashed {
+    transition-delay: 1100ms;
+  }
+  .step[data-pending] .step-ring-solid,
+  .step[data-pending] .build-solid {
+    opacity: 0;
+  }
+  .step[data-pending] .step-ring-dashed,
+  .step[data-pending] .build-dashed {
+    opacity: 1;
+  }
+
+  .hero-glow-soft {
+    background-image:
+      radial-gradient(50% 60% at 50% 50%, var(--glow-a), transparent 100%),
+      radial-gradient(var(--grid-line) 1px, transparent 1.2px);
+    background-size: 100% 100%, 16px 16px;
+  }
+
+  /* The features' small visuals. Their motion runs only while the grid is on screen (data-live). */
+  .bento .swap-b,
+  .bento .pick-b {
+    opacity: 0;
+  }
+
   /* Scroll reveals: in place from the start, unless motion is allowed and the part is still below the fold. */
   .reveal[data-pending] {
     opacity: 0;
@@ -106,9 +175,95 @@
   .rise-in {
     animation: rise 800ms var(--ease-out) both;
   }
+
+  .bento .build-part {
+    animation: build 6s var(--ease-out) infinite;
+  }
+  .bento .draft-tag {
+    animation: draft-tag 6s var(--ease-out) infinite;
+  }
+  .bento .pointer-glide {
+    animation: glide 6s var(--ease-out) infinite;
+  }
+  .bento .swap-a {
+    animation: swap-a 5s var(--ease-out) infinite;
+  }
+  .bento .swap-b {
+    animation: swap-b 5s var(--ease-out) infinite;
+  }
+  .bento .pick-a {
+    animation: swap-a 4s var(--ease-out) infinite;
+  }
+  .bento .pick-b {
+    animation: swap-b 4s var(--ease-out) infinite;
+  }
+  .bento .wave {
+    transform-origin: center;
+    animation: wave 1.1s ease-in-out infinite alternate;
+  }
+  .bento .log-row {
+    animation: log-row 4.5s var(--ease-out) infinite;
+  }
+  .bento:not([data-live]) * {
+    animation-play-state: paused;
+  }
+}
+
+/* Without motion, the features' visuals show their settled state. */
+@media (prefers-reduced-motion: reduce) {
+  .bento .swap-a,
+  .bento .pick-a {
+    opacity: 0;
+  }
+  .bento .swap-b,
+  .bento .pick-b {
+    opacity: 1;
+  }
+}
+
+@keyframes build {
+  0%, 6% { opacity: 0; transform: translateY(8px) scale(0.97); }
+  14%, 86% { opacity: 1; transform: none; }
+  96%, 100% { opacity: 0; transform: none; }
+}
+@keyframes draft-tag {
+  0%, 30% { opacity: 0; }
+  36%, 62% { opacity: 1; }
+  70%, 100% { opacity: 0; }
+}
+@keyframes glide {
+  0%, 10% { transform: translate(-40px, 30px); opacity: 0; }
+  22% { opacity: 1; }
+  45%, 60% { transform: translate(60px, -10px); }
+  80% { transform: translate(110px, 24px); opacity: 1; }
+  92%, 100% { transform: translate(110px, 24px); opacity: 0; }
+}
+@keyframes swap-a {
+  0%, 42% { opacity: 1; }
+  50%, 92% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes swap-b {
+  0%, 42% { opacity: 0; }
+  50%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes wave {
+  from { transform: scaleY(0.35); }
+  to { transform: scaleY(1); }
+}
+@keyframes log-row {
+  0% { opacity: 0.35; }
+  12%, 88% { opacity: 1; }
+  100% { opacity: 0.35; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .card-lift,
+  .step-ring-solid,
+  .step-ring-dashed,
+  .build-solid,
+  .build-dashed,
   .sc-fade,
   .sc-swap,
   .sc-pop,
