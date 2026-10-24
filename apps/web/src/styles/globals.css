@@ -9,7 +9,20 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/schibsted-grotesk";
 
+/* The display font, for large headings only (ADR 0015). The package's "full" file is the one with both the SOFT and
+   opsz axes; only its Latin subset is declared, so nothing else is downloaded. */
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/fraunces/files/fraunces-latin-full-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
   --bg: #f4f6f5;
   --surface: #ffffff;
   --sunk: #e9eeec;
@@ -239,6 +252,7 @@
   --color-frost: var(--frost);
 
   --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
+  --font-display: var(--font-display);
 
   --radius-field: 14px;
   --radius-plate: 18px;
@@ -300,6 +314,53 @@
   /* The meeting codes and other figures line up. */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Display type (ADR 0015): large headings only, never in forms, dialogs, sheets, menus, buttons, pills or Clerk's
+   components. Plain CSS, so the axis settings stay as written. Use `display` with one size: `display display-lg`.
+   Optical size follows the font size (font-optical-sizing: auto); only SOFT is pinned, and WONK stays off. */
+@layer components {
+  .display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.06;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  /* The landing page's hero headline only. */
+  .display-xl {
+    font-size: clamp(2.5rem, 7.1vw, 5.75rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+  }
+  /* Section heads, and the app's page titles. */
+  .display-lg {
+    font-size: clamp(1.875rem, 4.4vw, 3.5rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+  }
+  /* Card titles and FAQ questions. */
+  .display-md {
+    font-size: clamp(1.25rem, 2.1vw, 1.75rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+  }
+  /* The smallest display size. */
+  .display-sm {
+    font-size: 1.0625rem;
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
   }
 }
 

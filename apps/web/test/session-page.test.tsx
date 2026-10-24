@@ -49,7 +49,9 @@ describe("the session page", () => {
   it("reads the session with the token, and shows the meeting, status, times and limits", async () => {
     setClerk({ session: "active", orgId: "org_a" });
     const { api } = page(ok({ status: "joining", limits: { maxUsd: 5, maxMinutes: 60 } }));
-    expect(await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" })).toBeTruthy();
+    const code = await screen.findByRole("heading", { level: 1, name: "kfp-qzwd-nre" });
+    // The page's title is set in the display font (ADR 0015).
+    expect(code.className).toMatch(/\bdisplay display-lg\b/);
     expect(reads(api)[0]!.headers.Authorization).toBe("Bearer token-org_a");
     expect(screen.getByText("Google Meet, started 12 min ago")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Status" })).getByText("Joining")).toBeTruthy();

@@ -53,7 +53,7 @@ export function AppShell({ org, account, actionBar, homeLink = plainHomeLink, ch
 export function PageIntro({ title, subtitle, children }: { title: string; subtitle?: string; children?: ReactNode }) {
   return (
     <div>
-      <h1 className="m-0 text-title font-semibold tracking-[-0.025em] md:text-title-lg">{title}</h1>
+      <h1 className="display display-lg m-0">{title}</h1>
       {subtitle && <p className="mt-2 mb-0 max-w-[26em] text-ink-2">{subtitle}</p>}
       {children}
     </div>

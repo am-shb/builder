@@ -44,7 +44,8 @@ Option 3.
   motion. Motion is CSS and a few small hooks, with no animation library. Everything that moves stops under
   `prefers-reduced-motion`, and the hero animation pauses when it is off screen. New colors are tokens in
   `globals.css`, like every other color.
-- **No new packages.** The phone menu and the FAQ use the Radix primitives already installed.
+- **Packages.** One new: `@fontsource-variable/fraunces`, the display font for large headings (ADR 0015). The phone
+  menu and the FAQ use the Radix primitives already installed, and the motion needs no library.
 - **CSP.** Unchanged. Images, fonts and the demo video (added later as `public/demo.mp4`) come from our own origin.
 
 ## Consequences

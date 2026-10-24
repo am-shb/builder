@@ -21,7 +21,7 @@ export function Hero() {
           </p>
           <h1
             id="hero-title"
-            className="rise-in mt-5 mb-0 text-[clamp(2.375rem,11cqi,5.25rem)] leading-[1.04] font-semibold tracking-[-0.045em] text-balance break-words xl:text-[clamp(2.5rem,11cqi,5rem)]"
+            className="rise-in display display-xl mt-5 mb-0 break-words"
             style={delay(80)}
           >
             {HERO.headline[0]} <span className="agree-underline">{HERO.headline[1]}</span>

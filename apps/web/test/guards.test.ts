@@ -134,3 +134,20 @@ describe("colors come from the tokens", () => {
   });
 });
 
+
+describe("the display font", () => {
+  // Large headings only (ADR 0015): the landing page, the app's page titles and a session's title. Never in forms,
+  // dialogs, sheets, menus, buttons, pills or Clerk's components, so no other file may name its classes. Every use
+  // names a size (`display display-lg`), so looking for the sizes finds them all.
+  const DISPLAY = /\bdisplay-(?:xl|lg|md|sm)\b|\bfont-display\b/;
+  const ALLOWED = (file: string) => file.startsWith("src/landing/") || ["src/components/AppShell.tsx", "src/pages/SessionPage.tsx"].includes(file);
+  const users = () => src.filter(({ file, text }) => file.endsWith(".tsx") && DISPLAY.test(text)).map(({ file }) => file);
+
+  it("is used only on the landing page, page titles and a session's title", () => {
+    expect(users().filter((f) => !ALLOWED(f))).toEqual([]);
+  });
+
+  it("the check finds the files that use it", () => {
+    expect(users()).toEqual(expect.arrayContaining(["src/components/AppShell.tsx", "src/pages/SessionPage.tsx", "src/landing/hero/Hero.tsx"]));
+  });
+});
