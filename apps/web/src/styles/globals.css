@@ -56,6 +56,18 @@
   --edge: rgb(255 255 255 / 0);
   --lift: 0 1px 2px rgb(26 34 32 / 0.06), 0 24px 48px -24px rgb(13 92 76 / 0.28);
   --glow: 0 6px 16px -8px rgb(13 92 76 / 0.7);
+
+  /* The landing page (ADR 0017): pending is amber and dashed, agreed is the primary and solid. */
+  --pending: #b45309;
+  --pending-soft: #fdf1dc;
+  --pending-ink: #7a3b00;
+  --p-c-bg: #ebe5fb;
+  --p-c-ink: #4a2f8a;
+  --glow-a: rgb(13 92 76 / 0.2);
+  --glow-b: rgb(25 166 122 / 0.14);
+  --glow-c: rgb(180 83 9 / 0.07);
+  --grid-line: rgb(13 92 76 / 0.07);
+  --frost: rgb(244 246 245 / 0.78);
   color-scheme: light;
 }
 
@@ -106,6 +118,17 @@
     --edge: rgb(255 255 255 / 0.07);
     --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
     --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+
+    --pending: #f0a43a;
+    --pending-soft: #33260f;
+    --pending-ink: #f6c46d;
+    --p-c-bg: #2a2340;
+    --p-c-ink: #cdb9ff;
+    --glow-a: rgb(79 207 166 / 0.16);
+    --glow-b: rgb(139 240 205 / 0.07);
+    --glow-c: rgb(240 164 58 / 0.05);
+    --grid-line: rgb(255 255 255 / 0.045);
+    --frost: rgb(15 21 19 / 0.72);
     color-scheme: dark;
   }
 }
@@ -155,6 +178,17 @@
   --edge: rgb(255 255 255 / 0.07);
   --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
   --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+
+  --pending: #f0a43a;
+  --pending-soft: #33260f;
+  --pending-ink: #f6c46d;
+  --p-c-bg: #2a2340;
+  --p-c-ink: #cdb9ff;
+  --glow-a: rgb(79 207 166 / 0.16);
+  --glow-b: rgb(139 240 205 / 0.07);
+  --glow-c: rgb(240 164 58 / 0.05);
+  --grid-line: rgb(255 255 255 / 0.045);
+  --frost: rgb(15 21 19 / 0.72);
   color-scheme: dark;
 }
 
@@ -197,6 +231,12 @@
   --color-scrim: var(--scrim);
   --color-toast-bg: var(--toast-bg);
   --color-toast-ink: var(--toast-ink);
+  --color-pending: var(--pending);
+  --color-pending-soft: var(--pending-soft);
+  --color-pending-ink: var(--pending-ink);
+  --color-p-c-bg: var(--p-c-bg);
+  --color-p-c-ink: var(--p-c-ink);
+  --color-frost: var(--frost);
 
   --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
 
@@ -226,6 +266,13 @@
   --text-title--line-height: 1.1;
   --text-title-lg: 46px;
   --text-title-lg--line-height: 1.1;
+  /* The landing page only: fluid sizes for its headline, section titles and lead paragraphs. */
+  --text-display: clamp(2.625rem, 1.2rem + 5vw, 5.25rem);
+  --text-display--line-height: 1.02;
+  --text-section: clamp(2rem, 1.35rem + 2.5vw, 3.375rem);
+  --text-section--line-height: 1.06;
+  --text-lead: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  --text-lead--line-height: 1.5;
 
   --breakpoint-md: 768px;
 }

@@ -1,0 +1,164 @@
+/* The landing page's motion (ADR 0017). Colors come from the tokens in globals.css. Everything that moves here stops
+   under prefers-reduced-motion: the hero shows its last frame, reveals are already in place. */
+@layer base {
+  html:has(.landing) {
+    scroll-padding-top: 88px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html:has(.landing) {
+      scroll-behavior: smooth;
+    }
+  }
+}
+
+@layer components {
+  .landing {
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* The hero scene: parts fade and rise in when their step comes (data-on), and cross-fade between states. */
+  .sc-fade {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+    transition: opacity 420ms var(--ease-out), transform 560ms var(--ease-out);
+  }
+  .sc-fade[data-on] {
+    opacity: 1;
+    transform: none;
+  }
+  .sc-swap {
+    transition: opacity 420ms var(--ease-out), transform 420ms var(--ease-out);
+  }
+  .sc-pop {
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity 260ms var(--ease-out), transform 360ms var(--ease-out);
+  }
+  .sc-pop[data-on] {
+    opacity: 1;
+    transform: none;
+  }
+  .sc-body {
+    transition: opacity 700ms var(--ease-out);
+  }
+  /* Back at the start of the loop, everything goes back to hidden at once, while the scene is faded out. */
+  .scene[data-reset] .sc-fade,
+  .scene[data-reset] .sc-swap,
+  .scene[data-reset] .sc-pop {
+    transition: none;
+  }
+  .scene[data-paused] * {
+    animation-play-state: paused;
+  }
+
+  .typing-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: var(--ink-3);
+    opacity: 0.5;
+  }
+
+  /* The no-objection countdown on a pending decision. */
+  .ring-drain {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+
+  .dot-grid {
+    background-image: radial-gradient(var(--grid-line) 1px, transparent 1.2px);
+    background-size: 16px 16px;
+  }
+
+  /* The headline's last words: a dashed underline that is drawn over in solid once the page has loaded. Both are
+     backgrounds of the words themselves, so the underline follows them onto a second line when they wrap. */
+  .agree-underline {
+    padding-bottom: 0.04em;
+    background-image:
+      linear-gradient(var(--primary), var(--primary)),
+      repeating-linear-gradient(90deg, var(--pending) 0 0.22em, transparent 0.22em 0.36em);
+    background-repeat: no-repeat;
+    background-position: 0 100%, 0 100%;
+    background-size: 100% 0.075em, 100% 0.075em;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  /* Soft light behind the hero scene. Each spot fades out well inside the box, and the box itself fades at its
+     edges, so the light never ends in a visible line. */
+  .hero-glow {
+    background:
+      radial-gradient(38% 40% at 58% 46%, var(--glow-a), transparent 100%),
+      radial-gradient(30% 34% at 32% 68%, var(--glow-b), transparent 100%),
+      radial-gradient(24% 26% at 74% 26%, var(--glow-c), transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+  }
+
+  /* Scroll reveals: in place from the start, unless motion is allowed and the part is still below the fold. */
+  .reveal[data-pending] {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  .reveal {
+    transition: opacity 700ms var(--ease-out), transform 800ms var(--ease-out);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .typing-dot {
+    animation: typing 1s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .ring-drain.is-running {
+    animation: drain 3.4s linear forwards;
+  }
+  .agree-underline {
+    animation: draw 900ms 700ms var(--ease-out) both;
+  }
+  .rise-in {
+    animation: rise 800ms var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-fade,
+  .sc-swap,
+  .sc-pop,
+  .sc-body,
+  .reveal {
+    transition: none;
+  }
+}
+
+@keyframes typing {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
+}
+@keyframes drain {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+@keyframes draw {
+  from {
+    background-size: 0% 0.075em, 100% 0.075em;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}

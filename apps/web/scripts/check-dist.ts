@@ -27,3 +27,25 @@ if (!html.includes('<script src="/color-mode.js"></script>') || !statSync(join(d
   process.exit(1);
 }
 console.log("dist: no inline scripts; color-mode.js ships");
+
+// The landing page loads without Clerk or zod (ADR 0017): its entry chunk and every chunk it imports, followed through
+// their static imports, contain neither.
+const assets = join(dist, "assets");
+const entry = readdirSync(assets).find((n) => /^entry-[\w-]+\.js$/.test(n));
+if (!entry) {
+  console.error("dist has no landing entry chunk (assets/entry-*.js)");
+  process.exit(1);
+}
+const seen = new Set<string>();
+const follow = (name: string) => {
+  if (seen.has(name)) return;
+  seen.add(name);
+  for (const m of readFileSync(join(assets, name), "utf8").matchAll(/from\s*"\.\/([\w.-]+\.js)"|import\s*"\.\/([\w.-]+\.js)"/g)) follow((m[1] ?? m[2])!);
+};
+follow(entry);
+const heavy = [...seen].filter((n) => /clerk|ZodError|\$ZodType/i.test(readFileSync(join(assets, n), "utf8")));
+if (heavy.length) {
+  console.error(`the landing page loads Clerk or zod: ${heavy.join(", ")}`);
+  process.exit(1);
+}
+console.log(`dist: the landing page's ${seen.size} chunks load neither Clerk nor zod`);

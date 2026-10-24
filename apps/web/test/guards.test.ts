@@ -50,6 +50,8 @@ describe("the app's code", () => {
 describe("browser storage", () => {
   const STORAGE = /\b(local|session)Storage\b|\bindexedDB\b|\bdocument\.cookie\b/;
   const EXCEPTIONS = new Set(["src/lib/color-mode.ts", "public/color-mode.js"]);
+  // Reads Clerk's sign-in cookie and nothing else (checked below); not storage the app keeps.
+  const COOKIE_READ = "src/lib/signed-in-hint.ts";
   // The first argument of every getItem, setItem and removeItem call.
   const storageKeys = (text: string) => [...text.matchAll(/\.(getItem|setItem|removeItem)\(\s*([^,)]+)/g)].map((m) => m[2]!.trim());
   it("finds the public script", () => {
@@ -57,7 +59,7 @@ describe("browser storage", () => {
   });
 
   it("is used only by the color mode setting", () => {
-    expect(offenders(appCode, STORAGE).filter((f) => !EXCEPTIONS.has(f))).toEqual([]);
+    expect(offenders(appCode, STORAGE).filter((f) => !EXCEPTIONS.has(f) && f !== COOKIE_READ)).toEqual([]);
   });
 
   it("the exceptions use localStorage only, through getItem, setItem and removeItem, for the one key", () => {
@@ -71,6 +73,13 @@ describe("browser storage", () => {
       expect(calls.length, file).toBeGreaterThan(0);
       for (const key of calls) expect(["STORAGE_KEY", '"builder.color-mode"'], `${file}: ${key}`).toContain(key);
     }
+  });
+
+  // The one cookie read (ADR 0017): Clerk's sign-in hint, read to pick which chunk to load. Read only, never written.
+  it("the sign-in hint only reads document.cookie", () => {
+    const hint = appCode.find(({ file }) => file === "src/lib/signed-in-hint.ts");
+    expect(hint?.text).toMatch(/\bdocument\.cookie\b/);
+    expect(hint?.text).not.toMatch(/document\.cookie\s*=(?!=)|\b(local|session)Storage\b|\bindexedDB\b/);
   });
 
   it("the key check catches another key", () => {
