@@ -515,7 +515,7 @@ test("R3: flush waits for every session's queued saves", async () => {
 const openDecision = (id: string, text: string, proposedBy: string, affects: string[], status: "draft" | "pending" | "agreed" = "draft") =>
   ({ id, text, status, proposedBy, agreedBy: status === "agreed" ? [proposedBy] : [], affects, rejectedOptions: [] as string[] });
 
-async function supersedeSetup(uuid: string, opts: { bOps?: PatchBatch["ops"]; bBackers?: string[]; apply?: typeof applyBatch } = {}) {
+async function supersedeSetup(uuid: string, opts: { aOps?: PatchBatch["ops"]; bOps?: PatchBatch["ops"]; bBackers?: string[]; apply?: typeof applyBatch } = {}) {
   const store = await testStore();
   const s = await store.createIntent(uuid, "https://meet.google.com/x");
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
@@ -533,7 +533,7 @@ async function supersedeSetup(uuid: string, opts: { bOps?: PatchBatch["ops"]; bB
     conflicts: [{
       id: "c1", topic: "Top of home", status: "open", openedAt: 1,
       variants: [
-        { label: "A", summary: "Special on top", backers: ["Amin"], batch: { label: "A", ops: [{ op: "update", id: "home.special", props: { title: "Top special" } }] } },
+        { label: "A", summary: "Special on top", backers: ["Amin"], batch: { label: "A", ops: opts.aOps ?? [{ op: "update", id: "home.special", props: { title: "Top special" } }] } },
         { label: "B", summary: "Order again on top", backers: opts.bBackers ?? ["Omid"], batch: { label: "B", ops: opts.bOps ?? [
           { op: "add", parentId: "home", index: 0, node: { id: "home.order-again", type: "Card", props: { title: "Order again" }, status: "draft", children: [] } },
           { op: "move", id: "home.special", parentId: "home", index: 1 },
@@ -609,4 +609,16 @@ test("a re-tag that fails to apply is logged by ids and counts, and the pick sti
   const failed = logs.filter((l) => l.msg === "runtime.supersede_retag_failed");
   assert.equal(failed.length, 1);
   assert.deepEqual({ ...failed[0].fields, session_id: undefined }, { session_id: undefined, conflict_id: "c1", ops: 1 });
+});
+
+test("a proposal about a node the variants only move is not superseded", async () => {
+  const again = { op: "add" as const, parentId: "home", node: { id: "home.again", type: "Card" as const, props: { title: "Order again" }, status: "draft" as const, children: [] } };
+  const { rt, logs } = await supersedeSetup("88888888-8888-8888-8888-888888888807", {
+    aOps: [{ op: "move", id: "home.special", parentId: "home", index: 0 }], bOps: [again],
+  });
+  assert.deepEqual(rt.resolveComparison("c1", "B", ["Omid"]), { ok: true, applied: true });
+  const snap = rt.snapshot() as Extract<StageEvent, { type: "snapshot" }>;
+  assert.ok(snap.doc.decisions.some((d) => d.id === "dX"), "A only moved home.special to make room: Amin's dX stays open");
+  assert.equal(findNode(snap.proto, "home.special")?.decisionId, "dX");
+  assert.ok(!logs.some((l) => l.msg === "runtime.superseded"));
 });

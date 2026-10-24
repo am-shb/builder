@@ -2,7 +2,10 @@ import type { PatchBatch, ToolPatchBatch } from "./schema.ts";
 
 // Node ids a variant's patches add, update, remove or move. The App root and Screens are too broad to show
 // that a decision is about the same thing, and an update that changes no prop and no decision touches nothing.
-export function touchedNodeIds(batch: ToolPatchBatch | PatchBatch, screens: Set<string>): Set<string> {
+// With `moves: false` a moved node is left out: a variant that only moves a node (to make room) is not about it,
+// so it neither makes that node's proposer a backer nor supersedes their proposal.
+export function touchedNodeIds(batch: ToolPatchBatch | PatchBatch, screens: Set<string>, opts: { moves?: boolean } = {}): Set<string> {
+  const moves = opts.moves ?? true;
   const ids = new Set<string>();
   const broad = (id: string) => id === "app" || screens.has(id);
   for (const op of batch.ops) {
@@ -14,7 +17,7 @@ export function touchedNodeIds(batch: ToolPatchBatch | PatchBatch, screens: Set<
       collect(op.node);
     } else if (op.op === "update") {
       if ((op.props !== undefined || op.decisionId !== undefined) && !broad(op.id)) ids.add(op.id);
-    } else if ((op.op === "remove" || op.op === "move") && !broad(op.id)) ids.add(op.id);
+    } else if ((op.op === "remove" || (op.op === "move" && moves)) && !broad(op.id)) ids.add(op.id);
   }
   return ids;
 }

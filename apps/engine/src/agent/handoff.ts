@@ -134,15 +134,15 @@ export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<strin
   return { batch: rest, dropped: 1 };
 }
 
-/** Who stands behind a still-open decision, and the node ids it affects. */
+/** Who proposed a still-open decision, and the node ids it affects. */
 export type PriorBacking = { names: string[]; affects: string[] };
 
 /**
  * Only people heard in the grounding lines can propose, back or object. Drops support/object ops
  * and add_decision ops whose speaker is not among them, and strips ungrounded conflict backers
  * (backers become agreed_by when a conflict resolves) and variant credits. A conflict's variant backers
- * may also be people who proposed or backed a still-open decision in an earlier hand-off (grounded when
- * recorded) that affects nodes the variant itself touches (`prior`). `dropped` counts ops, backers and credits removed.
+ * may also be people who proposed a still-open decision in an earlier hand-off (grounded when recorded)
+ * that affects nodes the variant itself adds, changes or removes (`prior`; a move alone does not count). `dropped` counts ops, backers and credits removed.
  */
 export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, prior: PriorBacking[] = [], screenIds: Set<string> = new Set()): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
@@ -155,7 +155,7 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     }
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
-        const touched = touchedNodeIds(v.batch, screenIds);
+        const touched = touchedNodeIds(v.batch, screenIds, { moves: false });
         const earlier = new Set(prior.filter((p) => p.affects.some((a) => touched.has(a))).flatMap((p) => p.names));
         const backers = v.backers.filter((b) => groundingSpeakers.has(b) || earlier.has(b));
         const credit = groundCredit(v.batch, groundingSpeakers);

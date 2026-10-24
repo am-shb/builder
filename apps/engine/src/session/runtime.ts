@@ -170,7 +170,7 @@ function makeRuntime(
   };
 
   // The pick settles the losing side's earlier proposals: every open decision proposed by a backer of a
-  // losing variant that affects a node any variant touches is removed (its text joins the picked
+  // losing variant that affects a node any variant adds, changes or removes is removed (its text joins the picked
   // decision's rejectedOptions). Its drawn nodes that the WINNING variant's batch touches are re-tagged to
   // the picked decision, so promoting that decision agrees them; only when the winner's batch landed.
   // A node only a losing variant touched keeps the removed decision's id and stays a draft: the renderer
@@ -180,7 +180,8 @@ function makeRuntime(
     const screensOf = (n: UiNode) => { if (n.type === "Screen") screens.add(n.id); n.children.forEach(screensOf); };
     screensOf(proto.root);
     const touched = new Set<string>();
-    for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens)) touched.add(id);
+    // A move alone (making room) does not make a proposal about that node part of the choice.
+    for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens, { moves: false })) touched.add(id);
     const won = conflict.variants.find((v) => v.label === winner);
     const winnerTouched = won ? touchedNodeIds(won.batch, screens) : new Set<string>();
     const winners = new Set(won?.backers ?? []);

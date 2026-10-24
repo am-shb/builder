@@ -275,6 +275,21 @@ test("a conflict recorded in a later hand-off keeps the earlier proposer as a ba
   assert.deepEqual(c.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
 });
 
+test("only an open decision's proposer, not its supporters, can back a conflict variant from an earlier hand-off", async () => {
+  const s = await setup([
+    [consensus([{ op: "add_conflict", id: "c1", topic: "Special", variants: [
+      conflictVariant("A", "Special on top", ["Amin", "Rita"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top" }] }]),
+      conflictVariant("B", "Special below", ["Omid"], [addNode("home", "home.other", "Badge", [["text", "Other"]])]),
+    ] }])],
+  ]);
+  assert.equal(s.rt.applyBatch({ label: "seed", ops: [{ op: "add", parentId: "home", node: { id: "home.special", type: "Card", props: { title: "Special" }, status: "draft", decisionId: "dX", children: [] } }] }).ok, true);
+  s.rt.setDoc({ ...emptyDoc(), decisions: [{ id: "dX", text: "Special", status: "pending", pendingSince: s.timers.now(), proposedBy: "Amin", agreedBy: ["Rita"], affects: ["home.special"], rejectedOptions: [] }] });
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "I'd put it below")]));
+  await flush();
+  const c = s.doc().conflicts.find((x) => x.id === "c1")!;
+  assert.deepEqual(c.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+});
+
 test("handoffs during a run are merged into exactly one follow-up run", async () => {
   const g = gatedPort([[], [], []]);
   const s = await setup(g.port);
@@ -1631,6 +1646,7 @@ test("prior backers are not accepted through the App root, a Screen, or an updat
   assert.deepEqual(backersOfA([upd("home.card")], ["home.card"]), [], "an update with no props and no decisionId");
   assert.deepEqual(backersOfA([upd("home.card", { props: [{ key: "title", value: "x" }] })], ["home.card"]), ["Rita"], "a real update counts");
   assert.deepEqual(backersOfA([upd("home.card", { decisionId: "d1" })], ["home.card"]), ["Rita"], "a decisionId update counts");
+  assert.deepEqual(backersOfA([{ op: "move", id: "home.card", parentId: "home", index: 0 }], ["home.card"]), [], "a move only makes room");
 });
 
 // ---- a pick closes the losing side's earlier proposal (task 8c) ----

@@ -465,10 +465,10 @@ export function createBuildLoop(deps: {
       if (parsed.success) ops.push(...parsed.data.ops);
       else consensusInvalid++;
     }
-    // People behind decisions still open in the doc were grounded when those were recorded.
+    // The proposers of decisions still open in the doc were grounded when those were recorded.
     const priorBackers = view(rt).doc.decisions
       .filter((d) => d.status === "draft" || d.status === "pending")
-      .map((d) => ({ names: [d.proposedBy, ...d.agreedBy], affects: d.affects }));
+      .map((d) => ({ names: [d.proposedBy], affects: d.affects }));
     const grounded = enforceGrounding(ops, speakers, priorBackers, screenIds(view(rt).proto));
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
