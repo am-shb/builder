@@ -1631,6 +1631,25 @@ test("a model-originated hand-off repeating the pick adds nobody to the decision
   assert.deepEqual(agreedBy(s), ["Bob", "Sara"]);
 });
 
+test("two spoken picks of the same option 100 ms apart both record their speaker; one of the other option adds nobody", async () => {
+  const s = await setup([[], [], [], []]);
+  s.rt.setDoc({ ...s.doc(), conflicts: [{ id: "c1", topic: "T", status: "open", openedAt: 0, variants: [
+    { label: "A", summary: "a", backers: ["Sara"], batch: { label: "A", ops: [] } },
+    { label: "B", summary: "b", backers: ["Bob"], batch: { label: "B", ops: [] } },
+  ] }] });
+  const pick = (id: number, winner: "A" | "B" = "B") => handoff([id], { topics: [{ title: "Pick", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner } }] });
+  s.loop.handoff(s.sessionId, pick(await s.say("Mona", "B")));
+  await s.timers.advance(100);
+  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "B it is")));
+  s.loop.handoff(s.sessionId, pick(await s.say("Rita", "A it is"), "A"));
+  await flush();
+  assert.deepEqual(agreedBy(s), ["Bob", "Mona", "Lee"]);
+  assert.deepEqual(s.logs.filter((l) => l.msg === "build.pick_joined").map((l) => ({ ...l.fields, session_id: undefined })), [{ session_id: undefined, conflict_id: "c1", count: 1 }]);
+  s.loop.handoff(s.sessionId, pick(await s.say("Lee", "B it is")));
+  await flush();
+  assert.deepEqual(agreedBy(s), ["Bob", "Mona", "Lee"], "once");
+});
+
 test("prior backers are not accepted through the App root, a Screen, or an update that changes nothing", () => {
   const variant = (ops: unknown[]) => [{ op: "add_conflict", id: "c1", topic: "T", variants: [
     conflictVariant("A", "a", ["Rita"], ops), conflictVariant("B", "b", ["Omid"], [addNode("home", "home.x", "Badge")]),

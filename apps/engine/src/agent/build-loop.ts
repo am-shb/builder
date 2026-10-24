@@ -308,6 +308,22 @@ export function createBuildLoop(deps: {
     ensureTick(sessionId, st);
   }
 
+  // Adds the speaker of a stored line to a resolved pick's decision: only a person (not Builder) whose line picks
+  // that conflict's winner, while the decision is at most LATE_AGREE_MS old. Idempotent. Returns whether it changed.
+  function agreeLate(sessionId: string, rt: SessionRuntime, conflictId: string, winner: "A" | "B" | "C", line: StoredEvent): boolean {
+    if (ended.has(sessionId) || line.kind !== "utterance" || !line.text || !line.speaker || line.speaker === botName) return false;
+    if (matchSpokenPick(line.text, [winner]) !== winner) return false;
+    const doc = view(rt).doc;
+    const decision = doc.decisions.find((d) => d.id === `d-${conflictId}`);
+    const conflict = doc.conflicts.find((c) => c.id === conflictId);
+    if (!decision || conflict?.status !== "resolved" || conflict.winner !== winner) return false;
+    if (decision.decidedAt === undefined || clock() - decision.decidedAt > LATE_AGREE_MS) return false;
+    if (decision.agreedBy.includes(line.speaker)) return false;
+    const speaker = line.speaker;
+    rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => (d.id === decision.id ? { ...d, agreedBy: [...d.agreedBy, speaker] } : d)) });
+    return true;
+  }
+
   // Applies the room's pick right away, then marks the winning variant's nodes agreed. Acts only
   // when a person (not Builder) in this session's grounding lines is behind the hand-off.
   function resolveChoice(sessionId: string, stored: StoredEvent[], groundingIds: number[], picked: { conflictId: string; winner: "A" | "B" | "C" }): Pick {
@@ -339,7 +355,14 @@ export function createBuildLoop(deps: {
         log("build.resolve_failed", { session_id: sessionId, conflict_id: choice.conflictId });
         return { kind: "ignored" };
       }
-      if (conflict?.status !== "open") return { kind: "settled" };
+      if (conflict?.status !== "open") {
+        // Already picked, maybe a moment ago by someone else ("B" / "B it is"): a grounding line that picks the
+        // same winner agrees with it, under the same checks as a late agreement.
+        let joined = 0;
+        if (conflict?.winner === winner) for (const line of lines) if (agreeLate(sessionId, rt, choice.conflictId, winner, line)) joined++;
+        if (joined) log("build.pick_joined", { session_id: sessionId, conflict_id: choice.conflictId, count: joined });
+        return { kind: "settled" };
+      }
       const variant = conflict.variants.find((v) => v.label === choice.winner);
       const after = view(rt).doc;
       const decision = after.decisions.find((d) => !before.decisions.some((b) => b.id === d.id));
@@ -771,18 +794,8 @@ export function createBuildLoop(deps: {
       try {
         if (ended.has(sessionId)) return false;
         const line = (await store.listEvents(sessionId)).find((e) => e.kind === "utterance" && e.id === a.lineId);
-        if (ended.has(sessionId) || !line?.text || !line.speaker || line.speaker === botName) return false;
-        if (matchSpokenPick(line.text, [a.winner]) !== a.winner) return false;
-        const rt = runtime(sessionId);
-        const doc = view(rt).doc;
-        const decision = doc.decisions.find((d) => d.id === `d-${a.conflictId}`);
-        const conflict = doc.conflicts.find((c) => c.id === a.conflictId);
-        if (!decision || conflict?.status !== "resolved" || conflict.winner !== a.winner) return false;
-        if (decision.decidedAt === undefined || clock() - decision.decidedAt > LATE_AGREE_MS) return false;
-        if (decision.agreedBy.includes(line.speaker)) return false;
-        const speaker = line.speaker;
-        rt.setDoc({ ...doc, decisions: doc.decisions.map((d) => (d.id === decision.id ? { ...d, agreedBy: [...d.agreedBy, speaker] } : d)) });
-        return true;
+        if (ended.has(sessionId) || !line) return false;
+        return agreeLate(sessionId, runtime(sessionId), a.conflictId, a.winner, line);
       } catch (err) {
         log("build.late_agree_failed", { session_id: sessionId, error: errorCode(err) });
         return false;
