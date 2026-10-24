@@ -70,18 +70,9 @@
     background-size: 16px 16px;
   }
 
-  /* The headline's last words: a dashed underline that is drawn over in solid once the page has loaded. Both are
-     backgrounds of the words themselves, so the underline follows them onto a second line when they wrap. */
-  .agree-underline {
-    padding-bottom: 0.04em;
-    background-image:
-      linear-gradient(var(--primary), var(--primary)),
-      repeating-linear-gradient(90deg, var(--pending) 0 0.22em, transparent 0.22em 0.36em);
-    background-repeat: no-repeat;
-    background-position: 0 100%, 0 100%;
-    background-size: 100% 0.075em, 100% 0.075em;
-    -webkit-box-decoration-break: clone;
-    box-decoration-break: clone;
+  /* The words the hero's headline stresses: the display font's italic, same size, weight and settings. */
+  .hero-emphasis {
+    font-style: italic;
   }
 
   /* Soft light behind the hero scene. Each spot fades out well inside the box, and the box itself fades at its
@@ -117,9 +108,6 @@
   .ring-drain.is-running {
     animation: drain 3.4s linear forwards;
   }
-  .agree-underline {
-    animation: draw 900ms 700ms var(--ease-out) both;
-  }
   .rise-in {
     animation: rise 800ms var(--ease-out) both;
   }
@@ -149,11 +137,6 @@
 @keyframes drain {
   to {
     stroke-dashoffset: 100;
-  }
-}
-@keyframes draw {
-  from {
-    background-size: 0% 0.075em, 100% 0.075em;
   }
 }
 @keyframes rise {

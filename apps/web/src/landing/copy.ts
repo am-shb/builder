@@ -13,7 +13,7 @@ export const SIGN_IN = "/sign-in";
 
 export const HERO = {
   eyebrow: "An AI teammate for your meetings",
-  headline: ["Your meeting ends with a", "working prototype."] as const,
+  headline: ["Your meeting ends with", "a", "working prototype."] as const,
   sub: `${BOT_NAME} joins your call, listens, and builds a clickable prototype on screen while the team decides.`,
   platforms: "Built for Google Meet. Zoom and Microsoft Teams links work too.",
   // What the hero's animation shows, for people who can't see it.

@@ -123,13 +123,17 @@ inputs). Labels and pills 14px semibold; small text 13–14px. Sentence case eve
 (ADR 0017), for large headings only.
 - **The file.** The package's `full` file is the only one with both the `SOFT` and `opsz` axes (checked in Chrome: the
   `standard` and `opsz` files have no `SOFT`, the `soft` file has no `opsz`). `globals.css` declares its Latin
-  subset itself, with `font-display: swap`, so no other subset ships.
+  subset itself, with `font-display: swap`, so no other subset ships. The italic `full` file is declared the same
+  way, for the few words a heading stresses (the hero's "working prototype."); a browser downloads it only on a page
+  that uses it.
 - **Settings.** `--font-display: "Fraunces Variable", ui-serif, Georgia, serif`, also a Tailwind utility
   (`font-display`). Optical size follows the font size (`font-optical-sizing: auto`, never pinned); only `SOFT` is
   pinned, at 60; `WONK` stays off. Weight 600.
 - **Classes** (plain CSS, so the axis settings stay as written), used together as `display display-lg`:
   `display` (the family and settings, line height 1.06, tracking -0.01em, balanced wrapping), `display-xl`
-  (`clamp(2.5rem, 7.1vw, 5.75rem)`, the landing page's hero only), `display-lg` (`clamp(1.875rem, 4.4vw, 3.5rem)`,
+  (`clamp(2.5rem, 7.1vw, 5.75rem)`, the landing page's hero only; the hero keeps its line height and tracking but
+  takes its size from its column, so it stays at two lines from 768px and three on phones, and never runs under the
+  hero's scene; checked from 360px to 2560px and at 125% and 150% zoom), `display-lg` (`clamp(1.875rem, 4.4vw, 3.5rem)`,
   section heads and the app's page titles), `display-md` (`clamp(1.25rem, 2.1vw, 1.75rem)`, card titles and FAQ
   questions) and `display-sm` (1.0625rem).
 - **Where.** The landing page's hero, section heads, card titles and FAQ questions; in the app, the page title

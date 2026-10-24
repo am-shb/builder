@@ -19,12 +19,16 @@ export function Hero() {
             <span className="size-2 rounded-full bg-live animate-breathe" aria-hidden="true" />
             {HERO.eyebrow}
           </p>
+          {/* display-xl's line height and tracking, at a size taken from the column (cqi): "Your meeting ends with" is
+              about 10.4em wide at these sizes (optical sizing widens it as it gets smaller), so 9.2cqi keeps it on
+              one line. From 768px the headline breaks after it, two lines, and wraps
+              normally (balancing would even it out into three). The last words are set in italic. */}
           <h1
             id="hero-title"
-            className="rise-in display display-xl mt-5 mb-0 break-words"
+            className="rise-in display display-xl mt-5 mb-0 text-[clamp(2rem,10cqi,2.75rem)] break-words md:text-[clamp(2.25rem,9.2cqi,3.75rem)] md:text-wrap xl:text-[clamp(2.5rem,9.2cqi,4rem)]"
             style={delay(80)}
           >
-            {HERO.headline[0]} <span className="agree-underline">{HERO.headline[1]}</span>
+            {HERO.headline[0]}<br className="max-md:hidden" /> {HERO.headline[1]} <span className="hero-emphasis">{HERO.headline[2]}</span>
           </h1>
           <p className="rise-in mx-auto mt-6 mb-0 max-w-[34em] text-lead text-pretty text-ink-2 xl:mx-0" style={delay(160)}>{HERO.sub}</p>
           <div className="rise-in mt-8 flex flex-wrap items-center gap-3 max-xl:justify-center" style={delay(240)}>
