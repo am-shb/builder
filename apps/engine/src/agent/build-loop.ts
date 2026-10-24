@@ -436,7 +436,7 @@ export function createBuildLoop(deps: {
   // A model batch as the room may see it: its credit grounded and its ops sanitised (known issues
   // I2 and M9). `reopened` names the agreed decisions this run reopens; only their nodes may go.
   // `propsDropped` counts props the catalog does not allow (unknown keys, wrong kinds, enum misses);
-  // `unoffered` counts adds of a type the model is not offered, skipped one by one (ADR 0017).
+  // `unoffered` counts adds of a type the model is not offered, skipped one by one (ADR 0018).
   function prepareBatch(input: ToolPatchBatch, rt: SessionRuntime, speakers: Set<string>, reopened: Set<string>) {
     const credit = groundCredit(input, speakers);
     const snap = view(rt);

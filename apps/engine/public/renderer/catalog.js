@@ -177,7 +177,7 @@ export const CATALOG = {
 export const COMPONENT_TYPES = Object.keys(CATALOG);
 
 /**
- * The types the build model is offered (ADR 0017), in catalog order. The renderer and the stored-tree
+ * The types the build model is offered (ADR 0018), in catalog order. The renderer and the stored-tree
  * schema keep every type in CATALOG so old sessions still draw; only the prompt table and the tool
  * schema sent to the model list these.
  */

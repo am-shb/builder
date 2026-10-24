@@ -185,7 +185,7 @@ export const ToolPatchBatch = z.strictObject({
 export type ToolPatchBatch = z.infer<typeof ToolPatchBatch>;
 
 /**
- * A JSON schema for the model with every component-type enum cut down to OFFERED_TYPES (ADR 0017).
+ * A JSON schema for the model with every component-type enum cut down to OFFERED_TYPES (ADR 0018).
  * The local zod schemas keep accepting every catalog type, so a stray unoffered `add` reaches
  * `fromToolBatch`, which drops just that op instead of failing the call.
  */

@@ -234,7 +234,7 @@ function propsToRecord(props: ToolProp[]): Record<string, unknown> {
  * a set_theme that sets no slot or has no decision at all, which could never be agreed or dropped
  * (both counted in `dropped`). Props the model is not offered (`region` on any type, a Screen's
  * `template`) are dropped and counted too, on adds and updates, and an `add` of a type outside OFFERED_TYPES is skipped with
- * its descendants in the batch, each skip counted in `unoffered` (ADR 0017). Updates to nodes that
+ * its descendants in the batch, each skip counted in `unoffered` (ADR 0018). Updates to nodes that
  * already exist keep working for every type.
  */
 export function fromToolBatch(
@@ -254,7 +254,7 @@ export function fromToolBatch(
     dropped += props.length - Object.keys(record).length;
     const out = normalizeProps(type ?? "", record);
     dropped += out.dropped.length;
-    // Valid for the renderer's stored trees, but not offered to the model (ADR 0017).
+    // Valid for the renderer's stored trees, but not offered to the model (ADR 0018).
     const omit = type !== undefined && Object.hasOwn(OFFERED_PROPS_OMIT, type) ? (OFFERED_PROPS_OMIT as Record<string, string[]>)[type] : [];
     for (const key of ["region", ...omit]) {
       if (Object.hasOwn(out.props, key)) {
