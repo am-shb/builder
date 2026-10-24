@@ -50,7 +50,7 @@ export function Hero() {
             {HERO.platforms}
           </p>
         </div>
-        <div className="rise-in relative mx-auto w-full min-w-0 max-w-[720px] xl:max-w-none" style={delay(200)}>
+        <div className="rise-in-fade relative mx-auto w-full min-w-0 max-w-[720px] xl:max-w-none" style={delay(200)}>
           <p className="sr-only">{HERO.sceneSummary}</p>
           <HeroScene />
         </div>

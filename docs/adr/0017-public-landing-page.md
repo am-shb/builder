@@ -37,7 +37,7 @@ Option 3.
   imports from it.
 - **SEO and sharing.** This supersedes ADR 0012's "needs no SEO" for the landing paths only. `index.html` carries a
   title, a description, Open Graph and Twitter tags, written at build time from `PRODUCT_NAME` by a Vite plugin. The
-  share image is `public/og.png`, made by `scripts/og-image.ts` with the local Chrome and committed. Its URL is made
+  share image is `public/og.png`, made by `scripts/share-images.ts` with the local Chrome and committed. Its URL is made
   absolute when the build knows the site's origin (`SITE_URL`, else Render's `RENDER_EXTERNAL_URL`), and is relative
   otherwise. `robots.txt` allows the landing paths and asks crawlers to skip the app's.
 - **Design.** The landing page uses the Boardroom tokens, fonts and color mode (ADR 0015), with larger type and more

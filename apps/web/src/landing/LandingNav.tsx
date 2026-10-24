@@ -1,12 +1,66 @@
-import { ArrowRight, Menu } from "lucide-react";
-import { useRef, useState, type MouseEvent } from "react";
+import { ArrowRight, Menu, SunMoon } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent } from "react";
 import { buttonVariants } from "../components/Button.tsx";
-import { ColorModeMenu } from "../components/ColorModeMenu.tsx";
 import { Mark } from "../components/Mark.tsx";
-import { ResponsiveModal } from "../components/ResponsiveModal.tsx";
 import { cn } from "../lib/cn.ts";
 import { NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
 import { useInView } from "./useInView.ts";
+
+// Off the first screen's path (ADR 0017), so a slow phone spends its bandwidth on the page itself: the color menu loads
+// once the page has loaded and the browser is idle, or as soon as someone points at or focuses its button; the phone
+// menu's sheet loads when Menu is first pressed.
+const loadColorMenu = () => import("../components/ColorModeMenu.tsx").then((m) => ({ default: m.ColorModeMenu }));
+const ColorModeMenu = lazy(loadColorMenu);
+const ResponsiveModal = lazy(() => import("../components/ResponsiveModal.tsx").then((m) => ({ default: m.ResponsiveModal })));
+
+let colorMenuWanted = false;
+const wanters = new Set<() => void>();
+function wantColorMenu() {
+  if (colorMenuWanted) return;
+  colorMenuWanted = true;
+  for (const w of wanters) w();
+}
+
+// True once the page has finished loading and the browser has a quiet moment.
+function useColorMenuWanted(): boolean {
+  const [wanted, setWanted] = useState(colorMenuWanted);
+  useEffect(() => {
+    const on = () => setWanted(true);
+    wanters.add(on);
+    if (colorMenuWanted) on();
+    const idle = () => (typeof requestIdleCallback === "function" ? requestIdleCallback(wantColorMenu, { timeout: 2500 }) : setTimeout(wantColorMenu, 1200));
+    if (document.readyState === "complete") idle();
+    else window.addEventListener("load", idle, { once: true });
+    return () => {
+      wanters.delete(on);
+      window.removeEventListener("load", idle);
+    };
+  }, []);
+  return wanted;
+}
+
+function ColorModeButton({ className }: { className?: string }) {
+  const wanted = useColorMenuWanted();
+  // Looks like the menu's button; pointing at it or focusing it loads the menu, which then takes its place.
+  const placeholder = (
+    <button
+      type="button"
+      aria-label="Color mode"
+      onPointerEnter={wantColorMenu}
+      onFocus={wantColorMenu}
+      onClick={wantColorMenu}
+      className={cn("grid size-11 shrink-0 place-items-center rounded-full text-ink-2 hover:bg-sunk hover:text-ink", className)}
+    >
+      <SunMoon aria-hidden="true" className="size-5" />
+    </button>
+  );
+  if (!wanted) return placeholder;
+  return (
+    <Suspense fallback={placeholder}>
+      <ColorModeMenu className={className} />
+    </Suspense>
+  );
+}
 
 // Moves to a section by its #id and gives it focus, so the keyboard and screen readers continue from there.
 export function goToSection(hash: string) {
@@ -23,6 +77,8 @@ export function goToSection(hash: string) {
 export function LandingNav({ home = false }: { home?: boolean }) {
   const [topRef, atTop] = useInView<HTMLDivElement>();
   const [open, setOpen] = useState(false);
+  // The sheet is mounted from the first press of Menu on, so it can animate open and closed after that.
+  const [menuUsed, setMenuUsed] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   // A section link chosen in the sheet: followed once the sheet has closed and the page can scroll again.
   const pending = useRef<string | null>(null);
@@ -63,7 +119,7 @@ export function LandingNav({ home = false }: { home?: boolean }) {
             ))}
           </ul>
           <div className="ml-auto flex items-center gap-1 lg:ml-4">
-            <ColorModeMenu className="hidden sm:grid" />
+            <ColorModeButton className="hidden sm:grid" />
             <a href={SIGN_IN} className="hidden min-h-11 items-center rounded-full px-3.5 text-label font-semibold text-ink no-underline transition-colors hover:bg-sunk md:flex">
               Sign in
             </a>
@@ -73,7 +129,7 @@ export function LandingNav({ home = false }: { home?: boolean }) {
             <button
               ref={menuButton}
               type="button"
-              onClick={() => setOpen(true)}
+              onClick={() => { setMenuUsed(true); setOpen(true); }}
               aria-haspopup="dialog"
               aria-expanded={open}
               className="grid size-11 shrink-0 place-items-center rounded-full text-ink hover:bg-sunk lg:hidden"
@@ -84,7 +140,7 @@ export function LandingNav({ home = false }: { home?: boolean }) {
           </div>
         </nav>
       </header>
-      <ResponsiveModal
+      {menuUsed && <Suspense fallback={null}><ResponsiveModal
         open={open}
         onOpenChange={setOpen}
         title="Menu"
@@ -111,13 +167,13 @@ export function LandingNav({ home = false }: { home?: boolean }) {
         </ul>
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-hair pt-4">
           <span className="text-label font-medium text-ink-2">Color mode</span>
-          <ColorModeMenu />
+          <ColorModeButton />
         </div>
         <div className="mt-4 grid gap-2.5">
           <a href={SIGN_UP} className={cn(buttonVariants({ block: true }), "no-underline")}>Start free</a>
           <a href={SIGN_IN} className={cn(buttonVariants({ variant: "secondary", block: true }), "no-underline")}>Sign in</a>
         </div>
-      </ResponsiveModal>
+      </ResponsiveModal></Suspense>}
     </>
   );
 }

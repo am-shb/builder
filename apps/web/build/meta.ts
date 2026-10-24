@@ -61,11 +61,27 @@ export function injectMeta(html: string, origin: string | null): string {
   return html.replace("<title></title>", `<title>${escapeText(SHARE.title)}</title>\n    ${metaTags(origin)}`);
 }
 
+// The two fonts the first screen needs, preloaded so they download with the page rather than after its script:
+// the text font and the display font, Latin only (globals.css).
+const PRELOAD_FONTS = [/^assets\/schibsted-grotesk-latin-wght-normal-[\w-]+\.woff2$/, /^assets\/fraunces-latin-full-normal-[\w-]+\.woff2$/];
+
+export function fontPreloads(files: string[]): string {
+  return PRELOAD_FONTS.map((pattern) => files.find((f) => pattern.test(f)))
+    .filter((f): f is string => !!f)
+    .map((f) => `<link rel="preload" href="/${f}" as="font" type="font/woff2" crossorigin />`)
+    .join("\n    ");
+}
+
 export function metaPlugin(): Plugin {
   return {
     name: "builder-meta",
-    transformIndexHtml(html) {
-      return injectMeta(html, siteOrigin(process.env));
+    transformIndexHtml: {
+      order: "post",
+      handler(html, ctx) {
+        const withMeta = injectMeta(html, siteOrigin(process.env));
+        const preloads = ctx.bundle ? fontPreloads(Object.keys(ctx.bundle)) : "";
+        return preloads ? withMeta.replace("</title>", `</title>\n    ${preloads}`) : withMeta;
+      },
     },
   };
 }

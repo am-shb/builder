@@ -91,6 +91,10 @@ describe("the landing page", () => {
     useScreen({ ...PHONE, reducedMotion: true });
     const timers = new Set<unknown>();
     const original = window.setTimeout;
+    // The color menu waits for the browser to be idle; that isn't the scene's timer.
+    const w = window as unknown as { requestIdleCallback?: unknown };
+    const idle = w.requestIdleCallback;
+    w.requestIdleCallback = () => 0;
     window.setTimeout = ((fn: () => void, ms?: number) => { const id = original(fn, ms); timers.add(id); return id; }) as typeof window.setTimeout;
     try {
       render(<LandingPage />);
@@ -101,6 +105,7 @@ describe("the landing page", () => {
       expect(timers.size).toBe(0);
     } finally {
       window.setTimeout = original;
+      w.requestIdleCallback = idle;
     }
   });
 

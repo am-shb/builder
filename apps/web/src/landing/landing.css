@@ -80,6 +80,13 @@
     mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
   }
 
+  /* Sections below the hero are laid out and painted only when they come near the screen, so the first screen is
+     ready sooner on a slow phone. The size is a guess until a section has been shown once. */
+  .below-fold {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1100px;
+  }
+
   /* A card lifts a little on hover, and with a mouse a soft light follows the pointer across it. */
   .card-lift {
     transition: transform 280ms var(--ease-out), box-shadow 280ms var(--ease-out);
@@ -172,7 +179,12 @@
   .ring-drain.is-running {
     animation: drain 3.4s linear forwards;
   }
+  /* The hero's words rise a little but are never transparent: they are the first thing to read, and a page's largest
+     text or button counts as shown only once it is visible. The scene beside them fades in. */
   .rise-in {
+    animation: rise-text 700ms var(--ease-out) both;
+  }
+  .rise-in-fade {
     animation: rise 800ms var(--ease-out) both;
   }
 
@@ -287,6 +299,11 @@
 @keyframes drain {
   to {
     stroke-dashoffset: 100;
+  }
+}
+@keyframes rise-text {
+  from {
+    transform: translateY(10px);
   }
 }
 @keyframes rise {

@@ -8,7 +8,7 @@ export const WRAP = "mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-10 2xl:max
 // A section of the page: a landmark named by its heading, which the nav's links can move focus to.
 export function Section({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} tabIndex={-1} className={cn("relative scroll-mt-20 py-20 outline-none md:py-24 lg:py-28", className)}>
+    <section id={id} aria-labelledby={`${id}-title`} tabIndex={-1} className={cn("below-fold relative scroll-mt-20 py-20 outline-none md:py-24 lg:py-28", className)}>
       <div className={WRAP}>{children}</div>
     </section>
   );
