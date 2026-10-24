@@ -9,7 +9,7 @@ import { z } from "zod";
 import { withCostRecording } from "./cost.ts";
 import { toolJsonSchema } from "./tool-schema.ts";
 import type { ModelPort, PortTool, RunToolsResult, ToolCall } from "./llm.ts";
-import { HandoffSchema, HandoffToolInput } from "./handoff.ts";
+import { HandoffSchema, HandoffToolInput, repairHandoffInput } from "./handoff.ts";
 import type { Handoff } from "./handoff.ts";
 import { matchSpokenPick } from "./spoken-pick.ts";
 import { LATE_AGREE_MS } from "./build-loop.ts";
@@ -107,6 +107,7 @@ const TOOLS: PortTool[] = [
     strict: true,
     input_schema: toolJsonSchema(HandoffSchema),
     schema: HandoffToolInput,
+    repair: repairHandoffInput,
   },
 ];
 

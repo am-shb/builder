@@ -20,13 +20,15 @@ export const Proposal = z.strictObject({
 });
 export type Proposal = z.infer<typeof Proposal>;
 
+const ResolvedChoice = z.strictObject({ conflictId: z.string(), winner: VariantLabel });
+
 export const Topic = z.strictObject({
   title: z.string(),
   task: z.string().optional(),
   screenHint: z.string().optional(),
   proposals: z.array(Proposal),
   questionsRaised: z.array(z.string()),
-  resolvedChoice: z.strictObject({ conflictId: z.string(), winner: VariantLabel }).optional(),
+  resolvedChoice: ResolvedChoice.optional(),
 });
 
 // groundingIds are events.id values of the utterances the hand-off summarises.
@@ -48,18 +50,57 @@ export const HandoffToolInput = z.preprocess(repairHandoff, HandoffSchema);
 const isRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 
 function repairHandoff(v: unknown): unknown {
-  return hoistRequestedView(normalizeResolvedChoices(v));
+  return hoistRequestedView(repairHandoffInput(v).input);
 }
 
-function normalizeResolvedChoices(v: unknown): unknown {
-  if (!isRecord(v) || !Array.isArray(v.topics) || !v.topics.some((t) => isRecord(t) && t.resolvedChoice !== undefined)) return v;
-  return { ...v, topics: v.topics.map((t) => (isRecord(t) && t.resolvedChoice !== undefined ? { ...t, resolvedChoice: normalizeResolvedChoice(t.resolvedChoice) } : t)) };
+export type Repair = { path: string; code: "null_dropped" | "invalid_dropped" };
+
+const NULLABLE_TOPIC_KEYS = ["task", "screenHint", "requestedView"] as const;
+
+/**
+ * The update_build input with what would otherwise lose the whole hand-off taken out: an optional field the
+ * model wrote as null (models write null for "none"), and a resolvedChoice no shape matches (a bad pick must not
+ * cost the topic's proposals; dropping it picks nothing). A recognisable pick is normalised. `repairs` lists
+ * each path and what was done, for the port's llm_tool_repaired log (never the values).
+ */
+export function repairHandoffInput(v: unknown): { input: unknown; repairs: Repair[] } {
+  const repairs: Repair[] = [];
+  if (!isRecord(v)) return { input: v, repairs };
+  let out: Record<string, unknown> = v;
+  if (v.requestedView === null) {
+    const { requestedView: _null, ...rest } = v;
+    out = rest;
+    repairs.push({ path: "requestedView", code: "null_dropped" });
+  }
+  if (!Array.isArray(v.topics)) return { input: out, repairs };
+  const topics = v.topics.map((t, i) => {
+    if (!isRecord(t)) return t;
+    const topic: Record<string, unknown> = { ...t };
+    for (const key of NULLABLE_TOPIC_KEYS) {
+      if (topic[key] !== null) continue;
+      delete topic[key];
+      repairs.push({ path: `topics.${i}.${key}`, code: "null_dropped" });
+    }
+    if (topic.resolvedChoice === null) {
+      delete topic.resolvedChoice;
+      repairs.push({ path: `topics.${i}.resolvedChoice`, code: "null_dropped" });
+    } else if (topic.resolvedChoice !== undefined) {
+      const pick = normalizeResolvedChoice(topic.resolvedChoice);
+      if (ResolvedChoice.safeParse(pick).success) topic.resolvedChoice = pick;
+      else {
+        delete topic.resolvedChoice;
+        repairs.push({ path: `topics.${i}.resolvedChoice`, code: "invalid_dropped" });
+      }
+    }
+    return topic;
+  });
+  return { input: { ...out, topics }, repairs };
 }
 
 // Models write the room's pick as a JSON string, a bare label ("B", "option b"), or an object with
 // `label` for `winner` or no conflict id (a production session lost a pick to this). A recognised
 // shape becomes { conflictId, winner }, with conflictId "*" when only a label was given (the build
-// loop reads that as the one open conflict). Anything else comes back unchanged and fails validation.
+// loop reads that as the one open conflict). Anything else comes back unchanged (repairHandoffInput drops it).
 export function normalizeResolvedChoice(v: unknown): unknown {
   const label = (x: unknown) => {
     const m = typeof x === "string" ? /^\s*(?:option\s*)?([abc])\s*$/i.exec(x) : null;

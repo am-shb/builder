@@ -361,10 +361,18 @@ test("update_build survives the observed slips (requestedView inside a topic, an
   assert.deepEqual(repaired?.fields?.repairs, [{ path: "", code: "unrecognized_keys" }]);
   assert.ok(!JSON.stringify(c.logs).includes("extraNote"), "repairs log paths and codes only");
 
+  // A null pick (models write null for "none") or one no shape matches is dropped, logged by path only; the
+  // topic and the rest of the hand-off are kept.
+  for (const [pick, code] of [[null, "null_dropped"], [{ conflictId: 7 }, "invalid_dropped"], [{ conflictId: "c1", winner: "D" }, "invalid_dropped"]] as const) {
+    const d = await run({ ...observed, topics: [{ ...settled, resolvedChoice: pick }] });
+    assert.equal(d.r.dropped, 0, JSON.stringify(pick));
+    assert.deepEqual(d.h?.topics[0], { title: "Progress view", proposals: [], questionsRaised: [] });
+    assert.deepEqual(d.logs.find((l) => l.msg === "llm_tool_repaired")?.fields?.repairs, [{ path: "topics.0.resolvedChoice", code }]);
+  }
+
   // Ids, enums and types stay strict.
   for (const bad of [
     { ...observed, mood: "bogus" },
-    { ...observed, topics: [{ ...settled, resolvedChoice: { conflictId: "c1", winner: "D" } }] },
     { ...observed, groundingIds: [1.5] },
     { ...observed, groundingIds: undefined },
     { ...observed, topics: [{ ...settings, proposals: undefined }] },

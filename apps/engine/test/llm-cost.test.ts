@@ -7,7 +7,7 @@ import { loadConfig } from "../src/config.ts";
 import { createRecallClient } from "../src/recall-client.ts";
 import { settle, testStore } from "./helpers/store.ts";
 import { createApp } from "../src/app.ts";
-import { MODELS, BUILD_FALLBACKS, DEADLINE_MS, createFakePort, createOpenRouterPort, type ToolCall } from "../src/agent/llm.ts";
+import { MODELS, BUILD_FALLBACKS, DEADLINE_MS, createFakePort, createOpenRouterPort, issueDetails, type ToolCall } from "../src/agent/llm.ts";
 import { PRICES, costOf, withCostRecording } from "../src/agent/cost.ts";
 import { patchBatchJsonSchema, ToolPatchBatch } from "../src/ui/schema.ts";
 
@@ -368,12 +368,29 @@ test("llm_tool_dropped logs each zod issue's dotted path and code, never values 
   assert.equal(drop.fields!.reason, "invalid_input");
   assert.equal(drop.fields!.issues, 3);
   const details = drop.fields!.issue_details as { path: string; code: string }[];
+  // zod's `expected` type and the received value's type name (typeof, "null" or "array"), never the value.
   assert.deepEqual(
     [...details].sort((a, b) => a.path.localeCompare(b.path)),
-    [{ path: "items.1", code: "unrecognized_keys" }, { path: "items.1.kind", code: "invalid_value" }, { path: "items.1.tag", code: "invalid_type" }],
+    [
+      { path: "items.1", code: "unrecognized_keys", received: "object" },
+      { path: "items.1.kind", code: "invalid_value", received: "string" },
+      { path: "items.1.tag", code: "invalid_type", expected: "string", received: "number" },
+    ],
   );
   const text = JSON.stringify(logs);
-  for (const leak of ["leak-me", "secret-kind", "extra", "9137", "expected"]) assert.ok(!text.includes(leak), `log must not contain ${leak}`);
+  for (const leak of ["leak-me", "secret-kind", "extra", "9137", "Invalid"]) assert.ok(!text.includes(leak), `log must not contain ${leak}`);
+});
+
+test("issueDetails names the received type as null, array or typeof, and a missing value as undefined", () => {
+  const input = { a: null, b: [1], c: { d: "x" } };
+  const at = (path: PropertyKey[], expected?: string) => ({ path, code: "invalid_type", ...(expected ? { expected } : {}) });
+  assert.deepEqual(issueDetails([at(["a"], "string"), at(["b"], "object"), at(["c", "d"], "number"), at(["e"], "array")], { input }), [
+    { path: "a", code: "invalid_type", expected: "string", received: "null" },
+    { path: "b", code: "invalid_type", expected: "object", received: "array" },
+    { path: "c.d", code: "invalid_type", expected: "number", received: "string" },
+    { path: "e", code: "invalid_type", expected: "array", received: "undefined" },
+  ]);
+  assert.deepEqual(issueDetails([at(["a"], "string")]), [{ path: "a", code: "invalid_type", expected: "string" }], "without the input, no received");
 });
 
 test("port keeps an apply_patches call whose props were written as an object", async () => {
