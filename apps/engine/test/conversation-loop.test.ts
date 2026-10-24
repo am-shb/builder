@@ -42,7 +42,7 @@ function heldPort() {
 // would cost more than the tests themselves.
 const sharedStore = testStore();
 
-async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome } = {}) {
+async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?: (sessionId: string, cmd: UiCommand) => CommandOutcome; failSpeech?: { on: boolean } } = {}) {
   const store = await sharedStore;
   const sessionId = randomUUID();
   await store.createIntent(sessionId, "https://meet.google.com/abc-defg-hij");
@@ -59,7 +59,7 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
     { handoff: (_sid: string, h: Handoff) => { handoffs.push(h); for (const f of handoffHooks) f(h); } };
   const said: string[] = [];
   const stops: string[] = [];
-  const speech: Speech = { say: async (_sid, text) => { said.push(text); return `u${said.length}`; }, stop: (sid) => { stops.push(sid); }, speaking: () => false };
+  const speech: Speech = { say: async (_sid, text) => { if (opts.failSpeech?.on) throw new Error("speech down"); said.push(text); return `u${said.length}`; }, stop: (sid) => { stops.push(sid); }, speaking: () => false };
   const logs: { msg: string; fields?: Record<string, unknown> }[] = [];
   const loop = createConversationLoop({
     port, runtime, buildLoop, speech, store, clock, log: (msg, fields) => logs.push({ msg, fields }),
@@ -72,7 +72,7 @@ async function setup(portOrScript: ModelPort | ToolCall[][], opts: { uiCommand?:
     return e.id;
   };
   return {
-    store, sessionId, rt, loop, requests, buildLoop, handoffs, handoffHooks, said, stops, logs, sent, say,
+    opts, store, sessionId, rt, loop, requests, buildLoop, handoffs, handoffHooks, said, stops, logs, sent, say,
     advance: (ms: number) => { t += ms; return t; },
     now: () => t,
     mood: () => (rt.snapshot() as Snapshot).mood,
@@ -1027,4 +1027,18 @@ test("the model's own confirm_conflict for a resolution Builder already confirme
   await s.say("Amir", "Sounds fine to me.");
   await flush();
   assert.deepEqual(s.said, ["So: B. Everyone OK?"]);
+});
+
+test("a confirmation whose speech fails is not marked confirmed, so the model can still confirm it", async () => {
+  const s = await setup([[], [speak("So: B. Everyone OK?", "confirm_conflict")]], { failSpeech: { on: true } });
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
+  assert.equal(s.logs.some((l) => l.msg === "conversation.confirm_spoken"), false);
+  s.opts.failSpeech!.on = false;
+  await s.say("Amir", "Sounds fine to me.");
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"], "the model's own confirmation still opens");
 });

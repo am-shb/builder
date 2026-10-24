@@ -572,9 +572,14 @@ export function createConversationLoop(deps: {
       if (!c || c.status !== "resolved" || c.winner !== winner || !freshResolutions(st, doc, now).includes(conflictId)) return;
       if (speech.speaking(sessionId)) return;
       st.confirmed.add(conflictId);
-      if (await deliver(sessionId, st, `So: ${winner}. Everyone OK?`, "confirm_conflict", st.addressedAt)) {
-        log("conversation.confirm_spoken", { session_id: sessionId, conflict_id: conflictId, winner });
+      let said = false;
+      try {
+        said = await deliver(sessionId, st, `So: ${winner}. Everyone OK?`, "confirm_conflict", null);
+      } finally {
+        // Unsaid, so the model's own confirm_conflict (or a later turn) can still confirm it.
+        if (!said) st.confirmed.delete(conflictId);
       }
+      if (said) log("conversation.confirm_spoken", { session_id: sessionId, conflict_id: conflictId, winner });
     } catch (err) {
       log("conversation.confirm_failed", { session_id: sessionId, error: errorCode(err) });
     }
@@ -597,7 +602,8 @@ export function createConversationLoop(deps: {
       // Once the pick is taken and really resolved the conflict, Builder confirms it itself.
       const taken = buildLoop.taken?.(sessionId) ?? null;
       const confirm = () => confirmPick(sessionId, comparison.conflictId, winner);
-      if (taken) void taken.then(confirm, () => {}); else void confirm();
+      if (taken) void taken.then(confirm, (err) => log("conversation.confirm_failed", { session_id: sessionId, error: errorCode(err) }));
+      else void confirm();
     } catch (err) {
       log("conversation.spoken_pick_failed", { session_id: sessionId, error: errorCode(err) });
     }

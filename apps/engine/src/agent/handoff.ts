@@ -133,14 +133,28 @@ export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<strin
   return { batch: rest, dropped: 1 };
 }
 
+/** Who stands behind a still-open decision, and the node ids it affects. */
+export type PriorBacking = { names: string[]; affects: string[] };
+
+const nodeIds = (n: { id: string; children?: unknown[] }): string[] => [n.id, ...(n.children ?? []).flatMap((c) => nodeIds(c as { id: string; children?: unknown[] }))];
+// Node ids a variant's patches add, update, remove or move.
+function touchedIds(batch: ToolPatchBatch): Set<string> {
+  const ids = new Set<string>();
+  for (const op of batch.ops) {
+    if (op.op === "add") for (const id of nodeIds(op.node)) ids.add(id);
+    else if (op.op === "update" || op.op === "remove" || op.op === "move") ids.add(op.id);
+  }
+  return ids;
+}
+
 /**
  * Only people heard in the grounding lines can propose, back or object. Drops support/object ops
  * and add_decision ops whose speaker is not among them, and strips ungrounded conflict backers
  * (backers become agreed_by when a conflict resolves) and variant credits. A conflict's variant backers
- * may also be in `priorBackers`: people who proposed or backed a still-open decision in an earlier hand-off
- * (grounded when recorded), whose rival came later. `dropped` counts ops, backers and credits removed.
+ * may also be people who proposed or backed a still-open decision in an earlier hand-off (grounded when
+ * recorded) that affects nodes the variant itself touches (`prior`). `dropped` counts ops, backers and credits removed.
  */
-export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, priorBackers: Set<string> = new Set()): { ops: ConsensusUpdate[]; dropped: number } {
+export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, prior: PriorBacking[] = []): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
   const kept: ConsensusUpdate[] = [];
   for (const op of ops) {
@@ -151,7 +165,9 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     }
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
-        const backers = v.backers.filter((b) => groundingSpeakers.has(b) || priorBackers.has(b));
+        const touched = touchedIds(v.batch);
+        const earlier = new Set(prior.filter((p) => p.affects.some((a) => touched.has(a))).flatMap((p) => p.names));
+        const backers = v.backers.filter((b) => groundingSpeakers.has(b) || earlier.has(b));
         const credit = groundCredit(v.batch, groundingSpeakers);
         dropped += v.backers.length - backers.length + credit.dropped;
         return { ...v, backers, batch: credit.batch };
