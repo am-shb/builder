@@ -70,11 +70,6 @@
     background-size: 16px 16px;
   }
 
-  /* The words the hero's headline stresses: the display font's italic, same size, weight and settings. */
-  .hero-emphasis {
-    font-style: italic;
-  }
-
   /* Soft light behind the hero scene. Each spot fades out well inside the box, and the box itself fades at its
      edges, so the light never ends in a visible line. */
   .hero-glow {

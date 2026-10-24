@@ -123,9 +123,9 @@ inputs). Labels and pills 14px semibold; small text 13–14px. Sentence case eve
 (ADR 0017), for large headings only.
 - **The file.** The package's `full` file is the only one with both the `SOFT` and `opsz` axes (checked in Chrome: the
   `standard` and `opsz` files have no `SOFT`, the `soft` file has no `opsz`). `globals.css` declares its Latin
-  subset itself, with `font-display: swap`, so no other subset ships. The italic `full` file is declared the same
-  way, for the few words a heading stresses (the hero's "working prototype."); a browser downloads it only on a page
-  that uses it.
+  subset itself, with `font-display: swap`, so no other subset ships.
+- **Upright only.** Display headings use no italic, underline or other decoration; the whole heading is one weight and
+  one color.
 - **Settings.** `--font-display: "Fraunces Variable", ui-serif, Georgia, serif`, also a Tailwind utility
   (`font-display`). Optical size follows the font size (`font-optical-sizing: auto`, never pinned); only `SOFT` is
   pinned, at 60; `WONK` stays off. Weight 600.
