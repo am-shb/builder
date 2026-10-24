@@ -236,6 +236,41 @@ test("support by a speaker not in grounding lines is dropped", async () => {
   assert.deepEqual(r.ops.map((o) => o.op), ["support", "mark_pending"]);
 });
 
+test("enforceGrounding keeps conflict backers from priorBackers, and nothing else", () => {
+  const conflict = { op: "add_conflict" as const, id: "c1", topic: "T", variants: [
+    conflictVariant("A", "a", ["Amin", "Ghost"], []),
+    conflictVariant("B", "b", ["Omid"], []),
+  ] };
+  const r = enforceGrounding([conflict], new Set(["Omid"]), new Set(["Amin"]));
+  const op = r.ops[0] as typeof conflict;
+  assert.deepEqual(op.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+  assert.equal(r.dropped, 1, "only Ghost, who is in neither set, is dropped");
+
+  const r2 = enforceGrounding([
+    { op: "support", decisionId: "d1", speaker: "Amin" },
+    { op: "add_decision", id: "d2", text: "x", proposedBy: "Amin", affects: [] },
+  ], new Set(["Omid"]), new Set(["Amin"]));
+  assert.deepEqual(r2.ops, [], "support and add_decision still need this hand-off's speakers");
+  assert.equal(r2.dropped, 2);
+});
+
+test("a conflict recorded in a later hand-off keeps the earlier proposer as a backer of their variant", async () => {
+  const s = await setup([
+    [consensus([{ op: "add_decision", id: "d-top", text: "The special on top", proposedBy: "Amin", affects: [] }])],
+    [consensus([{ op: "add_conflict", id: "c-special", topic: "Special placement", variants: [
+      conflictVariant("A", "Special on top", ["Amin"], [addNode("home", "home.special-a", "Badge", [["text", "Special"]])]),
+      conflictVariant("B", "Special at the bottom", ["Omid"], [addNode("home", "home.special-b", "Badge", [["text", "Special"]])]),
+    ] }])],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "the special on top")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "no, at the bottom")], {}, "Placement"));
+  await flush();
+  await s.timers.advance(30_000);
+  const c = s.doc().conflicts.find((x) => x.id === "c-special")!;
+  assert.deepEqual(c.variants.map((v) => v.backers), [["Amin"], ["Omid"]]);
+});
+
 test("handoffs during a run are merged into exactly one follow-up run", async () => {
   const g = gatedPort([[], [], []]);
   const s = await setup(g.port);

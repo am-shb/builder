@@ -560,6 +560,26 @@ export function createConversationLoop(deps: {
     }
   };
 
+  // Speaks "So: <label>. Everyone OK?" for a conflict a spoken pick just resolved, through the same path as
+  // speak (reason confirm_conflict), and marks it confirmed so the model's own confirmation is not also said.
+  async function confirmPick(sessionId: string, conflictId: string, winner: string): Promise<void> {
+    try {
+      if (ended.has(sessionId)) return;
+      const st = state(sessionId);
+      const doc = view(sessionId).doc;
+      const now = clock();
+      const c = doc.conflicts.find((x) => x.id === conflictId);
+      if (!c || c.status !== "resolved" || c.winner !== winner || !freshResolutions(st, doc, now).includes(conflictId)) return;
+      if (speech.speaking(sessionId)) return;
+      st.confirmed.add(conflictId);
+      if (await deliver(sessionId, st, `So: ${winner}. Everyone OK?`, "confirm_conflict", st.addressedAt)) {
+        log("conversation.confirm_spoken", { session_id: sessionId, conflict_id: conflictId, winner });
+      }
+    } catch (err) {
+      log("conversation.confirm_failed", { session_id: sessionId, error: errorCode(err) });
+    }
+  }
+
   // A person's line that plainly picks an option shown on screen goes straight to the build loop, grounded in
   // that line, without waiting for the model to notice. The line still gets its normal turn. Never throws.
   const spokenPick = (sessionId: string, eventId: number, speaker: string | null, text: string) => {
@@ -574,6 +594,10 @@ export function createConversationLoop(deps: {
         topics: [{ title: "Pick", task: `Merging option ${winner}`, proposals: [], questionsRaised: [], resolvedChoice: { conflictId: comparison.conflictId, winner } }],
         mood: "converging", groundingIds: [eventId],
       });
+      // Once the pick is taken and really resolved the conflict, Builder confirms it itself.
+      const taken = buildLoop.taken?.(sessionId) ?? null;
+      const confirm = () => confirmPick(sessionId, comparison.conflictId, winner);
+      if (taken) void taken.then(confirm, () => {}); else void confirm();
     } catch (err) {
       log("conversation.spoken_pick_failed", { session_id: sessionId, error: errorCode(err) });
     }

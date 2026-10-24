@@ -979,3 +979,52 @@ test("a line that triggers a spoken pick still gets its normal model turn", asyn
   assert.equal(s.handoffs.length, 1);
   assert.equal(s.requests.length, 1, "the model is still called for that line");
 });
+
+// A pick on screen for conflict c1 (also in the doc), resolved by the fake build loop when it gets the hand-off.
+function pickSetup(s: Awaited<ReturnType<typeof setup>>, resolves = true) {
+  s.rt.setDoc(conflictDoc());
+  const variant = (label: string) => ({ label, summary: `Option ${label}`, backers: [], proto: { screens: [] } as never, focusIds: [] });
+  s.rt.showComparison({ conflictId: "c1", topic: "Where done tasks go", variants: [variant("A"), variant("B")] });
+  let taken: Promise<void> | null = null;
+  s.buildLoop.taken = () => taken;
+  s.handoffHooks.push((h) => {
+    const c = h.topics[0]?.resolvedChoice;
+    if (c && resolves) taken = new Promise<void>((r) => setTimeout(r, 10)).then(() => { s.rt.resolveComparison(c.conflictId, c.winner); taken = null; });
+  });
+}
+
+test("a spoken pick that resolves the conflict is confirmed out loud, once", async () => {
+  const s = await setup([[], []]);
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"]);
+  assert.deepEqual(s.logs.find((l) => l.msg === "conversation.confirm_spoken")?.fields, { session_id: s.sessionId, conflict_id: "c1", winner: "B" });
+  assert.equal(JSON.stringify(s.logs).includes("Everyone OK"), false, "no spoken text in logs");
+});
+
+test("no spoken confirmation when the pick did not resolve anything", async () => {
+  const s = await setup([[]]);
+  pickSetup(s, false);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(s.said, []);
+  const t = await setup([[]]);
+  await t.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  assert.deepEqual(t.said, [], "no comparison on screen");
+});
+
+test("the model's own confirm_conflict for a resolution Builder already confirmed is not said again", async () => {
+  const s = await setup([[], [speak("So: B. Everyone OK?", "confirm_conflict")]]);
+  pickSetup(s);
+  await s.say("Sara", "let's go with B");
+  await new Promise((r) => setTimeout(r, 40));
+  await flush();
+  await s.say("Amir", "Sounds fine to me.");
+  await flush();
+  assert.deepEqual(s.said, ["So: B. Everyone OK?"]);
+});

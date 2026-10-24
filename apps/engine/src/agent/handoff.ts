@@ -136,10 +136,11 @@ export function groundCredit(batch: ToolPatchBatch, groundingSpeakers: Set<strin
 /**
  * Only people heard in the grounding lines can propose, back or object. Drops support/object ops
  * and add_decision ops whose speaker is not among them, and strips ungrounded conflict backers
- * (backers become agreed_by when a conflict resolves) and variant credits. `dropped` counts ops,
- * backers and credits removed.
+ * (backers become agreed_by when a conflict resolves) and variant credits. A conflict's variant backers
+ * may also be in `priorBackers`: people who proposed or backed a still-open decision in an earlier hand-off
+ * (grounded when recorded), whose rival came later. `dropped` counts ops, backers and credits removed.
  */
-export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>): { ops: ConsensusUpdate[]; dropped: number } {
+export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<string>, priorBackers: Set<string> = new Set()): { ops: ConsensusUpdate[]; dropped: number } {
   let dropped = 0;
   const kept: ConsensusUpdate[] = [];
   for (const op of ops) {
@@ -150,7 +151,7 @@ export function enforceGrounding(ops: ConsensusUpdate[], groundingSpeakers: Set<
     }
     if (op.op === "add_conflict") {
       const variants = op.variants.map((v) => {
-        const backers = v.backers.filter((b) => groundingSpeakers.has(b));
+        const backers = v.backers.filter((b) => groundingSpeakers.has(b) || priorBackers.has(b));
         const credit = groundCredit(v.batch, groundingSpeakers);
         dropped += v.backers.length - backers.length + credit.dropped;
         return { ...v, backers, batch: credit.batch };

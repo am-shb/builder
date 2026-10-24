@@ -450,7 +450,11 @@ export function createBuildLoop(deps: {
       if (parsed.success) ops.push(...parsed.data.ops);
       else consensusInvalid++;
     }
-    const grounded = enforceGrounding(ops, speakers);
+    // People behind decisions still open in the doc were grounded when those were recorded.
+    const priorBackers = new Set(view(rt).doc.decisions
+      .filter((d) => d.status === "draft" || d.status === "pending")
+      .flatMap((d) => [d.proposedBy, ...d.agreedBy]));
+    const grounded = enforceGrounding(ops, speakers, priorBackers);
     // The agreed decisions this run's ops reopen: only their nodes may a batch remove (known issue I2).
     const current = view(rt).doc;
     const planned = applyConsensusOps(current, grounded.ops, clock(), view(rt).proto).doc;
