@@ -50,7 +50,7 @@ try {
       }
       scrollTo({ top: 0, behavior: "instant" });
     });
-    // With motion: wait for the reveals to finish, and for the hero's moment with the most on screen.
+    // With motion: wait for the reveals to finish, and for the hero's first part to be built and agreed.
     await page.waitForTimeout(c.motion ? 6700 : 300);
     const problems = await page.evaluate(() => {
       const out: string[] = [];

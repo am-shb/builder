@@ -65,4 +65,7 @@ Option 3.
   axe with color contrast.
 - The words live in `src/landing/copy.ts`. There is no contact address yet, so the page has no email links: every plan's
   button goes to sign-up, which starts on Free. The demo video goes in `public/` and is named by `DEMO_VIDEO`.
+- The hero's scene shows only what the engine's renderer can build (its chart, table and stat card, in the dashboard
+  layout), with invented people and data. Its text is never shown half transparent, so it keeps its contrast at every
+  moment of the loop; only outlines, fills and glows fade. The loop starts a moment after the page has loaded.
 - `/privacy` and `/terms` are placeholders that say only what is true today. They must be replaced before launch.

@@ -83,6 +83,11 @@
   --frost: rgb(244 246 245 / 0.9);
   --band: #0d5c4c;
   --band-ink: #ffffff;
+  /* The hero's example charts: the bars, and the donut's three slices. */
+  --chart-1: #0d5c4c;
+  --chart-2: #3fae8a;
+  --chart-3: #8a6fe0;
+  --chart-soft: rgb(13 92 76 / 0.24);
   color-scheme: light;
 }
 
@@ -146,6 +151,10 @@
     --frost: rgb(15 21 19 / 0.88);
     --band: #15392f;
     --band-ink: #eef3f1;
+    --chart-1: #4fcfa6;
+    --chart-2: #2b8a70;
+    --chart-3: #a58cf5;
+    --chart-soft: rgb(79 207 166 / 0.3);
     color-scheme: dark;
   }
 }
@@ -208,6 +217,10 @@
   --frost: rgb(15 21 19 / 0.88);
   --band: #15392f;
   --band-ink: #eef3f1;
+  --chart-1: #4fcfa6;
+  --chart-2: #2b8a70;
+  --chart-3: #a58cf5;
+  --chart-soft: rgb(79 207 166 / 0.3);
   color-scheme: dark;
 }
 
@@ -258,6 +271,10 @@
   --color-frost: var(--frost);
   --color-band: var(--band);
   --color-band-ink: var(--band-ink);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-soft: var(--chart-soft);
 
   --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
   --font-display: var(--font-display);

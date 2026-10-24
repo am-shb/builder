@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from "react";
 
 // Steps through a looping scene: step i starts `times[i]` ms into the loop, and the loop restarts at `loopAt`. While
 // `playing` is false (off screen, a background tab) it holds its step and picks up from there. With `still` set
-// (reduced motion) it shows that step and runs no timers at all.
-export function useSceneTimeline(times: readonly number[], loopAt: number, { playing, still }: { playing: boolean; still: number | null }): number {
-  const [step, setStep] = useState(0);
-  const current = useRef(0);
+// (reduced motion) it shows that step and runs no timers at all. The first time through it can open at a later step
+// (`start`); every loop after that begins at step 0.
+export function useSceneTimeline(
+  times: readonly number[],
+  loopAt: number,
+  { playing, still, start = 0 }: { playing: boolean; still: number | null; start?: number },
+): number {
+  const [step, setStep] = useState(start);
+  const current = useRef(start);
 
   useEffect(() => {
     if (!playing || still !== null) return;

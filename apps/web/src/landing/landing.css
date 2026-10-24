@@ -22,36 +22,116 @@
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* The hero scene: parts fade and rise in when their step comes (data-on), and cross-fade between states. */
+  /* The hero scene. Text is never shown half transparent, so it keeps its contrast at every moment: parts with text
+     are drawn in from the top (a clip that opens) and hidden once it has closed. Only outlines, fills, glows and the
+     typing dots fade. Each part's step sets data-on. */
   .sc-fade {
-    opacity: 0;
-    transform: translateY(6px) scale(0.985);
-    transition: opacity 420ms var(--ease-out), transform 560ms var(--ease-out);
+    visibility: hidden;
+    clip-path: inset(-40px -40px calc(100% + 40px) -40px);
+    transform: translateY(6px);
+    transition: clip-path 420ms var(--ease-out), transform 420ms var(--ease-out), visibility 0s linear 420ms;
   }
   .sc-fade[data-on] {
-    opacity: 1;
+    visibility: visible;
+    clip-path: inset(-40px);
     transform: none;
+    transition: clip-path 560ms var(--ease-out), transform 560ms var(--ease-out), visibility 0s;
+  }
+  /* A part that takes another's place comes in just after the other has gone, so the two never show at once. */
+  .sc-late[data-on]:not([data-past]) {
+    transition-delay: 320ms;
   }
   .sc-swap {
     transition: opacity 420ms var(--ease-out), transform 420ms var(--ease-out);
   }
-  .sc-pop {
-    opacity: 0;
-    transform: scale(0.85);
-    transition: opacity 260ms var(--ease-out), transform 360ms var(--ease-out);
+  /* Two words in one place (Listening and Building, Pending and Agreed by): the old one goes at once, the new one rises
+     into its place. */
+  .sc-word {
+    transition: transform 360ms var(--ease-out) 100ms, visibility 0s 100ms;
   }
-  .sc-pop[data-on] {
-    opacity: 1;
+  .sc-word[data-off] {
+    visibility: hidden;
+    transform: translateY(100%);
+    transition: none;
+  }
+  /* The typing dots go at once, so they never sit on the words that follow. */
+  .sc-dots {
+    transition: opacity 100ms linear;
+  }
+  /* The words of a message appear left to right once the typing dots are done. */
+  .sc-type {
+    transition: clip-path 480ms var(--ease-out), visibility 0s;
+  }
+  .sc-type[data-typing] {
+    visibility: hidden;
+    clip-path: inset(0 100% 0 0);
+    transition: none;
+  }
+  /* The Draft tag pops on and shrinks away. */
+  .sc-tag {
+    visibility: hidden;
+    transform: scale(0.6);
+    transition: transform 200ms var(--ease-out), visibility 0s linear 200ms;
+  }
+  .sc-tag[data-on] {
+    visibility: visible;
+    transform: none;
+    transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1) 320ms, visibility 0s 320ms;
+  }
+  /* The parts' contents build once the part is on: bars grow, rows slide in, the donut's slices fill. The delays are
+     set inline, one after another. */
+  .sc-bar {
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 700ms var(--ease-out);
+  }
+  .sc-card[data-on] .sc-bar {
     transform: none;
   }
-  .sc-body {
-    transition: opacity 700ms var(--ease-out);
+  .sc-row {
+    visibility: hidden;
+    clip-path: inset(0 100% 0 0);
+    transform: translateX(-8px);
+    transition: clip-path 420ms var(--ease-out), transform 420ms var(--ease-out), visibility 0s linear 420ms;
   }
-  /* Back at the start of the loop, everything goes back to hidden at once, while the scene is faded out. */
-  .scene[data-reset] .sc-fade,
-  .scene[data-reset] .sc-swap,
-  .scene[data-reset] .sc-pop {
+  .sc-card[data-on] .sc-row {
+    visibility: visible;
+    clip-path: inset(-4px);
+    transform: none;
+    transition: clip-path 520ms var(--ease-out), transform 520ms var(--ease-out), visibility 0s;
+  }
+  .sc-slice {
+    transition: stroke-dasharray 800ms var(--ease-out);
+  }
+  /* The light around a part that just changed: amber when it appears as a draft, the primary when it is agreed. */
+  .sc-flash {
+    position: absolute;
+    inset: -4px;
+    border-radius: 16px;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .sc-flash.is-draft {
+    box-shadow: 0 0 0 3px var(--pending-soft), 0 0 24px 2px color-mix(in srgb, var(--pending) 45%, transparent);
+  }
+  .sc-flash.is-agreed {
+    box-shadow: 0 0 0 3px var(--accent-tint), 0 0 24px 2px var(--glow-a);
+  }
+  /* On a phone the parts share one place: only the current one shows (the others have data-past). */
+  @container scene (width < 34rem) {
+    .sc-fade[data-past] {
+      visibility: hidden;
+      clip-path: inset(-40px -40px calc(100% + 40px) -40px);
+      transform: translateY(6px);
+      transition: clip-path 320ms var(--ease-out), transform 320ms var(--ease-out), visibility 0s linear 320ms;
+    }
+  }
+  /* Back at the start of the loop everything is already hidden; this step sets it all back with no motion. */
+  .scene[data-reset] * {
     transition: none;
+  }
+  .scene[data-paused] * {
+    animation-play-state: paused;
   }
   .scene[data-paused] * {
     animation-play-state: paused;
@@ -178,6 +258,9 @@
   .ring-drain.is-running {
     animation: drain 3.4s linear forwards;
   }
+  .sc-flash {
+    animation: flash 1.4s var(--ease-out) 320ms both;
+  }
   /* The hero's words rise a little but are never transparent: they are the first thing to read, and a page's largest
      text or button counts as shown only once it is visible. The scene beside them fades in. */
   .rise-in {
@@ -269,9 +352,17 @@
   .build-solid,
   .build-dashed,
   .sc-fade,
+  .sc-fade[data-on],
   .sc-swap,
-  .sc-pop,
-  .sc-body,
+  .sc-dots,
+  .sc-word,
+  .sc-type,
+  .sc-tag,
+  .sc-tag[data-on],
+  .sc-bar,
+  .sc-row,
+  .sc-card[data-on] .sc-row,
+  .sc-slice,
   .reveal {
     transition: none;
   }
@@ -287,6 +378,11 @@
     opacity: 0.9;
     transform: translateY(-2px);
   }
+}
+@keyframes flash {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
 }
 @keyframes drain {
   to {

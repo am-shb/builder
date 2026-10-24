@@ -109,10 +109,12 @@ describe("the landing page", () => {
     window.setTimeout = ((fn: () => void, ms?: number) => { const id = original(fn, ms); timers.add(id); return id; }) as typeof window.setTimeout;
     try {
       render(<LandingPage />);
-      // The third person's message and the second decision are already on screen.
+      // The last beat is on screen, and every part and decision is agreed.
       const shown = [...document.querySelectorAll(".scene [data-on]")].map((el) => el.textContent ?? "");
-      expect(shown.some((t) => t.includes("Could overdue ones show in red?"))).toBe(true);
-      expect(shown.some((t) => t.includes("Overdue tasks in red"))).toBe(true);
+      expect(shown.some((t) => t.includes("Yes, put it at the top."))).toBe(true);
+      expect(shown.some((t) => t.includes("Best month"))).toBe(true);
+      expect(document.querySelectorAll(".scene .sc-card[data-on]").length).toBe(5);
+      expect(screen.getAllByText("4 of 4 agreed").length).toBeGreaterThan(0);
       expect(timers.size).toBe(0);
     } finally {
       window.setTimeout = original;
@@ -140,7 +142,8 @@ describe("the landing page", () => {
   it("without reduced motion, the hero starts from the beginning", () => {
     render(<LandingPage />);
     const shown = [...document.querySelectorAll(".scene [data-on]")].map((el) => el.textContent ?? "");
-    expect(shown.some((t) => t.includes("Could overdue ones show in red?"))).toBe(false);
+    expect(shown.some((t) => t.includes("Yes, put it at the top."))).toBe(false);
+    expect(document.querySelectorAll(".scene .sc-card[data-on]").length).toBe(0);
   });
 
   it("the demo frame shows a placeholder, not a play button that does nothing", () => {

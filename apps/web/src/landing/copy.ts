@@ -22,9 +22,10 @@ export const HERO = {
   platforms: "Built for Google Meet. Zoom and Microsoft Teams links work too.",
   // What the hero's animation shows, for people who can't see it.
   sceneSummary:
-    `An example meeting. One person asks for a due date on each task, and ${BOT_NAME} adds it to the prototype on screen, ` +
-    "outlined with dashes as a draft. A second person agrees, so the decision moves from pending to agreed and the " +
-    "outline turns solid. A third person suggests showing overdue tasks in red, which starts a new pending decision.",
+    `An example meeting about a sales dashboard. Maya asks for monthly revenue as a bar chart, and ${BOT_NAME} adds it ` +
+    "to the prototype on screen, outlined with dashes as a draft. Jonah agrees, so the decision moves from pending to " +
+    "agreed and the outline turns solid. In the same way the team adds revenue by region as a donut chart, a table of " +
+    "top customers, and a card at the top for the best month, until all four decisions are agreed.",
 };
 
 // The demo video, self-hosted under public/ when it exists (for example "/demo.mp4"). Until then the demo section
