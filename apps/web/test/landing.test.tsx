@@ -44,6 +44,17 @@ describe("the landing page", () => {
     for (const a of screen.getAllByRole("link", { name: "Sign in" })) expect(a.getAttribute("href")).toBe("/sign-in");
   });
 
+  it("every plan's button goes to sign-up, and nothing links to an email address", () => {
+    useScreen(DESKTOP_MOUSE);
+    const { container } = render(<LandingPage />);
+    const pricing = document.getElementById("pricing")!;
+    const buttons = within(pricing).getAllByRole("link");
+    expect(buttons.map((a) => a.textContent)).toEqual(["Start free", "Get early access", "Start with your team"]);
+    for (const a of buttons) expect(a.getAttribute("href")).toBe("/sign-up");
+    expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
+    expect(screen.queryByRole("link", { name: "Contact" })).toBeNull();
+  });
+
   it.each([["phone", PHONE, "light"], ["desktop", DESKTOP_MOUSE, "light"], ["phone", PHONE, "dark"], ["desktop", DESKTOP_MOUSE, "dark"]] as const)(
     "has no accessibility violations on a %s in %s mode",
     async (_name, screenSize, mode) => {
@@ -158,6 +169,7 @@ describe("the legal placeholders", () => {
     const { container } = render(<LegalPage kind={kind} />);
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeTruthy();
     expect(screen.getByText(/This page is a placeholder/)).toBeTruthy();
+    expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
     expect(await axeViolations(container)).toEqual([]);
   });
 });

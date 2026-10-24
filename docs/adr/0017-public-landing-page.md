@@ -63,6 +63,6 @@ Option 3.
   sideways scrolling, no two texts overlapping, nothing off screen, and the hero's headline within its column on at
   most three lines. `npm run screenshots -w @builder/web -- landing` takes the page at six widths in both modes and runs
   axe with color contrast.
-- The words live in `src/landing/copy.ts`. Questions, the Pro waitlist and Team enquiries go to `CONTACT_EMAIL` there,
-  a placeholder until the product has an address. The demo video goes in `public/` and is named by `DEMO_VIDEO`.
+- The words live in `src/landing/copy.ts`. There is no contact address yet, so the page has no email links: every plan's
+  button goes to sign-up, which starts on Free. The demo video goes in `public/` and is named by `DEMO_VIDEO`.
 - `/privacy` and `/terms` are placeholders that say only what is true today. They must be replaced before launch.

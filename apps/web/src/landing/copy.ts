@@ -27,11 +27,6 @@ export const HERO = {
     "outline turns solid. A third person suggests showing overdue tasks in red, which starts a new pending decision.",
 };
 
-// Where questions, the Pro waitlist and Team enquiries go. A placeholder until the product has its own address, like
-// the product's name; changing it here changes every link on the page.
-export const CONTACT_EMAIL = "hello@example.com";
-export const mailto = (subject: string) => `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}`;
-
 // The demo video, self-hosted under public/ when it exists (for example "/demo.mp4"). Until then the demo section
 // shows a placeholder frame.
 export const DEMO_VIDEO: string | null = null;
@@ -163,14 +158,14 @@ export const PRICING = {
       price: "Priced at launch",
       blurb: "For a team that meets every week.",
       points: ["Meeting hours included each month", "Extra minutes billed per minute", "A monthly spending limit you set"],
-      cta: { label: "Join the waitlist", href: "pro" },
+      cta: { label: "Get early access", href: SIGN_UP },
     },
     {
       name: "Team",
       price: "Priced at launch",
       blurb: "For an organization with many teams.",
       points: ["Everything in Pro", "Sessions shared across your organization", "Admin and member roles"],
-      cta: { label: "Contact us", href: "team" },
+      cta: { label: "Start with your team", href: SIGN_UP },
     },
   ],
 };
@@ -230,7 +225,7 @@ export const LEGAL = {
   terms: {
     title: "Terms",
     intro: "This page is a placeholder. The terms of service will be published before launch.",
-    points: ["Until then, write to us with any question about using the product."],
+    points: ["The product is an early version and is still being built."],
   },
 };
 

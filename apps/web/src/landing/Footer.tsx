@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Mark } from "../components/Mark.tsx";
-import { FOOTER, mailto, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
+import { FOOTER, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
 import { goToSection } from "./LandingNav.tsx";
 import { WRAP } from "./layout.tsx";
 
@@ -30,8 +30,7 @@ export function Footer({ home = false }: { home?: boolean }) {
             <li><a href={SIGN_UP} className={linkClass}>Start free</a></li>
             <li><a href={SIGN_IN} className={linkClass}>Sign in</a></li>
           </FooterColumn>
-          <FooterColumn title="Company">
-            <li><a href={mailto(`About ${PRODUCT_NAME}`)} className={linkClass}>Contact</a></li>
+          <FooterColumn title="Legal">
             <li><a href="/privacy" className={linkClass}>Privacy</a></li>
             <li><a href="/terms" className={linkClass}>Terms</a></li>
           </FooterColumn>

@@ -1,6 +1,6 @@
 import "./landing.css";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
-import { LEGAL, mailto, PRODUCT_NAME } from "./copy.ts";
+import { LEGAL } from "./copy.ts";
 import { Footer } from "./Footer.tsx";
 import { LandingNav } from "./LandingNav.tsx";
 import { WRAP } from "./layout.tsx";
@@ -23,9 +23,6 @@ export function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
             <ul className="mt-8 mb-0 grid gap-4 pl-5 text-ink-2 marker:text-ink-3">
               {page.points.map((p) => <li key={p} className="text-pretty">{p}</li>)}
             </ul>
-            <p className="mt-10 mb-0 text-ink-2">
-              Questions? <a href={mailto(`${PRODUCT_NAME} ${page.title.toLowerCase()}`)} className="font-semibold text-accent-ink">Write to us</a>.
-            </p>
           </div>
         </div>
       </main>
