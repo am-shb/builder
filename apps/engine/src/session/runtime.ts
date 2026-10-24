@@ -25,6 +25,8 @@ export type UiState = {
 
 export type Log = (msg: string, fields?: Record<string, unknown>) => void;
 
+type ApplyBatch = typeof applyPatchBatch;
+
 export type SessionRuntime = ReturnType<typeof makeRuntime>;
 
 /**
@@ -87,15 +89,19 @@ export function handleStageMessage(
 
 type Saved = { doc: ConsensusDoc; proto: Prototype } | undefined;
 
-export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveConsensus">; channel: StageSink; clock?: () => number; log?: Log }) {
+// `applyBatch` is the prototype's patch function; tests replace it to make one write fail.
+export function createRuntime(deps: {
+  store: Pick<Store, "getConsensus" | "saveConsensus">; channel: StageSink; clock?: () => number; log?: Log; applyBatch?: ApplyBatch;
+}) {
   const clock = deps.clock ?? Date.now;
+  const apply = deps.applyBatch ?? applyPatchBatch;
   const log: Log = deps.log ?? (() => {});
   const runtimes = new Map<string, SessionRuntime>();
   const loading = new Map<string, Promise<SessionRuntime>>();
   const make = (sessionId: string, saved: Saved) => {
     let rt = runtimes.get(sessionId);
     if (!rt) {
-      rt = makeRuntime(sessionId, saved, deps.store, deps.channel, clock, log);
+      rt = makeRuntime(sessionId, saved, deps.store, deps.channel, clock, log, apply);
       runtimes.set(sessionId, rt);
     }
     return rt;
@@ -120,7 +126,10 @@ export function createRuntime(deps: { store: Pick<Store, "getConsensus" | "saveC
   return lookup;
 }
 
-function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveConsensus">, channel: StageSink, clock: () => number, log: Log) {
+function makeRuntime(
+  sessionId: string, saved: Saved, store: Pick<Store, "saveConsensus">, channel: StageSink, clock: () => number, log: Log,
+  applyPatchBatch: ApplyBatch,
+) {
   let proto: Prototype = saved?.proto ?? emptyPrototype(UNTITLED_APP);
   let doc: ConsensusDoc = saved?.doc ?? emptyDoc();
   // After a restart the room still sees the comparison it was choosing from (known issue M2).
@@ -162,15 +171,19 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
 
   // The pick settles the losing side's earlier proposals: every open decision proposed by a backer of a
   // losing variant that affects a node any variant touches is removed (its text joins the picked
-  // decision's rejectedOptions) and its drawn nodes are re-tagged to the picked decision, so promoting
-  // that decision agrees them. Re-tags only nodes the conflict's variants touch, and only when the winner's batch landed. Returns the re-tag changes.
+  // decision's rejectedOptions). Its drawn nodes that the WINNING variant's batch touches are re-tagged to
+  // the picked decision, so promoting that decision agrees them; only when the winner's batch landed.
+  // A node only a losing variant touched keeps the removed decision's id and stays a draft: the renderer
+  // tolerates a decisionId with no decision, and nobody picked that node. Returns the re-tag changes.
   function supersede(conflict: Conflict, winner: string, retag: boolean): Change[] {
     const screens = new Set<string>();
     const screensOf = (n: UiNode) => { if (n.type === "Screen") screens.add(n.id); n.children.forEach(screensOf); };
     screensOf(proto.root);
     const touched = new Set<string>();
     for (const v of conflict.variants) for (const id of touchedNodeIds(v.batch, screens)) touched.add(id);
-    const winners = new Set(conflict.variants.find((v) => v.label === winner)?.backers ?? []);
+    const won = conflict.variants.find((v) => v.label === winner);
+    const winnerTouched = won ? touchedNodeIds(won.batch, screens) : new Set<string>();
+    const winners = new Set(won?.backers ?? []);
     const losers = new Set(conflict.variants.filter((v) => v.label !== winner).flatMap((v) => v.backers).filter((b) => !winners.has(b)));
     const gone = doc.decisions.filter((d) => d.status !== "agreed" && losers.has(d.proposedBy) && d.affects.some((id) => touched.has(id)));
     if (!gone.length) return [];
@@ -185,9 +198,11 @@ function makeRuntime(sessionId: string, saved: Saved, store: Pick<Store, "saveCo
     log("runtime.superseded", { session_id: sessionId, conflict_id: conflict.id, count: gone.length });
     if (!retag) return [];
     const ops: PatchOp[] = [];
-    const walk = (n: UiNode) => { if (n.decisionId !== undefined && ids.has(n.decisionId) && touched.has(n.id)) ops.push({ op: "update", id: n.id, decisionId: picked }); n.children.forEach(walk); };
+    const walk = (n: UiNode) => { if (n.decisionId !== undefined && ids.has(n.decisionId) && winnerTouched.has(n.id)) ops.push({ op: "update", id: n.id, decisionId: picked }); n.children.forEach(walk); };
     walk(proto.root);
     if (!ops.length) return [];
+    // Only decisionIds change, on nodes the applied winner batch touched, so this should not fail; if it does, the
+    // nodes keep their old tags as drafts.
     const t = applyPatchBatch(proto, { label: "Settled by the pick", ops });
     if (!t.ok) { log("runtime.supersede_retag_failed", { session_id: sessionId, conflict_id: conflict.id, ops: ops.length }); return []; }
     proto = t.proto;

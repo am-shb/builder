@@ -1673,6 +1673,33 @@ test("a pick supersedes the loser's earlier open proposal; a later reference to 
   assert.deepEqual([findNode(s.proto(), "home.special")!.status, findNode(s.proto(), "home.special")!.decisionId], ["agreed", "d-c1"], "still agreed under d-c1");
 });
 
+test("a pick never agrees a node only the losing variant touched: it keeps its superseded tag as a draft", async () => {
+  const s = await setup([
+    [
+      patches("Proposed: special", [addNode("home", "home.special", "Card", [["title", "Fall special"]], "dX")], "Amin"),
+      consensus([
+        { op: "add_decision", id: "dX", text: "Feature the fall special", proposedBy: "Amin", affects: ["home.special"] },
+        { op: "add_conflict", id: "c1", topic: "Top of home", variants: [
+          conflictVariant("A", "Special on top", ["Amin"], [{ op: "update", id: "home.special", props: [{ key: "title", value: "Top special" }] }]),
+          conflictVariant("B", "Order again on top", ["Omid"], [addNode("home", "home.again", "Card", [["title", "Order again"]])]),
+        ] },
+      ]),
+    ],
+    [],
+  ]);
+  s.loop.handoff(s.sessionId, handoff([await s.say("Amin", "special on top"), await s.say("Omid", "order again on top")]));
+  await flush();
+  s.loop.handoff(s.sessionId, handoff([await s.say("Omid", "let's go with B")], {
+    topics: [{ title: "Top of home", proposals: [], questionsRaised: [], resolvedChoice: { conflictId: "c1", winner: "B" } }],
+  }));
+  await flush();
+  assert.ok(!s.doc().decisions.some((d) => d.id === "dX"), "dX is superseded");
+  const special = findNode(s.proto(), "home.special")!;
+  assert.deepEqual([special.decisionId, special.status], ["dX", "draft"], "only A touched it: nobody agreed it");
+  const again = findNode(s.proto(), "home.again")!;
+  assert.deepEqual([again.decisionId, again.status], ["d-c1", "agreed"]);
+});
+
 // ---- only people whose own line picks the winner are recorded as agreeing (task 8d) ----
 
 test("a model pick records as agreeing only the speaker whose line picks the winner", async () => {
