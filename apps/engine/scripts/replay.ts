@@ -6,7 +6,7 @@
 // --local posts plain lines to /api/sessions/<id>/speech of a `--local` server (no signature, no secret).
 //
 // It only sends: it binds no port. The secret comes from RECALL_WEBHOOK_VERIFICATION_SECRET (the same
-// one the target server verifies with). With --live-models the server's own models answer, so the
+// one the target server verifies with). It is only needed without --local. With --live-models the server's own models answer, so the
 // target must run with OPENROUTER_API_KEY set and that costs real money; without it the fixture's
 // `fakeModel` scripts are only meaningful to tests that build the app with a scripted port.
 // Never logs transcript text.

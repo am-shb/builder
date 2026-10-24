@@ -9,7 +9,7 @@
 // Prints only counts and paths, never transcript text.
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,11 @@ import { withChrome } from "../test/helpers/chrome.ts";
 const ENGINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = path.join(ENGINE, "test/fixtures/sessions/maple-cafe.json");
 
+/** Wait for the comparison only when the agent is on (a key is set); without one no comparison can appear. */
+export function shouldWait(env: Record<string, string | undefined>): boolean {
+  return !!(env.OPENROUTER_API_KEY ?? "").trim();
+}
+
 export type Report = {
   cost_usd: number;
   llm_tool_dropped: number;
@@ -27,9 +32,18 @@ export type Report = {
   ops_unoffered: number;
   spoken_picks: number;
   comparisons_resolved: number;
+  replay_error?: string;
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Servers still running, so a signal can stop them. */
+const active = new Set<() => Promise<void>>();
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.once(sig, () => {
+    Promise.all([...active].map((stop) => stop())).finally(() => process.exit(1));
+  });
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -76,28 +90,34 @@ async function startServer(dir: string, port: number) {
       if (l.startsWith("Listening on")) up();
     }
   });
-  proc.stderr!.on("data", () => {}); // warnings only (e.g. listen-only); not kept
+  const errLog = createWriteStream(path.join(dir, "stderr.log")); // the server's own warnings and errors
+  proc.stderr!.pipe(errLog);
   const exited = new Promise<never>((_, reject) => proc.once("exit", (c) => reject(new Error(`server exited early (${c})`))));
   exited.catch(() => {});
-  await Promise.race([listening, exited, sleep(60_000).then(() => { throw new Error("server did not start in 60 s"); })]);
-  return {
-    lines,
-    stop: async () => {
+  const stop = async () => {
       writeFileSync(logFile, lines.join("\n") + "\n");
       if (proc.exitCode === null && proc.signalCode === null) {
         proc.kill("SIGTERM");
         await Promise.race([new Promise((r) => proc.once("exit", r)), sleep(5000)]);
         if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
       }
-    },
   };
+  active.add(stop);
+  const handle = { lines, stop: async () => { active.delete(stop); await stop(); } };
+  try {
+    await Promise.race([listening, exited, sleep(60_000).then(() => { throw new Error("server did not start in 60 s"); })]);
+  } catch (err) {
+    await handle.stop();
+    throw err;
+  }
+  return handle;
 }
 
-async function oneRun(dir: string, speed: number): Promise<Report & { replay_error?: string }> {
+async function oneRun(dir: string, speed: number): Promise<Report> {
   mkdirSync(dir, { recursive: true });
   const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Fixture;
   // Without a key the agent is off and no comparison can appear, so there is nothing to wait for.
-  if (!(process.env.OPENROUTER_API_KEY ?? "").trim()) for (const u of fixture.utterances) delete u.waitFor;
+  if (!shouldWait(process.env)) for (const u of fixture.utterances) delete u.waitFor;
   const port = await freePort();
   const server = await startServer(dir, port);
   try {
@@ -124,7 +144,7 @@ async function oneRun(dir: string, speed: number): Promise<Report & { replay_err
 
     const cost = ((await (await fetch(`${base}/api/sessions/${session.id}/cost`)).json()) as { cost_usd: number }).cost_usd;
     const conflicts = (await stage()).doc?.conflicts ?? [];
-    const report: Report & { replay_error?: string } = {
+    const report: Report = {
       cost_usd: cost,
       ...countLogs(server.lines),
       comparisons_resolved: conflicts.filter((c) => c.status === "resolved").length,
@@ -140,21 +160,32 @@ async function oneRun(dir: string, speed: number): Promise<Report & { replay_err
 async function main() {
   const args = process.argv.slice(2);
   const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  // Like the server: a variable already set (even empty) wins over .env, so `OPENROUTER_API_KEY= node ...` stays a smoke run.
+  const envFile = path.join(ENGINE, ".env");
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
   const runs = Number(flag("--runs") ?? 1);
   const speed = Number(flag("--speed") ?? 1);
   if (!(runs >= 1) || !(speed > 0)) throw new Error("--runs and --speed must be positive numbers");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const out = path.resolve(flag("--out") ?? path.join(ENGINE, "../../.superpowers/demo-runs", stamp));
   mkdirSync(out, { recursive: true });
-  if (process.env.OPENROUTER_API_KEY === undefined && !existsSync(path.join(ENGINE, ".env"))) {
+  if (!shouldWait(process.env)) {
     console.log("no OPENROUTER_API_KEY: the agent is off, so the stage stays empty");
   }
+  const failed: number[] = [];
   for (let i = 1; i <= runs; i++) {
     const dir = runs > 1 ? path.join(out, `run-${i}`) : out;
-    const r = await oneRun(dir, speed);
+    let r: Report;
+    try { r = await oneRun(dir, speed); } catch (err) {
+      failed.push(i);
+      console.log(`run ${i}/${runs}: failed: ${(err as Error).message}\n  ${dir}`);
+      continue;
+    }
+    if (r.replay_error) failed.push(i);
     console.log(`run ${i}/${runs}: cost $${r.cost_usd.toFixed(4)}, ${r.build_runs} builds, ${r.llm_tool_dropped} dropped, ${r.ops_unoffered} unoffered, ${r.spoken_picks} spoken picks, ${r.comparisons_resolved} comparisons resolved${r.replay_error ? `, replay stopped: ${r.replay_error}` : ""}`);
     console.log(`  ${dir}`);
   }
+  if (failed.length) throw new Error(`${failed.length} of ${runs} runs failed: run ${failed.join(", ")}`);
 }
 
 if (import.meta.main) {
