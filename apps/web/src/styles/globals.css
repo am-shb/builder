@@ -9,7 +9,20 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/schibsted-grotesk";
 
+/* The display font, for large headings only (ADR 0015). The package's "full" file is the one with both the SOFT and
+   opsz axes; only its Latin subset is declared, so nothing else is downloaded. */
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/fraunces/files/fraunces-latin-full-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
   --bg: #f4f6f5;
   --surface: #ffffff;
   --sunk: #e9eeec;
@@ -56,6 +69,25 @@
   --edge: rgb(255 255 255 / 0);
   --lift: 0 1px 2px rgb(26 34 32 / 0.06), 0 24px 48px -24px rgb(13 92 76 / 0.28);
   --glow: 0 6px 16px -8px rgb(13 92 76 / 0.7);
+
+  /* The landing page (ADR 0017): pending is amber and dashed, agreed is the primary and solid. */
+  --pending: #b45309;
+  --pending-soft: #fdf1dc;
+  --pending-ink: #7a3b00;
+  --p-c-bg: #ebe5fb;
+  --p-c-ink: #4a2f8a;
+  --glow-a: rgb(13 92 76 / 0.2);
+  --glow-b: rgb(25 166 122 / 0.14);
+  --glow-c: rgb(180 83 9 / 0.07);
+  --grid-line: rgb(13 92 76 / 0.07);
+  --frost: rgb(244 246 245 / 0.9);
+  --band: #0d5c4c;
+  --band-ink: #ffffff;
+  /* The hero's example charts: the bars, and the donut's three slices. */
+  --chart-1: #0d5c4c;
+  --chart-2: #3fae8a;
+  --chart-3: #8a6fe0;
+  --chart-soft: rgb(13 92 76 / 0.24);
   color-scheme: light;
 }
 
@@ -106,6 +138,23 @@
     --edge: rgb(255 255 255 / 0.07);
     --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
     --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+
+    --pending: #f0a43a;
+    --pending-soft: #33260f;
+    --pending-ink: #f6c46d;
+    --p-c-bg: #2a2340;
+    --p-c-ink: #cdb9ff;
+    --glow-a: rgb(79 207 166 / 0.16);
+    --glow-b: rgb(139 240 205 / 0.07);
+    --glow-c: rgb(240 164 58 / 0.05);
+    --grid-line: rgb(255 255 255 / 0.045);
+    --frost: rgb(15 21 19 / 0.88);
+    --band: #15392f;
+    --band-ink: #eef3f1;
+    --chart-1: #4fcfa6;
+    --chart-2: #2b8a70;
+    --chart-3: #a58cf5;
+    --chart-soft: rgb(79 207 166 / 0.3);
     color-scheme: dark;
   }
 }
@@ -155,6 +204,23 @@
   --edge: rgb(255 255 255 / 0.07);
   --lift: 0 28px 56px -24px rgb(0 0 0 / 0.75);
   --glow: 0 6px 16px -8px rgb(79 207 166 / 0.55);
+
+  --pending: #f0a43a;
+  --pending-soft: #33260f;
+  --pending-ink: #f6c46d;
+  --p-c-bg: #2a2340;
+  --p-c-ink: #cdb9ff;
+  --glow-a: rgb(79 207 166 / 0.16);
+  --glow-b: rgb(139 240 205 / 0.07);
+  --glow-c: rgb(240 164 58 / 0.05);
+  --grid-line: rgb(255 255 255 / 0.045);
+  --frost: rgb(15 21 19 / 0.88);
+  --band: #15392f;
+  --band-ink: #eef3f1;
+  --chart-1: #4fcfa6;
+  --chart-2: #2b8a70;
+  --chart-3: #a58cf5;
+  --chart-soft: rgb(79 207 166 / 0.3);
   color-scheme: dark;
 }
 
@@ -197,8 +263,21 @@
   --color-scrim: var(--scrim);
   --color-toast-bg: var(--toast-bg);
   --color-toast-ink: var(--toast-ink);
+  --color-pending: var(--pending);
+  --color-pending-soft: var(--pending-soft);
+  --color-pending-ink: var(--pending-ink);
+  --color-p-c-bg: var(--p-c-bg);
+  --color-p-c-ink: var(--p-c-ink);
+  --color-frost: var(--frost);
+  --color-band: var(--band);
+  --color-band-ink: var(--band-ink);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-soft: var(--chart-soft);
 
   --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
+  --font-display: var(--font-display);
 
   --radius-field: 14px;
   --radius-plate: 18px;
@@ -226,6 +305,13 @@
   --text-title--line-height: 1.1;
   --text-title-lg: 46px;
   --text-title-lg--line-height: 1.1;
+  /* The landing page only: fluid sizes for its headline, section titles and lead paragraphs. */
+  --text-display: clamp(2.625rem, 1.2rem + 5vw, 5.25rem);
+  --text-display--line-height: 1.02;
+  --text-section: clamp(2rem, 1.35rem + 2.5vw, 3.375rem);
+  --text-section--line-height: 1.06;
+  --text-lead: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  --text-lead--line-height: 1.5;
 
   --breakpoint-md: 768px;
 }
@@ -253,6 +339,53 @@
   /* The meeting codes and other figures line up. */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Display type (ADR 0015): large headings only, never in forms, dialogs, sheets, menus, buttons, pills or Clerk's
+   components. Plain CSS, so the axis settings stay as written. Use `display` with one size: `display display-lg`.
+   Optical size follows the font size (font-optical-sizing: auto); only SOFT is pinned, and WONK stays off. */
+@layer components {
+  .display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.06;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  /* The landing page's hero headline only. */
+  .display-xl {
+    font-size: clamp(2.5rem, 7.1vw, 5.75rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+  }
+  /* Section heads, and the app's page titles. */
+  .display-lg {
+    font-size: clamp(1.875rem, 4.4vw, 3.5rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+  }
+  /* Card titles and FAQ questions. */
+  .display-md {
+    font-size: clamp(1.25rem, 2.1vw, 1.75rem);
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+  }
+  /* The smallest display size. */
+  .display-sm {
+    font-size: 1.0625rem;
+    font-variation-settings: "SOFT" 60;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
   }
 }
 

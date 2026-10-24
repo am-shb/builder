@@ -108,7 +108,7 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
       <header className="mt-3 flex items-start justify-between gap-x-4 sm:gap-x-6">
         <div className="min-w-0">
           <h1 className={cn(
-            "tabular m-0 text-title font-semibold tracking-[-0.03em] break-words lg:text-title-lg",
+            "display display-lg tabular m-0 break-words",
             isInProgress(session.status) && "underline decoration-primary/60 decoration-dashed decoration-2 underline-offset-[10px]",
           )}>
             {meeting.code}

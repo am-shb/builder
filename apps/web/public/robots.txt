@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /$
+Allow: /privacy
+Allow: /terms
+Disallow: /sign-in
+Disallow: /sign-up
+Disallow: /sessions/
+Disallow: /choose-organization

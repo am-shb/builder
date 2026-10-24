@@ -1,0 +1,409 @@
+/* The landing page's motion (ADR 0017). Colors come from the tokens in globals.css. Everything that moves here stops
+   under prefers-reduced-motion: the hero shows its last frame, reveals are already in place. */
+@layer base {
+  /* Moving to a section stops just under the sticky header; the section's own padding gives its heading room. */
+  html:has(.landing) {
+    scroll-padding-top: 64px;
+  }
+  @media (min-width: 1024px) {
+    html:has(.landing) {
+      scroll-padding-top: 72px;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html:has(.landing) {
+      scroll-behavior: smooth;
+    }
+  }
+}
+
+@layer components {
+  .landing {
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* The hero scene. Text is never shown half transparent, so it keeps its contrast at every moment: parts with text
+     are drawn in from the top (a clip that opens) and hidden once it has closed. Only outlines, fills, glows and the
+     typing dots fade. Each part's step sets data-on. */
+  .sc-fade {
+    visibility: hidden;
+    clip-path: inset(-40px -40px calc(100% + 40px) -40px);
+    transform: translateY(6px);
+    transition: clip-path 420ms var(--ease-out), transform 420ms var(--ease-out), visibility 0s linear 420ms;
+  }
+  .sc-fade[data-on] {
+    visibility: visible;
+    clip-path: inset(-40px);
+    transform: none;
+    transition: clip-path 560ms var(--ease-out), transform 560ms var(--ease-out), visibility 0s;
+  }
+  /* A part that takes another's place comes in just after the other has gone, so the two never show at once. */
+  .sc-late[data-on]:not([data-past]) {
+    transition-delay: 320ms;
+  }
+  .sc-swap {
+    transition: opacity 420ms var(--ease-out), transform 420ms var(--ease-out);
+  }
+  /* Two words in one place (Listening and Building, Pending and Agreed by): the old one goes at once, the new one rises
+     into its place. */
+  .sc-word {
+    transition: transform 360ms var(--ease-out) 100ms, visibility 0s 100ms;
+  }
+  .sc-word[data-off] {
+    visibility: hidden;
+    transform: translateY(100%);
+    transition: none;
+  }
+  /* The typing dots go at once, so they never sit on the words that follow. */
+  .sc-dots {
+    transition: opacity 100ms linear;
+  }
+  /* The words of a message appear left to right once the typing dots are done. */
+  .sc-type {
+    transition: clip-path 480ms var(--ease-out), visibility 0s;
+  }
+  .sc-type[data-typing] {
+    visibility: hidden;
+    clip-path: inset(0 100% 0 0);
+    transition: none;
+  }
+  /* The Draft tag pops on and shrinks away. */
+  .sc-tag {
+    visibility: hidden;
+    transform: scale(0.6);
+    transition: transform 200ms var(--ease-out), visibility 0s linear 200ms;
+  }
+  .sc-tag[data-on] {
+    visibility: visible;
+    transform: none;
+    transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1) 320ms, visibility 0s 320ms;
+  }
+  /* The parts' contents build once the part is on: bars grow, rows slide in, the donut's slices fill. The delays are
+     set inline, one after another. */
+  .sc-bar {
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 700ms var(--ease-out);
+  }
+  .sc-card[data-on] .sc-bar {
+    transform: none;
+  }
+  .sc-row {
+    visibility: hidden;
+    clip-path: inset(0 100% 0 0);
+    transform: translateX(-8px);
+    transition: clip-path 420ms var(--ease-out), transform 420ms var(--ease-out), visibility 0s linear 420ms;
+  }
+  .sc-card[data-on] .sc-row {
+    visibility: visible;
+    clip-path: inset(-4px);
+    transform: none;
+    transition: clip-path 520ms var(--ease-out), transform 520ms var(--ease-out), visibility 0s;
+  }
+  .sc-slice {
+    transition: stroke-dasharray 800ms var(--ease-out);
+  }
+  /* The light around a part that just changed: amber when it appears as a draft, the primary when it is agreed. */
+  .sc-flash {
+    position: absolute;
+    inset: -4px;
+    border-radius: 16px;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .sc-flash.is-draft {
+    box-shadow: 0 0 0 3px var(--pending-soft), 0 0 24px 2px color-mix(in srgb, var(--pending) 45%, transparent);
+  }
+  .sc-flash.is-agreed {
+    box-shadow: 0 0 0 3px var(--accent-tint), 0 0 24px 2px var(--glow-a);
+  }
+  /* On a phone the parts share one place: only the current one shows (the others have data-past). */
+  @container scene (width < 34rem) {
+    .sc-fade[data-past] {
+      visibility: hidden;
+      clip-path: inset(-40px -40px calc(100% + 40px) -40px);
+      transform: translateY(6px);
+      transition: clip-path 320ms var(--ease-out), transform 320ms var(--ease-out), visibility 0s linear 320ms;
+    }
+  }
+  /* Back at the start of the loop everything is already hidden; this step sets it all back with no motion. */
+  .scene[data-reset] * {
+    transition: none;
+  }
+  .scene[data-paused] * {
+    animation-play-state: paused;
+  }
+  .scene[data-paused] * {
+    animation-play-state: paused;
+  }
+
+  .typing-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: var(--ink-3);
+    opacity: 0.5;
+  }
+
+  /* The no-objection countdown on a pending decision. */
+  .ring-drain {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+
+  .dot-grid {
+    background-image: radial-gradient(var(--grid-line) 1px, transparent 1.2px);
+    background-size: 16px 16px;
+  }
+
+  /* Soft light behind the hero scene. Each spot fades out well inside the box, and the box itself fades at its
+     edges, so the light never ends in a visible line. */
+  .hero-glow {
+    background:
+      radial-gradient(38% 40% at 58% 46%, var(--glow-a), transparent 100%),
+      radial-gradient(30% 34% at 32% 68%, var(--glow-b), transparent 100%),
+      radial-gradient(24% 26% at 74% 26%, var(--glow-c), transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+  }
+
+  /* A card lifts a little on hover, and with a mouse a soft light follows the pointer across it. */
+  .card-lift {
+    transition: transform 280ms var(--ease-out), box-shadow 280ms var(--ease-out);
+  }
+  .spotlight::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--glow-a), transparent 70%);
+    transition: opacity 300ms var(--ease-out);
+  }
+  .spotlight > * {
+    position: relative;
+    z-index: 1;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .spotlight:hover::before {
+      opacity: 1;
+    }
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .card-lift:hover {
+      transform: translateY(-4px);
+    }
+  }
+
+  /* How it works: a step's number is a dashed ring until the step comes into view, then a solid one; the stage in the
+     third step settles the same way. */
+  .step-ring-solid,
+  .build-solid {
+    transition: opacity 500ms var(--ease-out) 450ms;
+  }
+  .build-solid {
+    transition-delay: 1100ms;
+  }
+  .step-ring-dashed,
+  .build-dashed {
+    transition: opacity 500ms var(--ease-out) 450ms;
+    opacity: 0;
+  }
+  .build-dashed {
+    transition-delay: 1100ms;
+  }
+  .step[data-pending] .step-ring-solid,
+  .step[data-pending] .build-solid {
+    opacity: 0;
+  }
+  .step[data-pending] .step-ring-dashed,
+  .step[data-pending] .build-dashed {
+    opacity: 1;
+  }
+
+  .hero-glow-soft {
+    background-image:
+      radial-gradient(50% 60% at 50% 50%, var(--glow-a), transparent 100%),
+      radial-gradient(var(--grid-line) 1px, transparent 1.2px);
+    background-size: 100% 100%, 16px 16px;
+  }
+
+  /* The features' small visuals. Their motion runs only while the grid is on screen (data-live). */
+  .bento .swap-b,
+  .bento .pick-b {
+    opacity: 0;
+  }
+
+  /* Scroll reveals: in place from the start, unless motion is allowed and the part is still below the fold. */
+  .reveal[data-pending] {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  .reveal {
+    transition: opacity 700ms var(--ease-out), transform 800ms var(--ease-out);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .typing-dot {
+    animation: typing 1s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .ring-drain.is-running {
+    animation: drain 3.4s linear forwards;
+  }
+  .sc-flash {
+    animation: flash 1.4s var(--ease-out) 320ms both;
+  }
+  /* The hero's words rise a little but are never transparent: they are the first thing to read, and a page's largest
+     text or button counts as shown only once it is visible. The scene beside them fades in. */
+  .rise-in {
+    animation: rise-text 700ms var(--ease-out) both;
+  }
+  .rise-in-fade {
+    animation: rise 800ms var(--ease-out) both;
+  }
+
+  /* Each plays once when the grid comes into view, in under 5 s, and rests on its settled frame (WCAG 2.2.2). */
+  .bento .build-part {
+    animation: build 1.6s var(--ease-out) both;
+  }
+  .bento .draft-tag {
+    animation: draft-tag 4s var(--ease-out) both;
+  }
+  .bento .pointer-glide {
+    animation: glide 3.6s var(--ease-out) 0.4s both;
+  }
+  .bento .swap-a {
+    animation: swap-a 3.2s var(--ease-out) both;
+  }
+  .bento .swap-b {
+    animation: swap-b 3.2s var(--ease-out) both;
+  }
+  .bento .pick-a {
+    animation: swap-a 3s var(--ease-out) both;
+  }
+  .bento .pick-b {
+    animation: swap-b 3s var(--ease-out) both;
+  }
+  .bento .wave {
+    transform-origin: center;
+    animation: wave 0.55s ease-in-out 7 alternate both;
+  }
+  .bento .log-row {
+    animation: log-row 1.2s var(--ease-out) both;
+  }
+  .bento:not([data-live]) * {
+    animation-play-state: paused;
+  }
+}
+
+/* Without motion, the features' visuals show their settled state. */
+@media (prefers-reduced-motion: reduce) {
+  .bento .swap-a,
+  .bento .pick-a {
+    opacity: 0;
+  }
+  .bento .swap-b,
+  .bento .pick-b {
+    opacity: 1;
+  }
+}
+
+@keyframes build {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+}
+@keyframes draft-tag {
+  0%, 30% { opacity: 0; }
+  40%, 100% { opacity: 1; }
+}
+@keyframes glide {
+  0% { transform: translate(-40px, 30px); opacity: 0; }
+  20% { opacity: 1; }
+  60% { transform: translate(60px, -10px); }
+  100% { transform: translate(110px, 24px); opacity: 1; }
+}
+@keyframes swap-a {
+  0%, 50% { opacity: 1; }
+  65%, 100% { opacity: 0; }
+}
+@keyframes swap-b {
+  0%, 50% { opacity: 0; }
+  65%, 100% { opacity: 1; }
+}
+@keyframes wave {
+  from { transform: scaleY(0.35); }
+  to { transform: scaleY(1); }
+}
+@keyframes log-row {
+  from { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-lift,
+  .step-ring-solid,
+  .step-ring-dashed,
+  .build-solid,
+  .build-dashed,
+  .sc-fade,
+  .sc-fade[data-on],
+  .sc-swap,
+  .sc-dots,
+  .sc-word,
+  .sc-type,
+  .sc-tag,
+  .sc-tag[data-on],
+  .sc-bar,
+  .sc-row,
+  .sc-card[data-on] .sc-row,
+  .sc-slice,
+  .reveal {
+    transition: none;
+  }
+}
+
+@keyframes typing {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
+}
+@keyframes flash {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes drain {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+@keyframes rise-text {
+  from {
+    transform: translateY(10px);
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@media print {
+  .reveal[data-pending] {
+    opacity: 1;
+    transform: none;
+  }
+}

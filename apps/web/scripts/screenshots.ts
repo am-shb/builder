@@ -90,6 +90,20 @@ for (const dark of [false, true]) {
   );
 }
 shots.push({ name: "shell-phone-360-light", path: "/_design?view=shell", width: 360, height: 780, dark: false, fullPage: false });
+
+// The landing page (ADR 0017), signed out: whole pages at each width, the phone menu, an open question and the legal
+// pages. Reduced motion, so every part is in place and the hero shows its still frame.
+const LANDING_SIZES = { 360: 780, 390: 844, 768: 1024, 1024: 768, 1280: 800, 1536: 864 } as const;
+for (const dark of [false, true]) {
+  const mode = dark ? "dark" : "light";
+  for (const [width, height] of Object.entries(LANDING_SIZES)) {
+    shots.push({ name: `landing-${width}-${mode}`, path: "/", width: Number(width), height, dark, fullPage: true });
+  }
+  shots.push({ name: `landing-menu-390-${mode}`, path: "/", width: 390, height: 844, dark, fullPage: false, click: "menu" });
+  shots.push({ name: `landing-faq-1280-${mode}`, path: "/#faq", width: 1280, height: 800, dark, fullPage: false, click: "faq" });
+  shots.push({ name: `landing-privacy-390-${mode}`, path: "/privacy", width: 390, height: 844, dark, fullPage: true });
+  shots.push({ name: `landing-terms-1280-${mode}`, path: "/terms", width: 1280, height: 800, dark, fullPage: false });
+}
 // Starting a session (W5): every outcome at phone and desktop width in light, the main ones in dark too.
 const START: [string, ApiFixture, string, boolean][] = [
   ["start-sheet", "list", "", true],
@@ -326,6 +340,12 @@ try {
     }
     if (shot.click === "org") await page.locator(".cl-organizationSwitcherTrigger").click();
     if (shot.click === "user") await page.locator(".cl-userButtonTrigger").click();
+    if (shot.click === "menu") await page.getByRole("button", { name: "Menu" }).click();
+    if (shot.click === "faq") {
+      const question = page.getByRole("button", { name: "Is it recording the meeting?" });
+      await question.scrollIntoViewIfNeeded();
+      await question.click();
+    }
     if (shot.click === "refresh") await page.getByRole("button", { name: "Refresh" }).click();
     if (shot.click === "show-stage") await page.getByRole("button", { name: "Show stage link" }).click();
     if (shot.start !== undefined) {

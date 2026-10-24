@@ -1,8 +1,11 @@
 import { useAuth, useSession } from "@clerk/react";
-import { useRef } from "react";
+import { lazy, Suspense, useRef } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
 import { LoadingPage } from "../pages/LoadingPage.tsx";
 import { StartSessionProvider } from "../sessions/StartSessionProvider.tsx";
+
+// The landing page, for a signed-out visitor whose browser looked signed in (ADR 0017). Its own chunk.
+const LandingPage = lazy(() => import("../landing/LandingPage.tsx"));
 
 // Where a signed-out visitor goes: sign-in, then back to the page they asked for.
 function signInPath(location: { pathname: string; search: string }): string {
@@ -32,6 +35,8 @@ export function RequireOrg() {
   if (!isLoaded) return <LoadingPage />;
   if (!isSignedIn) {
     if (session?.currentTask?.key === "choose-organization") return <Navigate to="/choose-organization" replace />;
+    // Signed out at `/`: the landing page, as main.tsx shows it to anyone who looks signed out (ADR 0017).
+    if (!wasSignedIn.current && location.pathname === "/") return <Suspense fallback={<LoadingPage />}><LandingPage /></Suspense>;
     return <Navigate to={wasSignedIn.current ? "/sign-in" : signInPath(location)} replace />;
   }
   if (!orgId) return <Navigate to="/choose-organization" replace />;

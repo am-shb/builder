@@ -44,9 +44,10 @@ describe("routes and the guard", () => {
     expect(screen.getByTestId("clerk-sign-in")).toBeTruthy();
   });
 
-  it("signed out on the home page goes to plain /sign-in", () => {
+  it("signed out on the home page shows the landing page, not a redirect (ADR 0017)", async () => {
     at("/");
-    expect(where()).toBe("/sign-in");
+    expect(await screen.findByRole("heading", { level: 1, name: /working prototype/ })).toBeTruthy();
+    expect(where()).toBe("/");
   });
 
   it("pending (signed in, no org chosen) goes to choose-organization and Clerk's task", () => {

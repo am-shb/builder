@@ -4,7 +4,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 // tailwind-merge has to know our type scale (globals.css): otherwise it reads `text-label` as a color and drops the
 // real color class next to it.
 const twMerge = extendTailwindMerge({
-  extend: { theme: { text: ["label", "heading", "heading-lg", "code", "code-lg", "title", "title-lg"] } },
+  extend: { theme: { text: ["label", "heading", "heading-lg", "code", "code-lg", "title", "title-lg", "display", "section", "lead"] } },
 });
 
 // Joins class names, letting a later Tailwind class win over an earlier one (`cn("px-4", "px-6")` is "px-6").

@@ -5,7 +5,8 @@
   "description": "The session screens' framework-free logic, shared by the web and mobile apps (ADR 0004, ADR 0016).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./brand": "./src/brand.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

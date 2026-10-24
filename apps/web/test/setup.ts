@@ -35,20 +35,22 @@ if (locale !== "en-US") throw new Error(`tests need the en-US locale, got ${loca
 
 // jsdom has no matchMedia or ResizeObserver; Radix and the layout hooks use them. The fake answers each query from a
 // pretend screen: a width and a pointer. Tests see a phone (390px, touch) unless they call `useScreen`.
-export const media = { width: 390, coarse: true };
+export const media = { width: 390, coarse: true, reducedMotion: false };
 export const PHONE = { width: 390, coarse: true };
 export const DESKTOP_MOUSE = { width: 1280, coarse: false };
-export function useScreen(screen: { width: number; coarse: boolean }) {
-  Object.assign(media, screen);
+export function useScreen(screen: { width: number; coarse: boolean; reducedMotion?: boolean }) {
+  Object.assign(media, { reducedMotion: false, ...screen });
 }
 
-// Understands the queries the app uses: (min-width: Npx), (max-width: Npx) and (pointer: coarse|fine), joined by "and".
+// Understands the queries the app uses: (min-width: Npx), (max-width: Npx), (pointer: coarse|fine) and
+// (prefers-reduced-motion: reduce), joined by "and".
 export function mediaMatches(query: string): boolean {
   return query.split(/\s+and\s+/).every((part) => {
-    const m = /^\(\s*(min-width|max-width|pointer)\s*:\s*([\w.]+?)(px)?\s*\)$/.exec(part.trim());
+    const m = /^\(\s*(min-width|max-width|pointer|prefers-reduced-motion)\s*:\s*([\w.-]+?)(px)?\s*\)$/.exec(part.trim());
     if (!m) return false;
     const [, feature, value] = m;
     if (feature === "pointer") return value === (media.coarse ? "coarse" : "fine");
+    if (feature === "prefers-reduced-motion") return (value === "reduce") === media.reducedMotion;
     return feature === "min-width" ? media.width >= Number(value) : media.width <= Number(value);
   });
 }

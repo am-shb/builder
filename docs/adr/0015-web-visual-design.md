@@ -34,7 +34,8 @@ Option 2, with the Boardroom design.
 Added to `apps/web` in the scaffold (W1), pinned exactly, so the design work doesn't change the lockfile again:
 - Runtime: `radix-ui` (behavior and accessibility only), `class-variance-authority`, `clsx` and `tailwind-merge`
   (variants and class merging), `lucide-react` (icons), `sonner` (toasts), `@fontsource-variable/schibsted-grotesk`
-  (the one typeface, self-hosted).
+  (the text typeface, self-hosted). Added later with the landing page (ADR 0017): `@fontsource-variable/fraunces`, the
+  display typeface (see Type).
 - Build and test: `tailwindcss` and `@tailwindcss/vite`, `tw-animate-css` (enter and exit animations), `axe-core`
   (accessibility checks), `playwright-core` (screenshots and in-browser checks against a local dev server with the
   installed Chrome; it downloads no browser and never runs in `npm test`).
@@ -113,9 +114,31 @@ The palette relates to the engine's pages without copying them: dark mode's mint
 family, and the stage's green and amber become "in the meeting" and "check the meeting".
 
 ### Type
-**Schibsted Grotesk** (variable, self-hosted), one family. Meeting codes 28px on phones and 34px on desktop, weight
-500, tight tracking (-0.03em), tabular figures. Page title 34px / 46px, weight 600. Body 16px (also stops iOS zooming
-into inputs). Labels and pills 14px semibold; small text 13–14px. Sentence case everywhere: no all-caps labels.
+**Schibsted Grotesk** (variable, self-hosted) is the text font: body, labels, buttons, pills, small text, and
+everything inside forms, dialogs, sheets, menus and Clerk's components. Meeting codes in the list 28px on phones and
+34px on desktop, weight 500, tight tracking (-0.03em), tabular figures. Body 16px (also stops iOS zooming into
+inputs). Labels and pills 14px semibold; small text 13–14px. Sentence case everywhere: no all-caps labels.
+
+**Fraunces** (variable, self-hosted, Latin only) is the display font, added on 2026-10-24 with the landing page
+(ADR 0017), for large headings only.
+- **The file.** The package's `full` file is the only one with both the `SOFT` and `opsz` axes (checked in Chrome: the
+  `standard` and `opsz` files have no `SOFT`, the `soft` file has no `opsz`). `globals.css` declares its Latin
+  subset itself, with `font-display: swap`, so no other subset ships.
+- **Upright only.** Display headings use no italic, underline or other decoration; the whole heading is one weight and
+  one color.
+- **Settings.** `--font-display: "Fraunces Variable", ui-serif, Georgia, serif`, also a Tailwind utility
+  (`font-display`). Optical size follows the font size (`font-optical-sizing: auto`, never pinned); only `SOFT` is
+  pinned, at 60; `WONK` stays off. Weight 600.
+- **Classes** (plain CSS, so the axis settings stay as written), used together as `display display-lg`:
+  `display` (the family and settings, line height 1.06, tracking -0.01em, balanced wrapping), `display-xl`
+  (`clamp(2.5rem, 7.1vw, 5.75rem)`, the landing page's hero only; the hero keeps its line height and tracking but
+  takes its size from its column, so it stays at two lines from 768px and three on phones, and never runs under the
+  hero's scene; checked from 360px to 2560px and at 125% and 150% zoom), `display-lg` (`clamp(1.875rem, 4.4vw, 3.5rem)`,
+  section heads and the app's page titles), `display-md` (`clamp(1.25rem, 2.1vw, 1.75rem)`, card titles and FAQ
+  questions) and `display-sm` (1.0625rem).
+- **Where.** The landing page's hero, section heads, card titles and FAQ questions; in the app, the page title
+  ("Sessions") and a session's title (its meeting code) only. Never in forms, dialogs, sheets, menus, buttons, status
+  pills or Clerk's components. `test/guards.test.ts` fails if any other file uses the classes.
 
 ### Shape, space and depth
 - Pills (full radius) for buttons and status; 14px for inputs; 18px for row plates; 24px for the start panel, the
