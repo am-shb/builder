@@ -101,11 +101,13 @@ describe("the landing page", () => {
 
   it("the hero scene is decoration, described in words for screen readers", () => {
     render(<LandingPage />);
-    expect(document.querySelector(".scene")?.getAttribute("aria-hidden")).toBe("true");
+    expect(document.querySelector(".scene-art")?.getAttribute("aria-hidden")).toBe("true");
+    // The tabs above it are real buttons, one per meeting.
+    expect(within(screen.getByRole("group", { name: "Example meetings" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Café app", "Sales review"]);
     expect(screen.getByText(/the decision moves from pending to agreed/)).toBeTruthy();
   });
 
-  it("with reduced motion, the hero shows its last frame at once and starts no timer", () => {
+  it("with reduced motion, the hero shows the café's two options at once and starts no timer", async () => {
     useScreen({ ...PHONE, reducedMotion: true });
     const timers = new Set<unknown>();
     const original = window.setTimeout;
@@ -116,17 +118,55 @@ describe("the landing page", () => {
     window.setTimeout = ((fn: () => void, ms?: number) => { const id = original(fn, ms); timers.add(id); return id; }) as typeof window.setTimeout;
     try {
       render(<LandingPage />);
-      // The last beat is on screen, and every part and decision is agreed.
-      const shown = [...document.querySelectorAll(".scene [data-on]")].map((el) => el.textContent ?? "");
-      expect(shown.some((t) => t.includes("Yes, put it at the top."))).toBe(true);
-      expect(shown.some((t) => t.includes("Best month"))).toBe(true);
-      expect(document.querySelectorAll(".scene .sc-card[data-on]").length).toBe(5);
-      expect(screen.getAllByText("4 of 4 agreed").length).toBeGreaterThan(0);
+      const sales = document.querySelector(".scene [data-room='sales']")!;
+      const cafe = document.querySelector(".scene [data-room='cafe']")!;
+      expect(sales.hasAttribute("data-off")).toBe(true);
+      expect(cafe.hasAttribute("data-off")).toBe(false);
+      // Both options, each with who backs it and its trade-off; nothing picked yet.
+      const said = (room: Element) => [...room.querySelectorAll("[data-on]")].map((el) => el.textContent ?? "");
+      expect(said(cafe).some((t) => t.includes("Backed by Sana"))).toBe(true);
+      expect(said(cafe).some((t) => t.includes("Backed by Ravi"))).toBe(true);
+      expect(said(cafe).some((t) => t.includes("Higher margin per order"))).toBe(true);
+      expect(said(cafe).some((t) => t.includes("Faster for regulars"))).toBe(true);
+      expect(cafe.querySelector(".sc-ab")?.getAttribute("data-layout")).toBe("split");
+      expect(screen.getByRole("button", { name: "Café app" }).getAttribute("aria-current")).toBe("true");
+      // The other pill shows the sales review's still: the finished dashboard, every decision agreed.
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Sales review" })); });
+      expect(sales.hasAttribute("data-off")).toBe(false);
+      expect(cafe.hasAttribute("data-off")).toBe(true);
+      expect(said(sales).some((t) => t.includes("Yes, put it at the top."))).toBe(true);
+      expect(sales.querySelectorAll(".sc-card[data-on]").length).toBe(5);
+      expect(within(sales as HTMLElement).getAllByText("4 of 4 agreed").length).toBeGreaterThan(0);
       expect(timers.size).toBe(0);
     } finally {
       window.setTimeout = original;
       w.requestIdleCallback = idle;
     }
+  });
+
+  it("the hero opens on the café app, and paused, a pill jumps to that meeting's key moment", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    const pills = within(screen.getByRole("group", { name: "Example meetings" })).getAllByRole("button");
+    expect(pills.map((b) => b.textContent)).toEqual(["Café app", "Sales review"]);
+    const [cafe, sales] = pills as [HTMLElement, HTMLElement];
+    expect(cafe.getAttribute("aria-current")).toBe("true");
+    expect(sales.hasAttribute("aria-current")).toBe(false);
+    const cafeRoom = document.querySelector(".scene [data-room='cafe']")!;
+    const salesRoom = document.querySelector(".scene [data-room='sales']")!;
+    expect(cafeRoom.hasAttribute("data-off")).toBe(false);
+    expect(salesRoom.hasAttribute("data-off")).toBe(true);
+    // Its first line is already there to read.
+    const said = [...cafeRoom.querySelectorAll("[data-on]")].map((el) => el.textContent ?? "");
+    expect(said.some((t) => t.includes("Let's build the Maple Café app"))).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Pause animation" }));
+    await user.click(sales);
+    expect(sales.getAttribute("aria-current")).toBe("true");
+    expect(salesRoom.hasAttribute("data-off")).toBe(false);
+    expect(cafeRoom.hasAttribute("data-off")).toBe(true);
+    expect(salesRoom.querySelectorAll(".sc-card[data-on]").length).toBe(5);
+    await user.click(cafe);
+    expect(cafeRoom.querySelector(".sc-ab")?.getAttribute("data-layout")).toBe("split");
   });
 
   it("the hero's loop can be paused and played again (WCAG 2.2.2)", async () => {

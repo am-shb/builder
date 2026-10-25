@@ -252,6 +252,9 @@
   --color-accent-tint: var(--accent-tint);
   --color-accent-tint-hover: var(--accent-tint-hover);
   --color-accent-ink: var(--accent-ink);
+  /* The landing hero's room accent (landing.css): set per meeting on the scene. */
+  --color-ra-ink: var(--ra-ink);
+  --color-ra-line: var(--ra-line);
   --color-info-bg: var(--info-bg);
   --color-info-ink: var(--info-ink);
   --color-warn-bg: var(--warn-bg);

@@ -5,7 +5,7 @@ import { usePageTitle } from "../hooks/usePageTitle.ts";
 export function SignUpPage() {
   usePageTitle("Sign up");
   return (
-    <AuthLayout>
+    <AuthLayout variant="sign-up">
       <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
     </AuthLayout>
   );
