@@ -148,9 +148,10 @@ inputs). Labels and pills 14px semibold; small text 13–14px. Sentence case eve
   tinted evergreen in light mode, a darker shadow plus a 1px inner highlight in dark mode. Rows never float.
 
 ### Signature details
-- **The mark:** an evergreen tile holding a dashed frame behind a solid one, the product's own rule from the stage
-  (still being decided, then agreed). It sits next to `PRODUCT_NAME`, needs no letter, and stays the same when the name
-  changes. The favicon is the mark.
+- **The mark:** Builder's robot from the stage, in its listening pose, drawn in the primary's green for each color
+  mode (evergreen in light, mint in dark). It sits next to `PRODUCT_NAME`, needs no letter, and stays the same when the
+  name changes. It also fills the empty and error states. The favicon is the mark; the app icons put the mint robot on
+  an evergreen tile.
 - **The rule in the list:** sessions still on their way (starting, joining) get a dashed underline under their code
   and a dashed status ring.
 - **Texture:** a faint dot grid in the top-left corner of the page that fades out, very low contrast in both modes.

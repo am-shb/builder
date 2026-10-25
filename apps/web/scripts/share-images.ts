@@ -9,6 +9,7 @@ import { chromium } from "playwright-core";
 import { createServer } from "vite";
 
 const root = join(import.meta.dirname, "..");
+const ICON_TILE = "#0d5c4c"; // the light --primary, the mobile app's icon tile too
 const chrome = [process.env.CHROME_PATH, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((p): p is string => !!p && existsSync(p));
 if (!chrome) throw new Error("Chrome not found: set CHROME_PATH");
@@ -27,11 +28,10 @@ try {
   await page.screenshot({ path: join(root, "public", "og.png") });
   console.log("public/og.png");
 
-  // The mark on a full square of its own color: iOS rounds the corners itself.
-  const icon = await browser.newPage({ viewport: { width: 180, height: 180 } });
+  // The robot on a full square of the primary, in its dark-mode green so it stands out: iOS rounds the corners itself.
+  const icon = await browser.newPage({ viewport: { width: 180, height: 180 }, colorScheme: "dark" });
   const svg = readFileSync(join(root, "public", "favicon.svg"), "utf8");
-  const tile = /<rect[^>]*fill="(#[0-9a-f]{6})"/i.exec(svg)?.[1] ?? "#000000";
-  await icon.setContent(`<!doctype html><html><body style="margin:0;background:${tile}">${svg.replace("<svg ", '<svg width="180" height="180" ')}</body></html>`);
+  await icon.setContent(`<!doctype html><html><body style="margin:0;height:180px;display:grid;place-items:center;background:${ICON_TILE}">${svg.replace("<svg ", '<svg width="128" height="128" ')}</body></html>`);
   await icon.screenshot({ path: join(root, "public", "apple-touch-icon.png") });
   console.log("public/apple-touch-icon.png");
 } finally {

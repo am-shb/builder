@@ -33,6 +33,13 @@
   --ink-3: #616b68;
   --input: #7d8784;
   --primary: #0d5c4c;
+  /* The mark's robot (components/Mark.tsx), in the primary's green. */
+  --bot-stem: #0a4b3e;
+  --bot-bulb: #3fae8a;
+  --bot-head: #0d5c4c;
+  --bot-chin: #0a4b3e;
+  --bot-face: #05261c;
+  --bot-eye: #dcf3ea;
   --primary-hover: #0a4b3e;
   --on-primary: #ffffff;
   --live: #19a67a;
@@ -104,6 +111,12 @@
     --ink-3: #8f9b97;
     --input: #6f7b77;
     --primary: #4fcfa6;
+    --bot-stem: #3fae8a;
+    --bot-bulb: #8bf0cd;
+    --bot-head: #4fcfa6;
+    --bot-chin: #3fae8a;
+    --bot-face: #05261c;
+    --bot-eye: #dcf3ea;
     --primary-hover: #6edcb8;
     --on-primary: #05261c;
     --live: #4fcfa6;
@@ -170,6 +183,12 @@
   --ink-3: #8f9b97;
   --input: #6f7b77;
   --primary: #4fcfa6;
+  --bot-stem: #3fae8a;
+  --bot-bulb: #8bf0cd;
+  --bot-head: #4fcfa6;
+  --bot-chin: #3fae8a;
+  --bot-face: #05261c;
+  --bot-eye: #dcf3ea;
   --primary-hover: #6edcb8;
   --on-primary: #05261c;
   --live: #4fcfa6;
@@ -238,6 +257,12 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-on-primary: var(--on-primary);
+  --color-bot-stem: var(--bot-stem);
+  --color-bot-bulb: var(--bot-bulb);
+  --color-bot-head: var(--bot-head);
+  --color-bot-chin: var(--bot-chin);
+  --color-bot-face: var(--bot-face);
+  --color-bot-eye: var(--bot-eye);
   --color-live: var(--live);
   --color-s-live-bg: var(--s-live-bg);
   --color-s-live-ink: var(--s-live-ink);

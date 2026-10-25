@@ -126,7 +126,7 @@ export function HeroScene({ paused = false }: { paused?: boolean }) {
               ))}
             </span>
             <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface/70 py-1 pr-2.5 pl-1 font-semibold text-ink-2 ring-1 ring-hair">
-              <Mark className="size-5 rounded-md" />
+              <Mark className="size-5" />
               <span className="relative inline-grid overflow-hidden">
                 <span data-off={building || undefined} className="sc-word col-start-1 row-start-1">Listening</span>
                 <span data-off={!building || undefined} className="sc-word col-start-1 row-start-1">Building</span>
