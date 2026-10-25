@@ -20,6 +20,7 @@ import { exactTime, limitsText, statusExplanation } from "@builder/session-core"
 import { ErrorNotice } from "../sessions/ErrorNotice.tsx";
 import { meetingDisplay } from "@builder/session-core";
 import { RefreshFailed } from "../sessions/SessionsList.tsx";
+import { HandoffLink } from "../sessions/HandoffLink.tsx";
 import { StageLink } from "../sessions/StageLink.tsx";
 import { mayStillChange } from "@builder/session-core";
 import { startedWhen } from "@builder/session-core";
@@ -150,7 +151,8 @@ function Loaded({ session, query, now }: { session: SessionView; query: OrgQuery
             )}
           </dl>
         </section>
-        <div className="lg:[@media(min-height:640px)]:sticky lg:[@media(min-height:640px)]:top-8">
+        <div className="grid gap-6 lg:[@media(min-height:640px)]:sticky lg:[@media(min-height:640px)]:top-8">
+          <HandoffLink handoffUrl={session.handoffUrl} />
           <StageLink stageUrl={session.stageUrl} />
         </div>
       </div>

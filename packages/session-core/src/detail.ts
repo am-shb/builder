@@ -61,14 +61,16 @@ export function statusExplanation(status: string, errorCode?: string): string {
   return Object.hasOwn(STATUS_EXPLANATIONS, status) ? STATUS_EXPLANATIONS[status]! : UNKNOWN_STATUS_EXPLANATION;
 }
 
-// The stage link, only if it is one we can show as a link: https, or http on the local dev server (the local engine).
-// Anything else (javascript:, data:, a broken value) is never rendered, so a bad value can't become a script link.
+// An engine link (the stage's, the handoff's), only if it is one we can show as a link: https, or http on the local dev
+// server (the local engine). Anything else (javascript:, data:, a broken value) is never rendered, so a bad value
+// can't become a script link.
 export function safeStageUrl(raw: string | undefined, { dev = false } = {}): string | null {
   const url = raw ? parseUrl(raw) : null;
   if (!url) return null;
   if (url.protocol === "https:" || (dev && url.protocol === "http:")) return url.href;
   return null;
 }
+export const safeHandoffUrl = safeStageUrl;
 
 // "Oct 20, 2026, 3:02 PM EDT": an exact time, next to the relative one. With its time zone, so it can be compared with
 // a support log or a teammate elsewhere.

@@ -7,6 +7,7 @@ import { ApiProvider } from "../src/api/ApiProvider.tsx";
 import { SessionPage } from "../src/pages/SessionPage.tsx";
 import { BOT_NAME, PRODUCT_NAME } from "../src/brand.ts";
 import { exactTime, limitsText, safeStageUrl, statusExplanation } from "@builder/session-core";
+import { HandoffLink } from "../src/sessions/HandoffLink.tsx";
 import { StageLink } from "../src/sessions/StageLink.tsx";
 import { axeViolations } from "./helpers/axe.ts";
 import { API, errorBody, fakeApi, session, type Reply } from "./helpers/fake-api.ts";
@@ -375,6 +376,57 @@ describe("the stage link", () => {
     render(<StageLink stageUrl={local} dev />);
     await userEvent.click(screen.getByRole("button", { name: "Show stage link" }));
     expect(screen.getByRole("link", { name: /Open stage/ }).getAttribute("href")).toBe(local);
+  });
+});
+
+describe("the handoff link", () => {
+  const HANDOFF = "https://engine.example.test/handoff/11111111?token=handoff-read-token";
+
+  it("once the meeting has ended: opens in a new tab with no opener and no referrer, and the link isn't printed", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    page(ok({ status: "ended", handoffUrl: HANDOFF }));
+    const region = within(await screen.findByRole("region", { name: "Handoff" }));
+    const open = region.getByRole("link", { name: /Open handoff/ });
+    expect(open.getAttribute("href")).toBe(HANDOFF);
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(open.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(screen.queryByText(HANDOFF)).toBeNull();
+  });
+
+  it("Copy link puts it on the clipboard and says so; a failure says what to do instead", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const first = page(ok({ status: "ended", handoffUrl: HANDOFF }));
+    await userEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledWith(HANDOFF);
+    expect(await screen.findByText("Copied.")).toBeTruthy();
+    first.view.unmount();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { throw new Error("denied"); } }, configurable: true });
+    page(ok({ status: "ended", handoffUrl: HANDOFF }));
+    await userEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+    expect(await screen.findByText("Couldn't copy. Open the handoff and copy its address instead.")).toBeTruthy();
+  });
+
+  it("isn't on the page until the engine has sent it", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    page(ok({ status: "in_meeting" }));
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("region", { name: "Handoff" })).toBeNull();
+  });
+
+  it.each(["javascript:alert(1)", "data:text/html,hi", "not a url", "http://engine.example.test/handoff/x"])("never renders %s outside dev", (bad) => {
+    const { container } = render(<HandoffLink handoffUrl={bad} dev={false} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("has no accessibility violations", async () => {
+    setClerk({ session: "active", orgId: "org_a" });
+    useScreen(DESKTOP_MOUSE);
+    page(ok({ status: "ended", handoffUrl: HANDOFF, stageUrl: STAGE }));
+    await screen.findByRole("region", { name: "Handoff" });
+    expect(await axeViolations(document.body)).toEqual([]);
   });
 });
 
