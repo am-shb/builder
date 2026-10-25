@@ -5,7 +5,7 @@ import type { DateTime, Surreal } from "surrealdb";
 import { orgRef } from "./orgs.ts";
 import { MAX_LIST } from "./types.ts";
 import { StartLimitError } from "./types.ts";
-import type { ApiSessionStatus, CreateResult, NewSession, SessionRecord, StartLimit, StartLimits, StartResult, StatusEventResult } from "./types.ts";
+import type { ApiSessionStatus, CreateResult, HandoffEventResult, NewSession, SessionRecord, StartLimit, StartLimits, StartResult, StatusEventResult } from "./types.ts";
 import type { SessionStatus } from "../contracts.ts";
 import { DEFAULT_START_GUARDS } from "../start-guards.ts";
 
@@ -16,13 +16,14 @@ type Row = {
   status: ApiSessionStatus;
   error_code?: string;
   stage_url?: string;
+  handoff_url?: string;
   max_usd: number;
   max_minutes: number;
   created_at: DateTime;
   updated_at: DateTime;
 };
 
-const FIELDS = "id, created_by, meeting_url, status, error_code, stage_url, max_usd, max_minutes, created_at, updated_at";
+const FIELDS = "id, created_by, meeting_url, status, error_code, stage_url, handoff_url, max_usd, max_minutes, created_at, updated_at";
 
 const sessionRef = (id: string) => new RecordId("session", id);
 
@@ -33,6 +34,7 @@ const toRecord = (r: Row): SessionRecord => ({
   status: r.status,
   errorCode: r.error_code ?? null,
   stageUrl: r.stage_url ?? null,
+  handoffUrl: r.handoff_url ?? null,
   limits: { maxUsd: r.max_usd, maxMinutes: r.max_minutes },
   createdAt: r.created_at.toDate().toISOString(),
   updatedAt: r.updated_at.toDate().toISOString(),
@@ -193,6 +195,14 @@ export async function applyStatusEvent(db: Surreal, orgId: string, id: string, s
   if (updated.length) return "applied";
   if (!out.found) return "not_found";
   return out.taken ? "conflict" : "stale";
+}
+
+/** The engine's handoff link for a session of the org (ADR 0008): the latest one wins, whatever the status. */
+export async function setHandoffUrl(db: Surreal, orgId: string, id: string, url: string): Promise<HandoffEventResult> {
+  if (!id) return "not_found";
+  const [updated] = await db.query<[unknown[]]>("UPDATE $id SET handoff_url = $url WHERE org = $org RETURN VALUE id",
+    { id: sessionRef(id), org: orgRef(orgId), url }).retry().collect();
+  return updated.length ? "applied" : "not_found";
 }
 
 export async function getSession(db: Surreal, orgId: string, id: string): Promise<SessionRecord | undefined> {

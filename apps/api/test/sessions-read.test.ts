@@ -36,6 +36,7 @@ async function seeded() {
   const a1 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a1` }), roomy)).session;
   const a2 = (await db.createSessionUnlessActive("org_a", newSession({ meetingUrl: `${MEET}?a2` }), roomy)).session;
   await db.setSessionStart("org_a", a2.id, { kind: "ok", status: "joining", stageUrl: "https://stage.example.com/a2" });
+  await db.setHandoffUrl("org_a", a2.id, "https://engine.example.org/handoff/a2?token=read");
   const b1 = (await db.createSessionUnlessActive("org_b", newSession({ meetingUrl: `${MEET}?b1` }), roomy)).session;
   await db.setSessionStart("org_b", b1.id, { kind: "rejected", errorCode: "recall_rejected" });
   return { db, a1, a2, b1 };
@@ -52,6 +53,7 @@ test("GET /v1/sessions lists the caller's org's sessions, newest first, in the S
     const [started, starting] = body.sessions;
     assert.equal(started.status, "joining");
     assert.equal("stageUrl" in started, false, "no stage URL in the list: it's a control link, sent only for one session");
+    assert.equal("handoffUrl" in started, false, "no handoff link in the list either: it's sent only for one session");
     assert.equal(starting.status, "starting");
     assert.equal("errorCode" in starting, false, "absent, not null, when there's nothing to say");
     assert.deepEqual(starting.limits, limits);
@@ -92,8 +94,9 @@ test("GET /v1/sessions/:id returns the org's session in the SessionResponse shap
     assert.equal(res.status, 200);
     const { session } = SessionResponse.parse(await res.json());
     assert.deepEqual([session.id, session.status, session.meetingUrl], [a2.id, "joining", `${MEET}?a2`]);
+    assert.equal(session.handoffUrl, "https://engine.example.org/handoff/a2?token=read");
     const failed = SessionResponse.parse(await (await get(base, `/v1/sessions/${b1.id}`, tokenFor("org_b"))).json()).session;
-    assert.deepEqual([failed.status, failed.errorCode, failed.stageUrl], ["start_failed", "recall_rejected", undefined]);
+    assert.deepEqual([failed.status, failed.errorCode, failed.stageUrl, failed.handoffUrl], ["start_failed", "recall_rejected", undefined, undefined]);
   });
 });
 

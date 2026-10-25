@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { SessionStatusEvent, SessionUsageEvent } from "@builder/contracts";
+import { HandoffReadyEvent, SessionStatusEvent, SessionUsageEvent } from "@builder/contracts";
 import type { SessionStatus } from "@builder/contracts";
 import { createServer } from "../src/server.ts";
 import type { Db, SessionRecord } from "../src/db/index.ts";
@@ -248,6 +248,62 @@ test("logs carry ids, the status and the outcome only", async () => {
     { session_id: s.id, org_id: "org_a", status: "joining", outcome: "stale" },
   ]);
   assert.ok(!JSON.stringify(logs).includes("meet.google.com") && !JSON.stringify(logs).includes(TOKEN));
+});
+
+// ---- the handoff link ----
+
+const HANDOFF_TOKEN = "handoff-read-token-0123456789";
+const handoffEvent = (s: { id: string }, over: Record<string, unknown> = {}) => HandoffReadyEvent.parse({
+  id: `${s.id}:handoff`, type: "handoff.ready", sessionId: s.id, orgId: "org_a", at: new Date().toISOString(), handoffId: s.id,
+  url: `https://engine.example.org/handoff/${s.id}?token=${HANDOFF_TOKEN}`, ...over,
+});
+
+test("handoff.ready saves the session's handoff link; a later one replaces it; the status doesn't change", async () => {
+  const { db, server } = await api();
+  const s = await startedSession(db);
+  await withServer(server, async (base) => {
+    assert.equal((await post(base, statusEvent(s, "ended"))).status, 200);
+    const res = await post(base, handoffEvent(s));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { applied: true });
+    assert.equal((await current(db, s)).handoffUrl, `https://engine.example.org/handoff/${s.id}?token=${HANDOFF_TOKEN}`);
+    // The restart sweep sends it again; a new engine origin replaces it.
+    assert.equal((await post(base, handoffEvent(s, { url: `https://engine2.example.org/handoff/${s.id}?token=t2` }))).status, 200);
+  });
+  const after = await current(db, s);
+  assert.deepEqual([after.status, after.handoffUrl], ["ended", `https://engine2.example.org/handoff/${s.id}?token=t2`]);
+});
+
+test("a handoff for another org's session, or one that doesn't exist, is 404 session_not_found and saves nothing", async () => {
+  const { db, server } = await api();
+  const theirs = await startedSession(db, "org_b");
+  await withServer(server, async (base) => {
+    for (const event of [handoffEvent(theirs), handoffEvent({ id: randomUUID() }), handoffEvent({ id: "not-a-uuid" })]) {
+      const res = await post(base, event);
+      assert.equal(res.status, 404);
+      assert.equal(((await res.json()) as { error: { code: string } }).error.code, "session_not_found");
+    }
+  });
+  assert.equal((await current(db, theirs, "org_b")).handoffUrl, null);
+});
+
+test("a handoff with another id than its session's, or a link that isn't http(s), is 400 and saves nothing", async () => {
+  const { db, server } = await api();
+  const s = await startedSession(db);
+  await withServer(server, async (base) => {
+    assert.equal((await post(base, handoffEvent(s, { handoffId: randomUUID() }))).status, 400);
+    assert.equal((await post(base, handoffEvent(s, { url: "javascript:alert(1)" }))).status, 400);
+    assert.equal((await post(base, handoffEvent(s, { url: `https://e.example.org/${"a".repeat(2000)}` }))).status, 400);
+  });
+  assert.equal((await current(db, s)).handoffUrl, null);
+});
+
+test("a handoff's log line has ids and the outcome only: never the link or its token", async () => {
+  const { db, server, logs } = await api();
+  const s = await startedSession(db);
+  await withServer(server, async (base) => { await post(base, handoffEvent(s)); });
+  assert.deepEqual(logs.filter((l) => l.msg === "engine_event.handoff").map((l) => l.fields), [{ session_id: s.id, org_id: "org_a", outcome: "applied" }]);
+  assert.ok(!JSON.stringify(logs).includes(HANDOFF_TOKEN) && !JSON.stringify(logs).includes("/handoff/"));
 });
 
 // ---- the start answer arriving after an event ----

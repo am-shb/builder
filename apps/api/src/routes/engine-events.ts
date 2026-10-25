@@ -1,6 +1,7 @@
 // POST /internal/engine-events: the engine tells the api what happened to a session (A2 in
-// docs/plans/api-first-slice.md, ADR 0008). One event from @builder/contracts per call. Only `session.status` is
-// stored for now; usage and hand-off events are acknowledged and skipped until their slices.
+// docs/plans/api-first-slice.md, ADR 0008). One event from @builder/contracts per call. `session.status` moves the
+// session on, and `handoff.ready` saves its handoff link; usage events are acknowledged and skipped until their slice.
+// The handoff link carries the page's read-only token, so it's never logged.
 //
 // Not for browsers: no Clerk, no CORS. It needs the shared bearer token (ENGINE_INTERNAL_TOKEN, the one the api
 // sends the engine), compared in constant time, and answers 404 when that isn't set or when the request came
@@ -34,6 +35,9 @@ function tokenMatches(given: string | null, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// The handoff link as the engine builds it: its public origin (https, or http locally), at most 2000 characters.
+const isWebUrl = (s: string) => s.length <= 2000 && URL.canParse(s) && ["https:", "http:"].includes(new URL(s).protocol);
+
 const notFound = () => new HttpError(404, "not_found", "No such route.");
 
 export function engineEventRoutes(deps: { db: Db | null; token: string | null; log: Log }): Route[] {
@@ -51,6 +55,15 @@ export function engineEventRoutes(deps: { db: Db | null; token: string | null; l
         return sendJson(res, 202, { applied: false });
       }
       const event = parsed.event;
+      if (event.type === "handoff.ready") {
+        // The engine's handoff is the session's own; any other id, or a link that isn't http(s), is refused for good.
+        if (event.handoffId !== event.sessionId || !isWebUrl(event.url)) throw new HttpError(400, "invalid_event", "The event doesn't match the contract.");
+        if (!deps.db) throw new HttpError(503, "db_unavailable", "The database isn't available on this server.");
+        const outcome = UUID.test(event.sessionId) ? await deps.db.setHandoffUrl(event.orgId, event.sessionId, event.url) : "not_found";
+        deps.log("engine_event.handoff", { session_id: event.sessionId, org_id: event.orgId, outcome });
+        if (outcome === "not_found") throw new HttpError(404, "session_not_found", "No such session in that organization.");
+        return sendJson(res, 200, { applied: true });
+      }
       if (event.type !== "session.status") {
         deps.log("engine_event.skipped", { type: event.type, session_id: event.sessionId });
         return sendJson(res, 202, { applied: false });

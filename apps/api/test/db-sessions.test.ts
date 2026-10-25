@@ -37,7 +37,7 @@ test("a new session is created as starting, with the org's row, and comes back a
   const { session, reused } = await db.createSessionUnlessActive("org_A", s);
   assert.equal(reused, false);
   assert.deepEqual({ ...session, createdAt: "", updatedAt: "" }, {
-    id: s.id, createdBy: "user_1", meetingUrl: MEET, status: "starting", errorCode: null, stageUrl: null, limits, createdAt: "", updatedAt: "",
+    id: s.id, createdBy: "user_1", meetingUrl: MEET, status: "starting", errorCode: null, stageUrl: null, handoffUrl: null, limits, createdAt: "", updatedAt: "",
   });
   assert.match(session.createdAt, ISO);
   assert.match(session.updatedAt, ISO);

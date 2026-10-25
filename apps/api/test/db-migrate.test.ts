@@ -109,7 +109,7 @@ test("0002 gives sessions that may have a bot an active_until from their time li
     await db.query("CREATE session:recent CONTENT $row", { row: { ...row, meeting_url: "https://meet.google.com/new" } }).collect();
     await db.query("CREATE session:unknown CONTENT $row", { row: { ...row, status: "start_unknown", meeting_url: "https://meet.google.com/unk" } }).collect();
     await db.query("CREATE session:ended CONTENT $row", { row: { ...row, status: "ended", meeting_url: "https://meet.google.com/end", created_at: hoursAgo(5) } }).collect();
-    assert.deepEqual(await migrate(db), ["0002_start_guards.surql"]);
+    assert.deepEqual(await migrate(db), ["0002_start_guards.surql", "0003_handoff_url.surql"]);
     const [rows] = await db.query<[{ id: RecordId; ttl?: string; active_meeting?: string }[]]>(
       "SELECT id, IF active_until != NONE { <string> (active_until - created_at) } AS ttl, active_meeting FROM session ORDER BY id").collect();
     assert.deepEqual(rows.map((r) => [String(r.id.id), r.ttl ?? null, r.active_meeting ?? null]), [
