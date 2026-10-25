@@ -152,13 +152,15 @@ services:
     runtime: static
     branch: main
     autoDeployTrigger: checksPass
-    # No rootDir, as for the other two: the build needs contracts/. Only the web workspace's packages are installed.
+    # No rootDir, as for the other two: the build needs contracts/ and packages/session-core/. Only the web workspace's
+    # packages are installed.
     buildCommand: npm ci --workspace @builder/web --include-workspace-root && npm run build -w @builder/web
     staticPublishPath: ./apps/web/dist
     buildFilter:
       paths:
         - apps/web/**
         - contracts/**
+        - packages/session-core/**
         - package.json
         - package-lock.json
         - .nvmrc
@@ -166,6 +168,8 @@ services:
         - apps/web/test/**
         - apps/web/README.md
         - contracts/README.md
+        - packages/session-core/test/**
+        - packages/session-core/README.md
     # Every path is the app: React Router handles it in the browser. Render serves a file that exists (/assets/*)
     # before it applies a rewrite.
     routes:

@@ -1,6 +1,6 @@
 // The deployed site's settings in render.yaml (I1): the headers a <meta> policy can't send, and the rewrite that lets
 // a deep link (/sessions/:id) load the app. Read as text, so a change there that drops one fails here.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -11,6 +11,21 @@ function webService(): string {
   const next = yaml.indexOf("\n  - type:", start);
   // Without comment lines: the checks are about settings, not their explanations.
   return yaml.slice(start, next < 0 ? undefined : next).split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+}
+
+const ROOT = join(import.meta.dirname, "../../..");
+
+// The repo folder of each workspace package the site imports (@builder/*), as "contracts" or "packages/session-core".
+function builderDependencyDirs(): string[] {
+  const read = (dir: string) => JSON.parse(readFileSync(join(ROOT, dir, "package.json"), "utf8"));
+  const dirs = ["contracts", ...readdirSync(join(ROOT, "packages")).map((d) => `packages/${d}`)];
+  const byName = new Map(dirs.map((d) => [read(d).name as string, d]));
+  const deps = Object.keys({ ...read("apps/web").dependencies, ...read("apps/web").devDependencies });
+  return deps.filter((d) => d.startsWith("@builder/")).map((d) => {
+    const dir = byName.get(d);
+    if (!dir) throw new Error(`no workspace folder for ${d}`);
+    return dir;
+  });
 }
 
 // Every `- path / name / value` header rule, as [path, name, value].
@@ -28,6 +43,13 @@ describe("builder-web in render.yaml", () => {
     expect(block).toContain("buildCommand: npm ci --workspace @builder/web --include-workspace-root && npm run build -w @builder/web");
     expect(block).toContain("staticPublishPath: ./apps/web/dist");
     expect(block).not.toContain("rootDir");
+  });
+
+  // A change to a package the site is built from has to deploy it, or the live site keeps the old code.
+  it("deploys when a workspace package the site imports changes", () => {
+    const dirs = builderDependencyDirs();
+    expect(dirs).toContain("packages/session-core");
+    for (const dir of dirs) expect(block).toContain(`        - ${dir}/**\n`);
   });
 
   it("sends the security headers on every path", () => {
