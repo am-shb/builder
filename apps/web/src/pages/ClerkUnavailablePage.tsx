@@ -1,6 +1,6 @@
 import { Button } from "../components/Button.tsx";
 import { AppShell } from "../components/AppShell.tsx";
-import { DraftToAgreed } from "../components/Mark.tsx";
+import { Mark } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
 
@@ -9,7 +9,7 @@ export function ClerkUnavailablePage() {
   usePageTitle("Sign-in isn't available");
   return (
     <AppShell>
-      <PageState icon={<DraftToAgreed />} title="Sign-in isn't available right now"
+      <PageState icon={<Mark className="size-16" />} title="Sign-in isn't available right now"
         action={<Button variant="secondary" onClick={() => location.reload()}>Try again</Button>}>
         <p className="m-0">Check your connection, then try again.</p>
       </PageState>

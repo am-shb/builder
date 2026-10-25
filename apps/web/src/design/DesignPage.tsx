@@ -9,7 +9,7 @@ import { Button } from "../components/Button.tsx";
 import { Callout } from "../components/Callout.tsx";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
-import { DraftToAgreed, Mark } from "../components/Mark.tsx";
+import { Mark } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
 import { ResponsiveModal } from "../components/ResponsiveModal.tsx";
 import { SessionList, SessionRow, SessionRowSkeleton } from "../components/SessionRow.tsx";
@@ -78,7 +78,7 @@ function Kit() {
         </Section>
 
         <Section title="Mark">
-          <div className="flex items-center gap-6"><Mark /><Mark className="size-12" /><DraftToAgreed /></div>
+          <div className="flex items-center gap-6"><Mark /><Mark className="size-12" /><Mark className="size-16" /></div>
         </Section>
 
         <Section title="Buttons">
@@ -146,7 +146,7 @@ function Kit() {
 
         <Section title="Page state">
           <div className="rounded-panel bg-surface shadow-elevated">
-            <PageState icon={<DraftToAgreed />} title="No such session in this organization" action={<Button variant="secondary" size="sm">Back to sessions</Button>}>
+            <PageState icon={<Mark className="size-16" />} title="No such session in this organization" action={<Button variant="secondary" size="sm">Back to sessions</Button>}>
               It may belong to another organization, or the link is wrong.
             </PageState>
           </div>

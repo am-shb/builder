@@ -121,7 +121,7 @@ function AdmitArt() {
         <span className="relative grid size-11 shrink-0 place-items-center rounded-full bg-surface">
           <span className="jr-wait absolute inset-0 rounded-full border-2 border-dashed border-pending" />
           <span className="jr-in absolute inset-0 rounded-full border-2 border-primary" />
-          <Mark className="size-7 rounded-lg" />
+          <Mark className="size-7" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="m-0 text-[13px] leading-snug font-semibold text-ink">{BOT_NAME} wants to join</p>

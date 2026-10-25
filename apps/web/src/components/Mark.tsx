@@ -1,24 +1,19 @@
 import { cn } from "../lib/cn.ts";
 
-// The mark: a dashed frame behind a solid one, the product's own rule (still being decided, then agreed). It needs no
-// letter, so it stays the same when the product's name changes. Decorative: the wordmark or a label names it.
+// The mark: Builder's robot, the one on the shared screen (apps/engine/public/stage.html) in its listening pose, drawn
+// in the primary's green for each color mode. It needs no letter, so it stays the same when the product's name
+// changes. public/favicon.svg is the same drawing. Decorative: a wordmark or label names it.
 export function Mark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true" className={cn("size-8 shrink-0", className)}>
-      <rect width="32" height="32" rx="9" className="fill-primary" />
-      <rect x="6.5" y="6.5" width="13" height="13" rx="3" fill="none" strokeWidth="2.2" strokeDasharray="3.4 2.6"
-        strokeLinecap="round" className="stroke-on-primary opacity-90" />
-      <rect x="12.5" y="12.5" width="13" height="13" rx="3" className="fill-on-primary" />
+    <svg viewBox="-8 -18 166 166" aria-hidden="true" className={cn("size-8 shrink-0", className)}>
+      <rect x="73" width="4" height="26" rx="2" className="fill-bot-stem" />
+      <circle cx="75" r="12" className="fill-bot-bulb" />
+      <rect y="24" width="150" height="118" rx="38" className="fill-bot-chin" />
+      <rect y="24" width="150" height="110" rx="38" className="fill-bot-head" />
+      <rect x="20" y="42" width="110" height="70" rx="26" className="fill-bot-face" />
+      <rect x="42" y="54" width="22" height="30" rx="11" className="fill-bot-eye" />
+      <rect x="86" y="54" width="22" height="30" rx="11" className="fill-bot-eye" />
+      <path d="M63 88a12 11 0 0 0 24 0" fill="none" className="stroke-bot-eye" strokeWidth="4" />
     </svg>
-  );
-}
-
-// The same idea, larger and loose, for empty states.
-export function DraftToAgreed({ className }: { className?: string }) {
-  return (
-    <span aria-hidden="true" className={cn("relative block h-16 w-21", className)}>
-      <span className="absolute top-0 left-0 h-11 w-13 rounded-xl border-2 border-dashed border-primary/65" />
-      <span className="absolute top-5 left-7 h-11 w-13 rounded-xl bg-primary shadow-glow" />
-    </span>
   );
 }

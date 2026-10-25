@@ -34,7 +34,7 @@ export function Trust() {
               const Icon = ICONS[i]!;
               return (
                 <li key={item.title} className="group relative flex gap-4 border-hair px-5 py-6 transition-colors duration-300 hover:bg-plate/40 sm:gap-5 sm:px-7 sm:py-7 [&:not(:last-child)]:border-b">
-                  {/* The mark's idea: a dashed frame behind a solid one, holding the icon. */}
+                  {/* The product's rule, still being decided then agreed: a dashed frame behind a solid one, holding the icon. */}
                   <span aria-hidden="true" className="relative block size-12 shrink-0">
                     <span className="absolute top-0 left-0 size-[38px] rounded-[12px] border-[1.5px] border-dashed border-primary/50 transition-transform duration-300 motion-safe:group-hover:-translate-x-0.5 motion-safe:group-hover:-translate-y-0.5" />
                     <span className="absolute right-0 bottom-0 grid size-[38px] place-items-center rounded-[12px] bg-primary text-on-primary">

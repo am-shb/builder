@@ -44,7 +44,7 @@ export function Avatars({ people, speaking, building }: { people: readonly Who[]
         </span>
       ))}
       <span className="relative grid size-8 shrink-0 place-items-center rounded-full bg-surface ring-1 ring-hair @min-[26rem]/scene:size-9">
-        <Mark className="size-6 rounded-md" />
+        <Mark className="size-6" />
         <span className={cn("sc-swap absolute -inset-[3px] rounded-full ring-2 ring-pending", !building && "opacity-0")} />
         <span className={cn("sc-swap absolute -inset-[3px] rounded-full ring-2 ring-primary", speaking !== "bot" && "opacity-0")} />
       </span>
@@ -80,7 +80,7 @@ function Bubble({ line, on, typing, replaced }: { line: Line; on: boolean; typin
       className="sc-fade sc-late flex items-start gap-2 @max-[34rem]/scene:col-start-1 @max-[34rem]/scene:row-start-1"
     >
       {!person
-        ? <span className="mt-1 grid size-6 shrink-0 place-items-center rounded-full bg-surface ring-1 ring-hair"><Mark className="size-[18px] rounded-[5px]" /></span>
+        ? <span className="mt-1 grid size-6 shrink-0 place-items-center rounded-full bg-surface ring-1 ring-hair"><Mark className="size-[18px]" /></span>
         : <span className={cn("mt-1 grid size-6 shrink-0 place-items-center rounded-full text-[10.5px] font-bold", TONES[person.tone])}>{person.initial}</span>}
       <div className={cn("relative max-w-[88%] rounded-2xl rounded-tl-md px-3 py-2 shadow-[0_1px_2px_var(--hair)] ring-1", bot ? "bg-accent-tint ring-primary/25" : "bg-surface ring-hair")}>
         <span className="block text-[11px] font-semibold text-ink-3">{person ? person.name : BOT_NAME}</span>

@@ -47,7 +47,7 @@ function PrototypeArt() {
   return (
     <div className="dot-grid absolute inset-0 grid grid-cols-[0.8fr_2fr] gap-3 p-4 sm:p-5">
       <div className="grid content-start gap-2 rounded-xl bg-surface p-3 ring-1 ring-hair">
-        <div className="mb-1 flex items-center gap-1.5"><Mark className="size-4 rounded" /><span className="h-2 w-10 rounded-full bg-ink-3/30" /></div>
+        <div className="mb-1 flex items-center gap-1.5"><Mark className="size-4" /><span className="h-2 w-10 rounded-full bg-ink-3/30" /></div>
         {[0, 1, 2, 3].map((i) => <div key={i} className={cn("h-2 rounded-full", i === 1 ? "w-4/5 bg-primary/60" : "w-3/5 bg-ink-3/15")} />)}
       </div>
       <div className="grid grid-rows-[auto_1fr] gap-3">

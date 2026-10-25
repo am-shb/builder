@@ -31,7 +31,7 @@
         {
           "backgroundColor": "#0d5c4c",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 100
         }
       ],
       "@clerk/expo",

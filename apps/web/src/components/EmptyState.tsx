@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
-import { DraftToAgreed } from "./Mark.tsx";
+import { Mark } from "./Mark.tsx";
 
 // An invitation, not a dead end: what this is, the real steps, and one way to start.
 export function EmptyState({ title, description, steps, action, headingLevel = 2, className }: {
@@ -16,7 +16,7 @@ export function EmptyState({ title, description, steps, action, headingLevel = 2
   const Heading = headingLevel === 3 ? "h3" : "h2";
   return (
     <div className={cn("grid justify-items-start rounded-panel bg-surface p-6 shadow-elevated md:max-w-[560px] md:p-9", className)}>
-      <DraftToAgreed />
+      <Mark className="size-16" />
       <Heading className="mt-5 mb-0 text-heading-lg font-semibold tracking-[-0.02em] text-balance">{title}</Heading>
       <p className="mt-1.5 mb-0 max-w-[30em] text-ink-2 text-pretty">{description}</p>
       {steps && (

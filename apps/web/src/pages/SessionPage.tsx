@@ -7,7 +7,7 @@ import { ApiError } from "@builder/session-core";
 import type { SessionView } from "@builder/session-core";
 import { SignedInShell } from "../auth/SignedInShell.tsx";
 import { Button } from "../components/Button.tsx";
-import { DraftToAgreed } from "../components/Mark.tsx";
+import { Mark } from "../components/Mark.tsx";
 import { PageState } from "../components/PageState.tsx";
 import { Skeleton } from "../components/Skeleton.tsx";
 import { isInProgress } from "@builder/session-core";
@@ -49,7 +49,7 @@ export function SessionPage({ now }: { now?: Date }) {
     if (notFound) {
       return (
         <SignedInShell>
-          <PageState icon={<DraftToAgreed />} title="No such session in this organization"
+          <PageState icon={<Mark className="size-16" />} title="No such session in this organization"
             action={<Button asChild variant="secondary"><Link to="/"><ArrowLeft aria-hidden="true" />{BACK_LABEL}</Link></Button>}>
             <p className="m-0">It may be in another organization. Switch organization to look there.</p>
           </PageState>
