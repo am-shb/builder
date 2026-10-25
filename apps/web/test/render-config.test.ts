@@ -45,10 +45,18 @@ describe("builder-web in render.yaml", () => {
     expect(block).toMatch(/- type: rewrite\n\s+source: \/\*\n\s+destination: \/index\.html\n/);
   });
 
-  it("keeps the origins out of the repo: every setting is entered in the dashboard", () => {
-    for (const key of ["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL", "VITE_ANDROID_APP_URL"]) {
+  it("keeps the origins out of the repo: both origin settings are entered in the dashboard", () => {
+    for (const key of ["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL"]) {
       expect(block).toMatch(new RegExp(`- key: ${key}\\n\\s+sync: false\\n`));
     }
     expect(block).not.toMatch(/https?:\/\/(?!localhost)[a-z0-9.-]+\.(onrender\.com|clerk)/);
+  });
+
+  // The one address written in the file (ADR 0012, amended): the APK on this repository's own releases page, which
+  // names no deployment and is derivable from the repository's name and a tag.
+  it("names the Android app's APK as a release asset of this repository, over https", () => {
+    const m = /- key: VITE_ANDROID_APP_URL\n\s+value: (\S+)\n/.exec(block);
+    expect(m, "VITE_ANDROID_APP_URL has a committed value").toBeTruthy();
+    expect(m![1]).toMatch(/^https:\/\/github\.com\/am-shb\/builder\/releases\/download\/v\d+\.\d+\.\d+\/builder-android\.apk$/);
   });
 });
