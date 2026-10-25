@@ -37,8 +37,8 @@ export function Footer({ home = false }: { home?: boolean }) {
           </div>
         </div>
         <div className="mt-8 flex flex-wrap items-center gap-x-2.5 border-t border-hair pt-2 text-sm text-ink-3 md:mt-12 md:justify-between md:pt-3">
-          <p className="m-0">© {year} {PRODUCT_NAME}</p>
-          <span className="md:hidden">{dot}</span>
+          {/* On a phone the legal links take their own line, under this one. */}
+          <p className="m-0 max-md:w-full">© {year} {PRODUCT_NAME} {dot} {FOOTER.builtAt}</p>
           <nav aria-label="Legal">
             <ul className="m-0 flex list-none items-center gap-x-2.5 p-0 md:gap-x-6">
               <li><a href="/privacy" className={`${linkBase} text-ink-3`}>Privacy</a></li>

@@ -21,10 +21,10 @@ export function SectionHeader({ id, eyebrow, title, lead, align = "center", clas
   // "start-lg": centered on small screens, at the start from 1024px.
   return (
     <Reveal className={cn("max-w-[46rem]", align === "center" && "mx-auto text-center", align === "start-lg" && "max-lg:mx-auto max-lg:text-center", className)}>
-      <p className="m-0 inline-flex items-center gap-2.5 rounded-full bg-accent-tint py-1.5 pr-4 pl-3 text-base font-semibold text-accent-ink ring-1 ring-primary/15 sm:text-lg lg:text-xl">
-        <span aria-hidden="true" className="relative inline-block size-[18px] sm:size-5 lg:size-[22px]">
-          <span className="absolute inset-0 rounded-[6px] border-[1.5px] border-dashed border-primary/70 sm:border-2" />
-          <span className="absolute top-[25%] left-[25%] size-[75%] rounded-[5px] bg-primary" />
+      <p className="m-0 inline-flex items-center gap-2 rounded-full bg-accent-tint py-1 pr-3.5 pl-2.5 text-sm font-semibold text-accent-ink ring-1 ring-primary/15 sm:text-[15px]">
+        <span aria-hidden="true" className="relative inline-block size-4">
+          <span className="absolute inset-0 rounded-[5px] border-[1.5px] border-dashed border-primary/70" />
+          <span className="absolute top-[25%] left-[25%] size-[75%] rounded-[4px] bg-primary" />
         </span>
         {eyebrow}
       </p>

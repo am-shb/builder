@@ -5,7 +5,6 @@ import { Footer } from "./Footer.tsx";
 import { Hero } from "./hero/Hero.tsx";
 import { LandingNav } from "./LandingNav.tsx";
 import { trackSpotlight } from "./layout.tsx";
-import { Audiences } from "./sections/Audiences.tsx";
 import { BeforeAfter } from "./sections/BeforeAfter.tsx";
 import { Demo } from "./sections/Demo.tsx";
 import { Faq } from "./sections/Faq.tsx";
@@ -33,7 +32,6 @@ export function LandingPage() {
         <HowItWorks />
         <Features />
         <Demo />
-        <Audiences />
         <Trust />
         <Pricing />
         <Faq />

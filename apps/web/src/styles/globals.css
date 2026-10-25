@@ -374,7 +374,7 @@
     line-height: 1.04;
     letter-spacing: -0.02em;
   }
-  /* Card titles and FAQ questions. */
+  /* Card titles. */
   .display-md {
     font-size: clamp(1.25rem, 2.1vw, 1.75rem);
     font-variation-settings: "SOFT" 60;

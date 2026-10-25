@@ -19,7 +19,7 @@ export const HERO = {
   headline: ["Your meeting ends with", "a working prototype."] as const,
   // The subheadline opens with what the product is, in a stronger ink, then what it does.
   subLead: `${BOT_NAME} is an AI product manager for your meetings.`,
-  sub: "It joins the call, asks who the app is for, lays out the trade-offs when you disagree, and builds the clickable prototype as you decide.",
+  sub: "Not a note taker, not a prompt box. It joins the call, asks who the app is for, lays out the trade-offs when you disagree, and builds the clickable prototype as you decide.",
   platforms: "Built for Google Meet. Zoom and Microsoft Teams links work too.",
   // What the hero's animation shows, for people who can't see it.
   sceneSummary:
@@ -69,11 +69,11 @@ export const STEPS = {
   items: [
     {
       title: "Paste the meeting link",
-      text: "Start a session with a Google Meet link. Zoom and Microsoft Teams links work too.",
+      text: "Start a session with your meeting's link. That's the whole setup.",
     },
     {
       title: `Admit ${BOT_NAME} when it asks to join`,
-      text: "It joins by name, like any guest, and posts a pinned message in the chat saying it is transcribing.",
+      text: "It asks to join like any guest. Once you let it in, it starts listening.",
     },
     {
       title: "Watch the prototype take shape",
@@ -109,7 +109,7 @@ export const FEATURES = {
     },
     teams: {
       title: "Made for teams",
-      text: "Sessions belong to your organization, so everyone sees the same ones. Admins manage members, and each organization's data is kept apart.",
+      text: "Create an organization and invite your teammates. Everyone sees the same sessions, and admins manage who's in.",
     },
   },
 };
@@ -121,27 +121,14 @@ export const DEMO = {
   placeholder: "The demo video is on its way.",
 };
 
-export const AUDIENCES = {
-  eyebrow: "Who it's for",
-  title: "For every meeting that should end in something real",
-  items: [
-    { title: "Product teams", text: "Plan with someone keeping the open questions in view, and leave with a flow everyone can click through." },
-    { title: "Agencies", text: "Leave a client kickoff with a prototype, and a record of what the client agreed to." },
-    { title: "Founders", text: "Talk an idea through with something that asks who it's for, then leave with a prototype your first users can try." },
-    { title: "Design sprints", text: "Make decision day produce a prototype, with the reasons for each choice on record." },
-  ],
-};
-
 export const TRUST = {
   eyebrow: "Trust and security",
   title: "Visible in the room, careful with your data",
   lead: "A meeting is a shared space. It behaves like a guest who says what it is doing.",
   items: [
     { tag: "In the meeting", title: "It announces itself", text: `${BOT_NAME} joins by name, waits to be admitted, and pins a chat message saying it is transcribing.` },
-    { tag: "Decisions", title: "People decide, not the model", text: "An agreement needs what people actually said behind it. Anything else stays a draft." },
-    { tag: "Your data", title: "Each organization's data is its own", text: "Every session belongs to one organization, and every request is checked against it." },
     { tag: "Spending", title: "Limits on every meeting", text: "At its time or spending limit, it says why in the chat, leaves, and keeps what was built." },
-    { tag: "Recording", title: "Clear about data", text: "It asks for the transcript, not a recording, and never writes transcripts, prompts or model output to logs." },
+    { tag: "Recording", title: "A transcript, not a recording", text: "It asks for the transcript, not an audio or video recording, and never writes transcripts, prompts or model output to logs." },
   ],
   logTitle: "What it promises",
   logNote: "True today, in every meeting",
@@ -151,40 +138,20 @@ export const TRUST = {
 export const PRICING = {
   eyebrow: "Pricing",
   title: "Start free. Pay when it's part of every meeting.",
-  note: "Pricing for paid plans is announced at launch. Plans include meeting hours, extra usage is billed per minute, and admins can set a spending limit.",
-  plans: [
-    {
-      name: "Free",
-      price: "$0",
-      blurb: "Try it in your own meetings.",
-      points: ["A small allowance of meeting minutes", "No card needed", "Stops at the limit; never billed"],
-      cta: { label: "Start free", href: SIGN_UP },
-    },
-    {
-      name: "Pro",
-      price: "Priced at launch",
-      blurb: "For a team that meets every week.",
-      points: ["Meeting hours included each month", "Extra minutes billed per minute", "A monthly spending limit you set"],
-      cta: { label: "Get early access", href: SIGN_UP },
-    },
-    {
-      name: "Team",
-      price: "Priced at launch",
-      blurb: "For an organization with many teams.",
-      points: ["Everything in Pro", "Sessions shared across your organization", "Admin and member roles"],
-      cta: { label: "Start with your team", href: SIGN_UP },
-    },
-  ],
+  free: {
+    name: "Free",
+    price: "$0",
+    blurb: "Try it in your own meetings.",
+    points: ["A small allowance of meeting minutes", "No card needed", "Stops at the limit; never billed"],
+    cta: { label: "Start free", href: SIGN_UP },
+  },
+  paid: "Paid plans for teams include meeting hours, bill extra use by the minute, and let an admin set a spending limit.",
 };
 
 export const FAQ = {
   eyebrow: "FAQ",
   title: "Questions, answered",
   items: [
-    {
-      q: "Is it recording the meeting?",
-      a: `It transcribes the call so it can follow what people decide. It doesn't ask for an audio or video recording. When it joins, it posts a pinned message in the meeting chat saying it is transcribing, and it has to be admitted like any guest.`,
-    },
     {
       q: "Which meeting platforms does it work with?",
       a: "It's built for Google Meet. Zoom and Microsoft Teams links are accepted too, but so far it has been tested most on Google Meet.",
@@ -203,11 +170,7 @@ export const FAQ = {
     },
     {
       q: "What happens to our data?",
-      a: "The transcript, the prototype and the decisions are stored with your organization's session, and only your organization can see them. The transcript is processed by the services that run the bot and the AI models. Transcripts are never written to logs. Settings for how long data is kept are coming before launch.",
-    },
-    {
-      q: "How much does it cost?",
-      a: "You can start free with a small allowance of meeting minutes and no card. Paid plans are announced at launch: they include meeting hours, extra usage is billed per minute, and admins can set a spending limit.",
+      a: "The transcript, the prototype and the decisions are stored with your organization's session, and only your organization can see them. The transcript is processed by the services that run the bot and the AI models. Settings for how long data is kept are coming before launch.",
     },
   ],
 };
@@ -219,6 +182,7 @@ export const FINAL_CTA = {
 
 export const FOOTER = {
   tagline: `${PRODUCT_NAME} sits in your meeting like a product manager, and builds the prototype while you decide.`,
+  builtAt: "Built at Build North 2026",
 };
 
 export const LEGAL = {
