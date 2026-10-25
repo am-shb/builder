@@ -1,17 +1,18 @@
-import { ArrowRight, Building2, FileLock2, Gauge, Handshake, Megaphone, type LucideIcon } from "lucide-react";
+import { ArrowRight, FileLock2, Gauge, Megaphone, type LucideIcon } from "lucide-react";
 import { TRUST as C } from "../copy.ts";
 import { Reveal, Section, SectionHeader } from "../layout.tsx";
 
 // One icon per promise, in the order of C.items.
-const ICONS: LucideIcon[] = [Megaphone, Handshake, Building2, Gauge, FileLock2];
+const ICONS: LucideIcon[] = [Megaphone, Gauge, FileLock2];
 
 // What the bot does in the room and with the data, each point true in the code today. Set as a decision log, the
-// product's own way of writing things down: each promise a settled, solid entry.
+// product's own way of writing things down: each promise a settled, solid entry. On desktop the heading stays in view
+// beside the list (sticky, below the bar).
 export function Trust() {
   return (
     <Section id="trust">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-16 xl:gap-20">
-        <div className="lg:self-center">
+        <div className="lg:sticky lg:top-28 lg:self-start">
           <SectionHeader id="trust" eyebrow={C.eyebrow} title={C.title} lead={C.lead} align="start-lg" />
           <Reveal className="max-lg:text-center">
             <a href="/privacy" className="group mt-7 inline-flex min-h-11 items-center gap-2 rounded-full font-semibold text-accent-ink no-underline hover:underline">

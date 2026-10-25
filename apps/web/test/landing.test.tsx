@@ -44,13 +44,14 @@ describe("the landing page", () => {
     for (const a of screen.getAllByRole("link", { name: "Sign in" })) expect(a.getAttribute("href")).toBe("/sign-in");
   });
 
-  it("every plan's button goes to sign-up, and nothing links to an email address", () => {
+  it("pricing shows the Free plan, whose button goes to sign-up, and nothing links to an email address", () => {
     useScreen(DESKTOP_MOUSE);
     const { container } = render(<LandingPage />);
     const pricing = document.getElementById("pricing")!;
     const buttons = within(pricing).getAllByRole("link");
-    expect(buttons.map((a) => a.textContent)).toEqual(["Start free", "Get early access", "Start with your team"]);
-    for (const a of buttons) expect(a.getAttribute("href")).toBe("/sign-up");
+    expect(buttons.map((a) => a.textContent)).toEqual(["Start free"]);
+    expect(buttons[0]!.getAttribute("href")).toBe("/sign-up");
+    expect(within(pricing).queryByText(/Priced at launch/)).toBeNull();
     expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
     expect(screen.queryByRole("link", { name: "Contact" })).toBeNull();
   });
@@ -198,6 +199,11 @@ describe("the landing page", () => {
     const demo = document.getElementById("demo")!;
     expect(within(demo).queryByRole("button")).toBeNull();
     expect(within(demo).getByText("The demo video is on its way.")).toBeTruthy();
+  });
+
+  it("the footer says where it was built", () => {
+    render(<LandingPage />);
+    expect(within(screen.getByRole("contentinfo")).getByText(/Built at Build North 2026/)).toBeTruthy();
   });
 
   it("names the page in the tab", () => {

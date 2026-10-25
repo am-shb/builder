@@ -13,7 +13,7 @@ export function Faq() {
         <Accordion.Root type="multiple" className="grid gap-3">
           {C.items.map((item) => (
             <Accordion.Item key={item.q} value={item.q} className="rounded-plate bg-surface ring-1 ring-hair transition-shadow has-[[data-state=open]]:shadow-elevated">
-              <Accordion.Header className="display display-md m-0">
+              <Accordion.Header className="display m-0 text-[1.0625rem] font-medium leading-snug sm:text-[1.1875rem]">
                 <Accordion.Trigger className="group flex min-h-16 w-full cursor-pointer items-center justify-between gap-4 rounded-plate px-5 py-4 text-left sm:px-6">
                   {item.q}
                   <span aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-full bg-sunk text-ink-2 transition-[transform,background-color] duration-200 group-hover:bg-plate group-data-[state=open]:rotate-45">

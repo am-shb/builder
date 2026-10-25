@@ -161,14 +161,15 @@ function TeamsArt() {
     { i: "S", c: "bg-p-c-bg text-p-c-ink" }, { i: "A", c: "bg-info-bg text-info-ink" },
   ];
   return (
-    <div className="absolute inset-0 flex items-center justify-center gap-5 p-4 sm:p-5">
-      <div className="flex -space-x-2.5 transition-[gap] motion-safe:group-hover:-space-x-1">
-        {people.map((p) => <span key={p.i} className={cn("grid size-10 place-items-center rounded-full text-[14px] font-bold ring-[3px] ring-plate transition-transform", p.c)}>{p.i}</span>)}
+    <div className="absolute inset-0 flex items-center justify-center gap-3 p-4 sm:gap-5 sm:p-5">
+      <div className="flex shrink-0 -space-x-2.5 transition-[gap] motion-safe:group-hover:-space-x-1">
+        {people.map((p) => <span key={p.i} className={cn("grid size-9 place-items-center rounded-full text-[13px] font-bold ring-[3px] ring-plate transition-transform sm:size-10 sm:text-[14px]", p.c)}>{p.i}</span>)}
       </div>
-      <div className="grid min-w-0 gap-1.5 rounded-xl bg-surface p-3 ring-1 ring-hair">
-        <span className="flex items-center gap-2 text-[12px] font-semibold text-ink"><span className="size-2 rounded-full bg-live" />Your team · 4 members</span>
-        <span className="h-2 w-32 max-w-full rounded-full bg-ink-3/20" />
-        <span className="h-2 w-24 max-w-full rounded-full bg-ink-3/15" />
+      {/* Two short lines that never wrap, so the card keeps its shape on a phone. */}
+      <div className="grid min-w-0 gap-1.5 overflow-hidden rounded-xl bg-surface p-3 ring-1 ring-hair">
+        <span className="flex items-center gap-2 text-[12px] font-semibold whitespace-nowrap text-ink"><span className="size-2 shrink-0 rounded-full bg-live" />Your team</span>
+        <span className="pl-4 text-[11px] whitespace-nowrap text-ink-3">4 members</span>
+        <span className="h-2 w-24 max-w-full rounded-full bg-ink-3/20" />
       </div>
     </div>
   );
