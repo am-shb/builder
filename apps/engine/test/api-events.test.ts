@@ -5,8 +5,8 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { SessionStatusEvent } from "@builder/contracts";
-import { createStatusReporter, EVENTS_PATH, statusEvent } from "../src/api-events.ts";
+import { EngineEvent, HandoffReadyEvent, SessionStatusEvent } from "@builder/contracts";
+import { createStatusReporter, EVENTS_PATH, handoffEvent, statusEvent } from "../src/api-events.ts";
 import { createApp } from "../src/app.ts";
 import type { StatusChange } from "../src/app.ts";
 import { apiInternalUrl, loadConfig, loadLocalConfig } from "../src/config.ts";
@@ -73,6 +73,63 @@ test("sessions the api didn't start, or without a bot, have no event", () => {
   assert.equal(statusEvent(session({ org_id: null }), new Date(NOW)), null, "the operator's own session");
   assert.equal(statusEvent(session({ state: "intent", bot_id: null, bot_status: null }), new Date(NOW)), null);
   assert.equal(statusEvent(session({ state: "create_failed", bot_id: null, bot_status: null }), new Date(NOW)), null);
+});
+
+// ---- the handoff ----
+
+const BASE = "https://engine.example.org";
+
+test("an ended session the api started has a handoff event with its link and read-only token", () => {
+  const s = session({ bot_status: "done", handoff_token: "a+b/c" });
+  const e = handoffEvent(s, new Date(NOW), BASE)!;
+  assert.equal(HandoffReadyEvent.safeParse(e).success, true, "a valid contract event");
+  assert.deepEqual([e.id, e.type, e.sessionId, e.orgId, e.handoffId], [`${s.id}:handoff`, "handoff.ready", s.id, "org_a", s.id]);
+  assert.equal(e.url, `${BASE}/handoff/${s.id}?token=a%2Bb%2Fc`, "the same link as the engine's own handoff route");
+});
+
+test("no handoff event before the end, for a failure, for the operator's sessions, or without a token", () => {
+  for (const over of [
+    { bot_status: "in_call_recording" }, { bot_status: "fatal" }, { bot_status: "done", org_id: null },
+    { bot_status: "done", handoff_token: null }, { state: "create_failed" as const, bot_id: null, bot_status: null },
+  ]) assert.equal(handoffEvent(session(over), new Date(NOW), BASE), null, JSON.stringify(over));
+});
+
+/** A reporter with the engine's public origin, so it sends handoffs too, against a fake api that takes everything. */
+function handoffHarness(publicBaseUrl: string | null = BASE) {
+  const sent: EngineEvent[] = [];
+  const logs: string[] = [];
+  const fakeFetch = (async (_url: string, init: RequestInit) => {
+    sent.push(EngineEvent.parse(JSON.parse(String(init.body))));
+    return new Response(JSON.stringify({ applied: true }), { status: 200 });
+  }) as typeof fetch;
+  const store = { listOrgSessionsUpdatedSince: async () => [] };
+  const reporter = createStatusReporter({
+    apiUrl: API, token: TOKEN, store, fetch: fakeFetch, clock: () => NOW,
+    log: (msg, fields) => logs.push(JSON.stringify({ msg, fields })),
+    ...(publicBaseUrl ? { publicBaseUrl } : {}),
+  });
+  return { reporter, sent, logs };
+}
+
+test("when a session ends, its status and then its handoff are sent; the link is never logged", async () => {
+  const h = handoffHarness();
+  const s = session({ bot_status: "in_call_recording", handoff_token: "secret-handoff-token" });
+  h.reporter.notify(s);
+  await h.reporter.flush();
+  assert.deepEqual(h.sent.map((e) => e.type), ["session.status"], "no handoff while the meeting runs");
+  h.reporter.notify({ ...s, bot_status: "done" });
+  await h.reporter.flush();
+  assert.deepEqual(h.sent.slice(1).map((e) => e.id), [`${s.id}:status:ended`, `${s.id}:handoff`]);
+  assert.equal(h.reporter.waiting(), 0);
+  assert.ok(h.logs.some((l) => l.includes("api_events.delivered") && l.includes('"status":"handoff"')));
+  assert.ok(h.logs.every((l) => !l.includes("secret-handoff-token") && !l.includes("/handoff/")), "no link or token in the logs");
+});
+
+test("without the engine's public origin, no handoff is sent", async () => {
+  const h = handoffHarness(null);
+  h.reporter.notify(session({ bot_status: "done" }));
+  await h.reporter.flush();
+  assert.deepEqual(h.sent.map((e) => e.type), ["session.status"]);
 });
 
 // ---- the reporter ----

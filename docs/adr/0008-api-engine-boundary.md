@@ -56,6 +56,17 @@ latest value.
 - Only sessions the api started (with an org) are reported. Without `API_INTERNAL_URL` on the engine nothing is
   sent, and the api's statuses stay at what the start answered.
 
+**Delivering the hand-off link (added 2026-10-25).**
+- When an org's session ends, the engine sends `handoff.ready` once: `handoffId` is the session's id (a session has
+  one hand-off) and `url` is the engine's hand-off page with its read-only token. It goes through the same reporter as
+  the status, with the same retries, and waits apart from it under its own id, `<sessionId>:handoff`. A failed session
+  has no hand-off.
+- The restart sweep sends it again for sessions that ended in the last day; the api stores the latest link, so a repeat
+  is harmless. Sessions that ended before this change, or more than a day before a restart, don't get one.
+- The api keeps the link on the session and returns it from `GET /v1/sessions/:id` to members of the session's org,
+  never in the list. The link stays a bearer link: anyone it's shared with can read the hand-off, as designed for
+  engineers. Neither side logs it.
+
 **Spend limits.** The engine enforces `limits` itself and ends the session with a clear message when either is reached.
 The api decides the limits from the plan. This clears deployment blocker 4.
 

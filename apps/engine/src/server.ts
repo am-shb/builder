@@ -84,7 +84,7 @@ async function main() {
   const agent = config.agentEnabled ? { port: createOpenRouterPort(config, { log }), ...(speech ? { speech } : {}) } : undefined;
   // Session status events to the api (A2), only when API_INTERNAL_URL is set (it requires the token).
   const reporter = config.apiInternalUrl && config.internalToken
-    ? createStatusReporter({ apiUrl: config.apiInternalUrl, token: config.internalToken, store, log })
+    ? createStatusReporter({ apiUrl: config.apiInternalUrl, token: config.internalToken, publicBaseUrl: config.publicBaseUrl, store, log })
     : null;
   const app = await createApp({ config, recall, store, runtime, log, agent, ...(reporter ? { onStatusChange: reporter.notify } : {}) });
   server.on("request", app.handler);
