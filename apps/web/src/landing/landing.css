@@ -126,15 +126,96 @@
       transition: clip-path 320ms var(--ease-out), transform 320ms var(--ease-out), visibility 0s linear 320ms;
     }
   }
-  /* Back at the start of the loop everything is already hidden; this step sets it all back with no motion. */
-  .scene[data-reset] * {
+  /* Each of the hero's meetings has its own accent, on its tab and the window's bar: the café is warm amber, the sales
+     review the page's teal. Both inks pass AA on the bar in light and dark. */
+  .scene,
+  [data-accent="sales"] {
+    --ra-line: var(--primary);
+    --ra-ink: var(--accent-ink);
+  }
+  [data-accent="cafe"] {
+    --ra-line: var(--pending);
+    --ra-ink: var(--warn-ink);
+  }
+  .sc-bar-bg {
+    background-color: color-mix(in srgb, var(--ra-line) 9%, var(--surface));
+    transition: background-color 450ms var(--ease-out), color 450ms var(--ease-out);
+  }
+  .sc-tab {
+    transition: background-color 200ms var(--ease-out), color 200ms var(--ease-out);
+  }
+  /* The hero's two meetings share one place. The one leaving fades out and drifts down; once it has gone, the next
+     fades in. A room that isn't playing is set back to its start with no motion, out of sight. */
+  .sc-room {
+    transition: opacity 450ms var(--ease-out), transform 450ms var(--ease-out);
+  }
+  .sc-room[data-off] {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+  }
+  .sc-room[data-reset],
+  .sc-room[data-reset] * {
+    transition: none !important;
+  }
+  .scene[data-paused] * {
+    animation-play-state: paused;
+  }
+  /* Paused, nothing moves: a pill pressed then shows its room's frame at once. */
+  .scene[data-paused] .sc-room,
+  .scene[data-paused] .sc-room * {
+    transition: none !important;
+  }
+  /* The café's options: one phone, then A and B side by side, then B alone. The columns' widths move, and a column
+     with no room left is clipped in from both sides (it folds away), then hidden. */
+  .sc-ab {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+    transition: grid-template-columns 700ms var(--ease-out);
+  }
+  .sc-ab[data-layout="split"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .sc-ab[data-layout="picked"] {
+    grid-template-columns: minmax(0, 0fr) minmax(0, 1fr);
+  }
+  .sc-opt {
+    overflow-x: clip;
+    overflow-clip-margin: 8px;
+    clip-path: inset(-40px);
+    transition: clip-path 600ms var(--ease-out), visibility 0s;
+  }
+  .sc-opt[data-off] {
+    visibility: hidden;
+    clip-path: inset(0 50%);
+    transition: clip-path 600ms var(--ease-out), visibility 0s linear 600ms;
+  }
+  /* Its parts would show through on their own (they set visibility themselves), so they are hidden too. */
+  .sc-ab .sc-opt[data-off] * {
+    visibility: hidden;
+    transition: visibility 0s linear 600ms;
+  }
+  /* A slot at the top of the café's phone opens downwards, pushing the menu down, then its part is drawn in it. */
+  .sc-slot {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 520ms var(--ease-out);
+  }
+  .sc-slot[data-on] {
+    grid-template-rows: 1fr;
+  }
+  .sc-slot > * {
+    visibility: hidden;
+    transition: visibility 0s linear 520ms;
+  }
+  .sc-slot[data-on] > * {
+    visibility: visible;
     transition: none;
   }
-  .scene[data-paused] * {
-    animation-play-state: paused;
-  }
-  .scene[data-paused] * {
-    animation-play-state: paused;
+  /* The indicator's bar fills over the playing room. */
+  .sc-progress {
+    transform: scaleX(0);
+    transform-origin: left;
   }
 
   .typing-dot {
@@ -186,30 +267,159 @@
     }
   }
 
-  /* How it works: a step's number is a dashed ring until the step comes into view, then a solid one; the stage in the
-     third step settles the same way. */
+  /* How it works: one track links the three numbers, dashed until the fill (solid, the primary) passes over it. A
+     number is a dashed ring until the fill reaches its step (data-reached), then a solid one, and that step's picture
+     plays once. The track's place, length (--len) and fill (--fill, 0 to 1) come from HowItWorks.tsx. */
+  .journey-track {
+    width: 0;
+    height: var(--len, 0);
+    margin-left: -1px;
+  }
+  .journey-track[data-across] {
+    width: var(--len, 0);
+    height: 0;
+    margin: -1px 0 0;
+  }
+  .journey-track::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-left: 2px dashed var(--outline);
+  }
+  .journey-track[data-across]::before {
+    border-left: 0;
+    border-top: 2px dashed var(--outline);
+  }
+  .journey-fill {
+    width: 2px;
+    height: 100%;
+    border-radius: 2px;
+    transform-origin: top;
+    transform: scaleY(var(--fill, 0));
+    transition: transform 180ms linear;
+  }
+  .journey-track[data-across] .journey-fill {
+    width: 100%;
+    height: 2px;
+    transform-origin: left;
+    transform: scaleX(var(--fill, 0));
+  }
+  .step-num {
+    transition: box-shadow 500ms var(--ease-out), color 400ms var(--ease-out);
+    color: var(--ink-2);
+  }
+  .step[data-reached] .step-num {
+    color: var(--accent-ink);
+    box-shadow: 0 0 0 6px var(--accent-tint);
+  }
   .step-ring-solid,
-  .build-solid {
-    transition: opacity 500ms var(--ease-out) 450ms;
-  }
-  .build-solid {
-    transition-delay: 1100ms;
-  }
   .step-ring-dashed,
+  .jr-wait,
+  .jr-in,
+  .build-solid,
   .build-dashed {
-    transition: opacity 500ms var(--ease-out) 450ms;
+    transition: opacity 450ms var(--ease-out);
+  }
+  .step-ring-solid,
+  .jr-in,
+  .build-solid,
+  .step[data-reached] .step-ring-dashed,
+  .step[data-reached] .jr-wait,
+  .step[data-reached] .build-dashed {
     opacity: 0;
   }
-  .build-dashed {
-    transition-delay: 1100ms;
-  }
-  .step[data-pending] .step-ring-solid,
-  .step[data-pending] .build-solid {
-    opacity: 0;
-  }
-  .step[data-pending] .step-ring-dashed,
-  .step[data-pending] .build-dashed {
+  .step[data-reached] .step-ring-solid,
+  .step[data-reached] .jr-in,
+  .step[data-reached] .build-solid {
     opacity: 1;
+  }
+  .step .jr-wait,
+  .step .jr-in {
+    transition-delay: 650ms;
+  }
+  .step .build-solid,
+  .step .build-dashed {
+    transition-delay: 1300ms;
+  }
+  /* The admitted line takes the waiting one's place at once, so its words are never half transparent. */
+  .jr-in-text,
+  .step[data-reached] .jr-wait-text {
+    visibility: hidden;
+  }
+  .step[data-reached] .jr-in-text {
+    visibility: visible;
+  }
+  .jr-in-text,
+  .jr-wait-text {
+    transition: visibility 0s 650ms;
+  }
+  /* The field's placeholder goes as the link starts to be drawn in. */
+  .step[data-reached] .jr-placeholder {
+    visibility: hidden;
+  }
+  .jr-placeholder {
+    transition: visibility 0s 250ms;
+  }
+
+  /* Before and after: when the pair comes into view, a note is crossed out, then the "after" card and its prototype
+     settle from dashed (amber, still a draft) to solid, and its decision turns agreed. Settled unless still pending. */
+  .ba-strike {
+    transform-origin: left;
+    transition: transform 600ms var(--ease-out) 500ms;
+  }
+  .ba-solid,
+  .ba-part-done,
+  .ba-decision-bg,
+  .ba-glow {
+    transition: opacity 600ms var(--ease-out) 1100ms;
+  }
+  .ba-dashed,
+  .ba-part-draft,
+  .ba-decision-draft {
+    opacity: 0;
+    transition: opacity 600ms var(--ease-out) 1100ms;
+  }
+  .ba-part-2 > span,
+  .ba-glow {
+    transition-delay: 1250ms;
+  }
+  .ba-decision > span:nth-child(-n + 2) {
+    transition-delay: 1500ms;
+  }
+  .ba-check,
+  .ba-agreed {
+    transition: opacity 400ms var(--ease-out) 1650ms, scale 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 1650ms;
+  }
+  .ba-turn {
+    transition: scale 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 700ms, opacity 400ms var(--ease-out) 700ms;
+  }
+  /* Becoming pending is instant; only settling is animated. */
+  .ba[data-pending] :is(.ba-strike, .ba-solid, .ba-part-done, .ba-decision-bg, .ba-glow, .ba-agreed, .ba-dashed, .ba-part-draft,
+    .ba-decision-draft, .ba-check, .ba-turn) {
+    transition: none;
+  }
+  .ba[data-pending] .ba-strike {
+    transform: scaleX(0);
+  }
+  .ba[data-pending] .ba-solid,
+  .ba[data-pending] .ba-part-done,
+  .ba[data-pending] .ba-decision-bg,
+  .ba[data-pending] .ba-glow,
+  .ba[data-pending] .ba-agreed {
+    opacity: 0;
+  }
+  .ba[data-pending] .ba-dashed,
+  .ba[data-pending] .ba-part-draft,
+  .ba[data-pending] .ba-decision-draft {
+    opacity: 1;
+  }
+  .ba[data-pending] .ba-check {
+    opacity: 0;
+    scale: 0.4;
+  }
+  .ba[data-pending] .ba-turn {
+    opacity: 0;
+    scale: 0.6;
   }
 
   .hero-glow-soft {
@@ -251,6 +461,15 @@
   .sc-flash {
     animation: flash 1.4s var(--ease-out) 320ms both;
   }
+  /* A label that appears once, drawn in from the left (its words are never half transparent). */
+  .sc-pop {
+    animation: pop-in 520ms var(--ease-out) 320ms both;
+  }
+  .sc-progress {
+    animation-name: progress;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
   /* The hero's words rise a little but are never transparent: they are the first thing to read, and a page's largest
      text or button counts as shown only once it is visible. The scene beside them fades in. */
   .rise-in {
@@ -258,6 +477,30 @@
   }
   .rise-in-fade {
     animation: rise 800ms var(--ease-out) both;
+  }
+
+  /* How it works: the number settles with a small pop, the link is drawn into its field, buttons are pressed and
+     the prototype's parts rise in, each once, when its step is reached. Hidden only until then. */
+  .step[data-reached] .step-num {
+    animation: num-pop 520ms var(--ease-out) both;
+  }
+  .step:not([data-reached]) .jr-type {
+    clip-path: inset(0 100% 0 0);
+  }
+  .step[data-reached] .jr-type {
+    animation: type-in 900ms steps(28, end) 250ms both;
+  }
+  .step[data-reached] .jr-press-1 {
+    animation: press 420ms var(--ease-out) 1250ms both;
+  }
+  .step[data-reached] .jr-press-2 {
+    animation: press 420ms var(--ease-out) 250ms both;
+  }
+  .step:not([data-reached]) .jr-part {
+    opacity: 0;
+  }
+  .step[data-reached] .jr-part {
+    animation: build 700ms var(--ease-out) 200ms both;
   }
 
   /* Each plays once when the grid comes into view, in under 5 s, and rests on its settled frame (WCAG 2.2.2). */
@@ -306,6 +549,19 @@
   }
 }
 
+@keyframes num-pop {
+  0% { transform: scale(0.9); }
+  60% { transform: scale(1.06); }
+  100% { transform: none; }
+}
+@keyframes type-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0); }
+}
+@keyframes press {
+  0%, 100% { transform: none; }
+  45% { transform: scale(0.92); filter: brightness(1.12); }
+}
 @keyframes build {
   from { opacity: 0; transform: translateY(8px) scale(0.97); }
 }
@@ -341,6 +597,24 @@
   .step-ring-dashed,
   .build-solid,
   .build-dashed,
+  .journey-fill,
+  .step-num,
+  .jr-wait,
+  .jr-in,
+  .jr-in-text,
+  .jr-wait-text,
+  .jr-placeholder,
+  .ba-strike,
+  .ba-solid,
+  .ba-part-done,
+  .ba-decision-bg,
+  .ba-glow,
+  .ba-dashed,
+  .ba-part-draft,
+  .ba-decision-draft,
+  .ba-check,
+  .ba-agreed,
+  .ba-turn,
   .sc-fade,
   .sc-fade[data-on],
   .sc-swap,
@@ -353,6 +627,14 @@
   .sc-row,
   .sc-card[data-on] .sc-row,
   .sc-slice,
+  .sc-room,
+  .sc-bar-bg,
+  .sc-tab,
+  .sc-ab,
+  .sc-opt,
+  .sc-opt[data-off],
+  .sc-slot,
+  .sc-slot > *,
   .reveal {
     transition: none;
   }
@@ -368,6 +650,13 @@
     opacity: 0.9;
     transform: translateY(-2px);
   }
+}
+@keyframes pop-in {
+  from { clip-path: inset(-4px 100% -4px -4px); transform: translateX(-4px); }
+  to { clip-path: inset(-4px); transform: none; }
+}
+@keyframes progress {
+  to { transform: scaleX(1); }
 }
 @keyframes flash {
   0% { opacity: 0; }

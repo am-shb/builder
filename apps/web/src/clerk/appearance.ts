@@ -40,8 +40,10 @@ export const clerkAppearance = {
     // Clerk's small secondary buttons (Upload, Manage) as our outline pill, 44px.
     avatarImageActionsUpload: "min-h-11 rounded-full px-4 text-label font-semibold text-ink shadow-outline hover:bg-sunk",
     organizationSwitcherPopoverActionButton__manageOrganization: "min-h-11 rounded-full px-4 text-ink shadow-outline hover:bg-sunk",
-    // The phone field is a box holding a country picker and an input: the box gets the border, the input none.
-    phoneInputBox: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus-within:border-primary focus-within:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)] [&_input]:border-0 [&_input]:shadow-none",
+    // The phone field is a box holding a country picker and an input: the box gets the border and the one focus ring,
+    // the input none. The input is also a formFieldInput, whose focus ring would draw a second one inside the box, so
+    // these win over it (!).
+    phoneInputBox: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus-within:border-primary focus-within:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)] [&_input]:border-0! [&_input]:shadow-none! [&_input]:outline-none!",
     formFieldInput: "min-h-12 rounded-field border-[1.5px] border-input bg-surface shadow-none focus:border-primary focus:shadow-[inset_0_0_0_0.5px_var(--primary),0_0_0_4px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
     // A long org name is cut short with an ellipsis, so the color mode and account buttons stay inside the page's
     // margins down to a 320px phone (the switcher can shrink: SignedInShell). Below 400px the org's small avatar is

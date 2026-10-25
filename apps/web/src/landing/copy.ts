@@ -16,16 +16,22 @@ export const HOME_TITLE = `${PRODUCT_NAME} · The AI product manager that builds
 export const HOME_DESCRIPTION = `${PRODUCT_NAME} joins your call like a product manager: it asks who the app is for, lays out the trade-offs when you disagree, and builds a clickable prototype while the team decides.`;
 
 export const HERO = {
-  eyebrow: "An AI product manager for your meetings",
   headline: ["Your meeting ends with", "a working prototype."] as const,
-  sub: `${BOT_NAME} joins your call like a product manager. It asks who the app is for, lays out the trade-offs when you disagree, and builds the clickable prototype as you decide.`,
+  // The subheadline opens with what the product is, in a stronger ink, then what it does.
+  subLead: `${BOT_NAME} is an AI product manager for your meetings.`,
+  sub: "It joins the call, asks who the app is for, lays out the trade-offs when you disagree, and builds the clickable prototype as you decide.",
   platforms: "Built for Google Meet. Zoom and Microsoft Teams links work too.",
   // What the hero's animation shows, for people who can't see it.
   sceneSummary:
-    `An example meeting about a sales dashboard. Maya asks for monthly revenue as a bar chart, and ${BOT_NAME} adds it ` +
-    "to the prototype on screen, outlined with dashes as a draft. Jonah agrees, so the decision moves from pending to " +
-    "agreed and the outline turns solid. In the same way the team adds revenue by region as a donut chart, a table of " +
-    "top customers, and a card at the top for the best month, until all four decisions are agreed.",
+    "Two example meetings, one after the other. In the first, a team designs a café's ordering app: a phone screen " +
+    `with today's menu as photo cards with prices, which ${BOT_NAME} draws as a draft and Theo agrees to. Then Sana ` +
+    "wants the fall special at the top for its higher margin, and Ravi wants Order again at the top because most " +
+    `orders are repeats. ${BOT_NAME} shows both side by side as A and B, each with who backs it and its trade-off. ` +
+    `Theo picks B, and B is marked as picked by Theo. ${BOT_NAME} only asks whether everyone is OK with B; Nora ` +
+    "agrees, and the decision is recorded as agreed by Theo and Nora. In the second, a sales review, Maya asks for " +
+    `monthly revenue as a bar chart, and ${BOT_NAME} adds it to the prototype on screen, outlined with dashes as a ` +
+    "draft. Jonah agrees, so the decision moves from pending to agreed and the outline turns solid. In the same way " +
+    "the team adds revenue by region, a table of top customers and a card for the best month.",
 };
 
 // The demo video, self-hosted under public/ when it exists (for example "/demo.mp4"). Until then the demo section
@@ -131,11 +137,11 @@ export const TRUST = {
   title: "Visible in the room, careful with your data",
   lead: "A meeting is a shared space. It behaves like a guest who says what it is doing.",
   items: [
-    { tag: "In the meeting", title: "It announces itself", text: `${BOT_NAME} joins by name, has to be admitted like any guest, and posts a pinned chat message saying it is transcribing.` },
-    { tag: "Decisions", title: "People decide, not the model", text: "Every agreement has to be backed by what people actually said. Anything not agreed stays a draft." },
-    { tag: "Your data", title: "Each organization's data is its own", text: "Every session belongs to one organization, and every request is checked against it. One organization can't see another's sessions." },
-    { tag: "Spending", title: "Limits on every meeting", text: "Each session has a time and a spending limit. When one is reached, it says why in the chat, leaves, and keeps what was built." },
-    { tag: "Recording", title: "Clear about data", text: "It asks for the transcript, not an audio or video recording. Transcripts, prompts and model output are never written to logs." },
+    { tag: "In the meeting", title: "It announces itself", text: `${BOT_NAME} joins by name, waits to be admitted, and pins a chat message saying it is transcribing.` },
+    { tag: "Decisions", title: "People decide, not the model", text: "An agreement needs what people actually said behind it. Anything else stays a draft." },
+    { tag: "Your data", title: "Each organization's data is its own", text: "Every session belongs to one organization, and every request is checked against it." },
+    { tag: "Spending", title: "Limits on every meeting", text: "At its time or spending limit, it says why in the chat, leaves, and keeps what was built." },
+    { tag: "Recording", title: "Clear about data", text: "It asks for the transcript, not a recording, and never writes transcripts, prompts or model output to logs." },
   ],
   logTitle: "What it promises",
   logNote: "True today, in every meeting",

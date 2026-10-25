@@ -18,38 +18,43 @@ export function Hero() {
       {/* Two columns from 1280px, when both fit; stacked and centered below. Grid children may shrink (min-w-0), and
           the headline is sized from its own column (cqi), so the text never runs under the scene. */}
       <div className="mx-auto grid max-w-[1320px] items-center gap-y-14 px-4 pt-8 pb-16 sm:px-6 md:gap-y-16 md:pt-14 md:pb-20 lg:px-10 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:gap-x-[clamp(3rem,5vw,6rem)] xl:pt-[clamp(3rem,8vh,6.5rem)] xl:pb-[clamp(4rem,10vh,8rem)] 2xl:max-w-[1440px]">
-        <div className="@container w-full min-w-0 max-xl:mx-auto max-xl:max-w-[780px] max-xl:text-center">
-          <p className="rise-in m-0 inline-flex items-center gap-2 rounded-full border border-dashed border-primary/45 bg-surface/60 py-1.5 pr-3.5 pl-2.5 text-[13.5px] font-semibold text-accent-ink" style={delay(0)}>
-            <span className={cn("size-2 rounded-full bg-live animate-breathe", paused && "[animation-play-state:paused]")} aria-hidden="true" />
-            {HERO.eyebrow}
-          </p>
-          {/* display-xl's line height and tracking, at a size taken from the column (cqi): "Your meeting ends with" is
-              about 10.4em wide at these sizes (optical sizing widens it as it gets smaller), so 9.2cqi keeps it on
-              one line. From 768px the headline breaks after it, two lines, and wraps
-              normally (balancing would even it out into three). */}
+        {/* The words: headline, subheadline, actions, platforms, on one rhythm (24, 40, 28 px apart). Centered and
+            stacked below 1280px; beside the scene from there, centered against it. */}
+        <div className="@container w-full min-w-0 max-xl:mx-auto max-xl:max-w-[760px] max-xl:text-center">
+          {/* Sized from its own column (cqi), with slightly tighter tracking: "Your meeting ends with" is about 10.5em
+              wide at these sizes (optical sizing widens it as it gets smaller), so 9.25cqi keeps it on one line. From
+              768px it breaks after it, two lines; on a phone it balances over three, keeping "a working" together. The tight
+              line height lets the letters' box rise above the line, so a little top padding keeps them in the column. */}
           <h1
             id="hero-title"
-            className="rise-in display display-xl mt-5 mb-0 text-[clamp(2rem,10cqi,2.75rem)] break-words md:text-[clamp(2.25rem,9.2cqi,3.75rem)] md:text-wrap xl:text-[clamp(2.5rem,9.2cqi,4rem)]"
-            style={delay(80)}
+            className="rise-in display display-xl m-0 pt-[0.12em] text-[clamp(1.875rem,10.6cqi,3rem)] leading-[1.02] tracking-[-0.02em] text-balance break-words md:text-[clamp(2.5rem,9.25cqi,4rem)] md:text-wrap xl:text-[clamp(2.75rem,9.25cqi,4.5rem)]"
+            style={delay(0)}
           >
-            {HERO.headline[0]}<br className="max-md:hidden" /> {HERO.headline[1]}
+            {HERO.headline[0]}<br className="max-md:hidden" />{" "}
+            <span className="whitespace-nowrap">{HERO.headline[1].split(" ").slice(0, 2).join(" ")}</span>{" "}
+            {HERO.headline[1].split(" ").slice(2).join(" ")}
           </h1>
-          <p className="rise-in mx-auto mt-6 mb-0 max-w-[34em] text-lead text-pretty text-ink-2 xl:mx-0" style={delay(160)}>{HERO.sub}</p>
-          <div className="rise-in mt-8 flex flex-wrap items-center gap-3 max-xl:justify-center" style={delay(240)}>
-            <a href={SIGN_UP} className={cn(buttonVariants(), "group min-h-13 px-7 text-[16px] no-underline max-sm:flex-1")}>
+          <p className="rise-in mx-auto mt-6 mb-0 max-w-[33rem] text-lead text-pretty text-ink-2 xl:mx-0 xl:max-w-[31rem]" style={delay(80)}>
+            <span className="font-semibold text-ink">{HERO.subLead}</span> {HERO.sub}
+          </p>
+          <div className="rise-in mt-10 flex flex-wrap items-center gap-x-3 gap-y-2 max-xl:justify-center max-sm:flex-col max-sm:items-stretch" style={delay(160)}>
+            <a href={SIGN_UP} className={cn(buttonVariants(), "group min-h-13 px-7 text-[16px] no-underline shadow-[0_8px_20px_-8px_var(--glow-a)]")}>
               Start free
               <ArrowRight aria-hidden="true" className="transition-transform motion-safe:group-hover:translate-x-0.5" />
             </a>
+            {/* The second action is lighter: no outline, its play icon in a small disc. */}
             <a
               href="#demo"
               onClick={(e) => { e.preventDefault(); goToSection("#demo"); }}
-              className={cn(buttonVariants({ variant: "secondary" }), "min-h-13 px-6 text-[16px] no-underline max-sm:flex-1")}
+              className={cn(buttonVariants({ variant: "secondary" }), "group min-h-13 gap-2.5 pr-5 pl-2 text-[16px] no-underline !shadow-none hover:bg-sunk max-sm:self-center")}
             >
-              <Play aria-hidden="true" className="fill-current" />
+              <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-surface text-accent-ink shadow-[0_1px_2px_var(--hair)] ring-1 ring-hair transition-transform motion-safe:group-hover:scale-105">
+                <Play className="ml-0.5 !size-3.5 fill-current" />
+              </span>
               Watch the demo
             </a>
           </div>
-          <p className="rise-in mt-6 mb-0 text-sm text-balance text-ink-3" style={delay(320)}>
+          <p className="rise-in mt-7 mb-0 text-[13.5px] leading-snug text-balance text-ink-3" style={delay(240)}>
             <Video aria-hidden="true" className="mr-2 inline size-4 -translate-y-px align-middle" />
             {HERO.platforms}
           </p>
@@ -57,7 +62,8 @@ export function Hero() {
         <div className="rise-in-fade relative mx-auto w-full min-w-0 max-w-[720px] xl:max-w-none" style={delay(200)}>
           <p className="sr-only">{HERO.sceneSummary}</p>
           <HeroScene paused={paused} />
-          {/* The scene loops, so it can be stopped (WCAG 2.2.2). In the hero's bottom padding, so the layout stays put. */}
+          {/* The scene loops, so it can be stopped (WCAG 2.2.2); this stops both meetings. In the hero's bottom padding, so
+              the layout stays put. */}
           {!reduced && (
             <button
               type="button"
