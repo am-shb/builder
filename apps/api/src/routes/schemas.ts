@@ -15,14 +15,19 @@ export const SessionView = z.strictObject({
   errorCode: z.string().optional(),
   // Shown to members of the owning org (D8). Never logged.
   stageUrl: z.string().optional(),
+  // The engine's handoff page, once the meeting has ended (ADR 0008). A read-only link for the org. Never logged.
+  handoffUrl: z.string().optional(),
   limits: SessionLimitsSchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
-/** GET /v1/sessions. Without the stage URL: it's a control link, sent only for one session (GET /v1/sessions/:id). */
-export const SessionListItem = SessionView.omit({ stageUrl: true });
+/**
+ * GET /v1/sessions. Without the stage URL (a control link) or the handoff link: links with tokens are sent only for one
+ * session (GET /v1/sessions/:id).
+ */
+export const SessionListItem = SessionView.omit({ stageUrl: true, handoffUrl: true });
 export type SessionListItem = z.infer<typeof SessionListItem>;
 export const SessionList = z.strictObject({ sessions: z.array(SessionListItem) });
 export type SessionList = z.infer<typeof SessionList>;
@@ -38,6 +43,7 @@ export function toSessionView(r: SessionRecord): SessionView {
     status: r.status,
     ...(r.errorCode !== null ? { errorCode: r.errorCode } : {}),
     ...(r.stageUrl !== null ? { stageUrl: r.stageUrl } : {}),
+    ...(r.handoffUrl !== null ? { handoffUrl: r.handoffUrl } : {}),
     limits: r.limits,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -45,7 +51,7 @@ export function toSessionView(r: SessionRecord): SessionView {
 }
 
 export function toSessionListItem(r: SessionRecord): SessionListItem {
-  const { stageUrl: _stageUrl, ...item } = toSessionView(r);
+  const { stageUrl: _stageUrl, handoffUrl: _handoffUrl, ...item } = toSessionView(r);
   return item;
 }
 

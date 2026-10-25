@@ -4,10 +4,10 @@ import { connect } from "./connect.ts";
 import type { DbTarget } from "./connect.ts";
 import { migrate } from "./migrate.ts";
 import { upsertOrg } from "./orgs.ts";
-import { applyStatusEvent, createSessionUnlessActive, getSession, listSessions, setSessionStart } from "./sessions.ts";
+import { applyStatusEvent, createSessionUnlessActive, getSession, listSessions, setHandoffUrl, setSessionStart } from "./sessions.ts";
 import type { Db } from "./types.ts";
 
-export type { Db, CreateResult, NewSession, StartLimit, StartLimits, SessionRecord, StartResult, ApiSessionStatus, StatusEventResult } from "./types.ts";
+export type { Db, CreateResult, NewSession, StartLimit, StartLimits, SessionRecord, StartResult, ApiSessionStatus, StatusEventResult, HandoffEventResult } from "./types.ts";
 export { StartLimitError } from "./types.ts";
 export type { DbTarget } from "./connect.ts";
 
@@ -34,6 +34,7 @@ export async function openDb(target: DbTarget = {}): Promise<Db> {
     getSession: (orgId, id) => getSession(db, orgId, id),
     listSessions: (orgId, limit) => listSessions(db, orgId, limit),
     applyStatusEvent: (orgId, id, status, code) => applyStatusEvent(db, orgId, id, status, code),
+    setHandoffUrl: (orgId, id, url) => setHandoffUrl(db, orgId, id, url),
     // Closing twice is fine.
     close: () => (closing ??= db.close().then(() => {})),
   };

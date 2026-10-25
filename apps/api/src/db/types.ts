@@ -18,6 +18,8 @@ export type SessionRecord = {
   status: ApiSessionStatus;
   errorCode: string | null;
   stageUrl: string | null;
+  // The engine's handoff page (ADR 0008), once the meeting has ended. A read-only link with its token: never logged.
+  handoffUrl: string | null;
   limits: SessionLimits;
   createdAt: string;
   updatedAt: string;
@@ -74,6 +76,9 @@ export const MAX_LIST = 50;
  */
 export type StatusEventResult = "applied" | "stale" | "conflict" | "not_found";
 
+/** The handoff link: saved, or no such session in the org. */
+export type HandoffEventResult = "applied" | "not_found";
+
 /**
  * The only way into the database. Every function takes the org id first, from the verified token, and never
  * returns or changes another org's rows.
@@ -93,5 +98,7 @@ export type Db = {
   listSessions(orgId: string, limit?: number): Promise<SessionRecord[]>;
   /** The engine's status event (A2): moves the session on, never back. Only within `orgId`. */
   applyStatusEvent(orgId: string, id: string, status: SessionStatus, errorCode: string | null): Promise<StatusEventResult>;
+  /** The engine's handoff link (ADR 0008), replacing any earlier one. Only within `orgId`. */
+  setHandoffUrl(orgId: string, id: string, url: string): Promise<HandoffEventResult>;
   close(): Promise<void>;
 };
