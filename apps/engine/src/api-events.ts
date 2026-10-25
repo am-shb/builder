@@ -1,12 +1,15 @@
 // Tells the api when a session's status changes (A2 in docs/plans/api-first-slice.md, ADR 0008): one
 // `session.status` event from @builder/contracts per call to POST {API_INTERNAL_URL}/internal/engine-events, with the
-// shared bearer token. Only sessions the api started (they have an org) are reported.
+// shared bearer token. Once a session has ended, also its `handoff.ready` event, with the handoff page's link (its
+// read-only token included), so people in the org can find it. Only sessions the api started (they have an org) are
+// reported.
 //
 // Delivery:
 // - Only each session's latest status waits to be sent. A newer one replaces an older one not yet sent (and is sent
 //   right away, without waiting out the older one's retry delay), so events never go out of order; the api also
 //   refuses to move a session backwards.
-// - The event id is fixed for a session and status, so sending it again is harmless.
+// - The event id is fixed for a session and status, so sending it again is harmless. The handoff's waits apart from the
+//   status, with its own fixed id (`<sessionId>:handoff`), and the api stores the latest link.
 // - 2xx: delivered. 401, 408, 429, 5xx, a timeout or a network error: tried again, waiting 2 s, then twice as long
 //   each time, up to 60 s. So is a 404 for the route itself (an api without it, mid-deploy, or the route turned off):
 //   only a 404 that says `session_not_found` is about the event. Any other 4xx (no such session, a malformed event,
@@ -16,8 +19,8 @@
 //   sweep's slower read can't push back a newer status the poll has just queued.
 // - Waiting events are kept in memory. After a restart, `sweep` queues the current status of every org session
 //   changed in the last day, and the api ignores what it already has.
-// Never logs more than ids, statuses, codes and HTTP statuses.
-import { SessionStatusEvent } from "@builder/contracts";
+// Never logs more than ids, statuses, codes and HTTP statuses: never the handoff's link, which carries its token.
+import { HandoffReadyEvent, SessionStatusEvent } from "@builder/contracts";
 import { contractStatus } from "./app.ts";
 import type { StatusChange } from "./app.ts";
 import { errorCode } from "./error-code.ts";
@@ -65,16 +68,39 @@ export function statusEvent(s: Session, at: Date, changes: readonly StatusChange
   });
 }
 
-type Waiting = { event: SessionStatusEvent; attempts: number; nextAt: number; since: number };
+/**
+ * The handoff's event for a session that has ended, or null: not ended yet, not started by the api, or no handoff
+ * token (sessions from before the token existed). The handoff is the session's own, so its id is the session's.
+ */
+export function handoffEvent(s: Session, at: Date, publicBaseUrl: string): HandoffReadyEvent | null {
+  if (!s.org_id || s.state !== "created" || !s.handoff_token || contractStatus(s) !== "ended") return null;
+  return HandoffReadyEvent.parse({
+    id: `${s.id}:handoff`,
+    type: "handoff.ready",
+    sessionId: s.id,
+    orgId: s.org_id,
+    at: at.toISOString(),
+    handoffId: s.id,
+    url: `${publicBaseUrl}/handoff/${s.id}?token=${encodeURIComponent(s.handoff_token)}`,
+  });
+}
+
+type Event = SessionStatusEvent | HandoffReadyEvent;
+type Waiting = { event: Event; attempts: number; nextAt: number; since: number };
+
+// Final: once delivered, nothing more is sent for it, so it isn't remembered.
+const isFinal = (e: Event) => e.type === "handoff.ready" || e.status === "ended" || e.status === "failed";
+// What the log says about an event: its status, or that it's the handoff.
+const what = (e: Event) => (e.type === "session.status" ? e.status : "handoff");
 
 export type StatusReporter = {
-  /** Queues the session's current status for the api, if it's new. Never throws. */
+  /** Queues the session's current status for the api, if it's new, and its handoff once it has ended. Never throws. */
   notify(s: Session, changes?: readonly StatusChange[]): void;
   /** Sends what's due. One run at a time; never rejects. */
   flush(): Promise<void>;
   /** After a restart: queues the status of every org session changed since `since`. Never rejects. */
   sweep(since: Date): Promise<void>;
-  /** Events still waiting to be delivered (tests, logs). */
+  /** Events still waiting to be delivered, statuses and handoffs (tests, logs). */
   waiting(): number;
 };
 
@@ -83,6 +109,8 @@ export function createStatusReporter(deps: {
   token: string;
   store: Pick<Store, "listOrgSessionsUpdatedSince">;
   log: Log;
+  /** The engine's public origin, for the handoff's link. Without it, no handoff events are sent. */
+  publicBaseUrl?: string;
   fetch?: typeof fetch;
   clock?: () => number;
   timeoutMs?: number;
@@ -91,20 +119,29 @@ export function createStatusReporter(deps: {
   const clock = deps.clock ?? Date.now;
   const url = `${deps.apiUrl}${EVENTS_PATH}`;
   const waiting = new Map<string, Waiting>();
-  // The last event id the api took for each session, so the same status isn't sent twice. Dropped once a final
-  // status is delivered, so it doesn't grow with every session ever run.
+  // Keyed by the session's id for its status, and `<id>:handoff` for its handoff.
+  // The last event id the api took for each key, so the same status isn't sent twice. Dropped once a final event is
+  // delivered, so it doesn't grow with every session ever run.
   const delivered = new Map<string, string>();
   let running: Promise<void> | null = null;
 
+  // Whether `event` was queued under `key`: not if it's already sent or waiting, or a higher status is waiting.
+  function queue(key: string, event: Event): boolean {
+    const queued = waiting.get(key)?.event;
+    if (delivered.get(key) === event.id || queued?.id === event.id) return false;
+    if (queued?.type === "session.status" && event.type === "session.status" && RANK[queued.status] > RANK[event.status]) return false;
+    waiting.set(key, { event, attempts: 0, nextAt: clock(), since: clock() });
+    return true;
+  }
+
   function notify(s: Session, changes: readonly StatusChange[] = []) {
     try {
-      const event = statusEvent(s, new Date(clock()), changes);
-      if (!event) return;
-      const queued = waiting.get(s.id)?.event;
-      if (delivered.get(s.id) === event.id || queued?.id === event.id) return;
-      if (queued && RANK[queued.status] > RANK[event.status]) return;
-      waiting.set(s.id, { event, attempts: 0, nextAt: clock(), since: clock() });
-      void flush();
+      const at = new Date(clock());
+      const status = statusEvent(s, at, changes);
+      const handoff = deps.publicBaseUrl ? handoffEvent(s, at, deps.publicBaseUrl) : null;
+      const queuedStatus = status ? queue(s.id, status) : false;
+      const queuedHandoff = handoff ? queue(`${s.id}:handoff`, handoff) : false;
+      if (queuedStatus || queuedHandoff) void flush();
     } catch (err) {
       deps.log("api_events.queue_failed", { session_id: s.id, error: errorCode(err) });
     }
@@ -112,7 +149,7 @@ export function createStatusReporter(deps: {
 
   type Outcome = "delivered" | "retry" | "dropped";
 
-  async function deliver(event: SessionStatusEvent): Promise<{ outcome: Outcome; status: number | string }> {
+  async function deliver(event: Event): Promise<{ outcome: Outcome; status: number | string }> {
     try {
       const res = await send(url, {
         method: "POST",
@@ -143,25 +180,25 @@ export function createStatusReporter(deps: {
     const tried = new Set<Waiting>();
     const due = () => [...waiting].find(([, w]) => w.nextAt <= clock() && !tried.has(w));
     for (let next = due(); next; next = due()) {
-      const [sessionId, w] = next;
+      const [key, w] = next;
       tried.add(w);
       const { outcome, status } = await deliver(w.event);
       // A newer status may have replaced this one while it was being sent: that one stays queued.
-      const current = waiting.get(sessionId);
+      const current = waiting.get(key);
       const replaced = current !== w;
-      const fields = { session_id: sessionId, status: w.event.status, http: status };
+      const fields = { session_id: w.event.sessionId, status: what(w.event), http: status };
       if (outcome === "delivered") {
-        if (!replaced) waiting.delete(sessionId);
-        if (w.event.status === "ended" || w.event.status === "failed") delivered.delete(sessionId);
-        else delivered.set(sessionId, w.event.id);
+        if (!replaced) waiting.delete(key);
+        if (isFinal(w.event)) delivered.delete(key);
+        else delivered.set(key, w.event.id);
         deps.log("api_events.delivered", fields);
       } else if (outcome === "dropped") {
-        if (!replaced) waiting.delete(sessionId);
+        if (!replaced) waiting.delete(key);
         deps.log("api_events.dropped", fields);
       } else if (!replaced) {
         w.attempts += 1;
         if (clock() - w.since >= GIVE_UP_MS) {
-          waiting.delete(sessionId);
+          waiting.delete(key);
           deps.log("api_events.gave_up", { ...fields, attempts: w.attempts });
           continue;
         }
