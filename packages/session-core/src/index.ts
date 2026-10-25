@@ -12,7 +12,7 @@ export {
   type StartConfirmation, type StartOrg, type StartResult,
 } from "./start.ts";
 export {
-  ENDED_REASONS, exactTime, FAILED_REASONS, limitsText, safeStageUrl, STATUS_EXPLANATIONS, statusExplanation, UNKNOWN_STATUS_EXPLANATION,
+  ENDED_REASONS, exactTime, FAILED_REASONS, limitsText, safeHandoffUrl, safeStageUrl, STATUS_EXPLANATIONS, statusExplanation, UNKNOWN_STATUS_EXPLANATION,
 } from "./detail.ts";
 export { meetingDisplay, type MeetingDisplay } from "./meeting.ts";
 export { startedWhen } from "./time.ts";
