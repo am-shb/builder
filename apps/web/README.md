@@ -27,8 +27,9 @@ screen built from them (`&empty=1`, `&open=sheet`, `&open=confirm`, `&toast=1`),
 forces a mode. It isn't in the production build.
 
 Settings go in `apps/web/.env` (git-ignored), names in [.env.example](.env.example): `VITE_CLERK_PUBLISHABLE_KEY` and
-`VITE_API_URL`. Vite builds every `VITE_*` value into public JavaScript, so nothing secret ever goes here. The build
-succeeds without them.
+`VITE_API_URL`, plus the optional `VITE_ANDROID_APP_URL` (the APK's address; set, the landing page offers the Android
+app). Vite builds every `VITE_*` value into public JavaScript, so nothing secret ever goes here. The build succeeds
+without them.
 
 For the api and the engine next to it, with no bot and no spend, see "Local development" in the plan.
 

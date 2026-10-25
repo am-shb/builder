@@ -88,9 +88,9 @@ describe("browser storage", () => {
 });
 
 describe("configuration", () => {
-  const ALLOWED_VITE = new Set(["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL"]);
+  const ALLOWED_VITE = new Set(["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL", "VITE_ANDROID_APP_URL"]);
 
-  it("reads no VITE_ variable but the two public ones", () => {
+  it("reads no VITE_ variable but the three public ones", () => {
     const names = shipped.flatMap(({ text }) => text.match(/\bVITE_[A-Z0-9_]+/g) ?? []);
     expect(names.filter((n) => !ALLOWED_VITE.has(n))).toEqual([]);
   });

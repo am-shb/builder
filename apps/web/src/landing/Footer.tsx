@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Mark } from "../components/Mark.tsx";
-import { FOOTER, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
+import { androidAppUrl } from "../lib/android-app-url.ts";
+import { ANDROID_APP, FOOTER, NAV_LINKS, PRODUCT_NAME, SIGN_IN, SIGN_UP } from "./copy.ts";
 import { goToSection } from "./LandingNav.tsx";
 import { WRAP } from "./layout.tsx";
 
@@ -11,6 +12,7 @@ const dot = <span aria-hidden="true" className="select-none text-ink-3/70">·</s
 
 export function Footer({ home = false }: { home?: boolean }) {
   const year = new Date().getFullYear();
+  const androidApp = androidAppUrl();
   return (
     <footer className="border-t border-hair pt-10 pb-4 md:pt-14 md:pb-6">
       <div className={WRAP}>
@@ -29,6 +31,7 @@ export function Footer({ home = false }: { home?: boolean }) {
                   <a href={home ? l.href : `/${l.href}`} onClick={home ? (e) => { e.preventDefault(); goToSection(l.href); } : undefined} className={linkClass}>{l.label}</a>
                 </li>
               ))}
+              {androidApp && <li><a href={androidApp} className={linkClass}>{ANDROID_APP.footer}</a></li>}
             </FooterColumn>
             <FooterColumn title="Account">
               <li><a href={SIGN_UP} className={linkClass}>Start free</a></li>

@@ -59,6 +59,11 @@ Option 1, with these rules:
   `VITE_API_URL`, both public by design, because Vite builds every `VITE_*` value into the JavaScript. No secret of any
   kind goes in `apps/web`. No URL of ours is written in the code or in `render.yaml`; origins come only from those two
   variables. A missing variable shows a "not configured" screen at runtime; the build still succeeds.
+  *Amended 2026-10-25:* a third, optional variable, `VITE_ANDROID_APP_URL`, holds the https address of the Android
+  app's APK (ADR 0016), published as an asset on the repository's releases page because a 100 MB file can't live in
+  the repo or under `public/`. Set, the landing page (ADR 0017) offers "Get the Android app" in its hero and footer;
+  unset, the page doesn't mention the app, and nothing else changes. Same rules: the address is entered in Render's
+  dashboard, never written in the code.
 - **Hosting.** A Render static site in the existing `render.yaml`, built from the repo root (so `contracts/` is
   there), deployed after CI passes like the other services, with one rewrite from `/*` to `/index.html`. It has no
   Dockerfile, because it runs no process; this is an exception to ADR 0005's "each app has a Dockerfile" and should be
