@@ -181,8 +181,9 @@ values: it asks only when a Blueprint is first created.
    |---|---|
    | `VITE_CLERK_PUBLISHABLE_KEY` | the publishable key of the **same** Clerk instance as `builder-api`'s `CLERK_JWT_KEY` (otherwise every call gets 401) |
    | `VITE_API_URL` | `builder-api`'s public origin, `https://...onrender.com`, from its page. No path, no trailing slash |
+   | `VITE_ANDROID_APP_URL` | optional: the APK's https address from the repository's releases page (`.../releases/download/<tag>/builder-android.apk`). Set, the landing page offers "Get the Android app" |
 
-   Both are read at build time: after changing either, deploy the site again (Manual Deploy > Deploy latest commit).
+   All are read at build time: after changing any, deploy the site again (Manual Deploy > Deploy latest commit).
 3. On `builder-api`'s Environment tab, set `CLERK_AUTHORIZED_PARTIES` to the site's origin (`https://...onrender.com`,
    from its page). It's also the api's CORS list. Leave `http://localhost:5173` out of the deployed api: any local Vite
    page would be trusted. Saving redeploys only the api, which doesn't end meetings.

@@ -1,8 +1,9 @@
-import { ArrowRight, Pause, Play, Video } from "lucide-react";
+import { ArrowRight, Pause, Play, Smartphone, Video } from "lucide-react";
 import { useState } from "react";
 import { buttonVariants } from "../../components/Button.tsx";
+import { androidAppUrl } from "../../lib/android-app-url.ts";
 import { cn } from "../../lib/cn.ts";
-import { HERO, SIGN_UP } from "../copy.ts";
+import { ANDROID_APP, HERO, SIGN_UP } from "../copy.ts";
 import { goToSection } from "../LandingNav.tsx";
 import { useReducedMotion } from "../useReducedMotion.ts";
 import { HeroScene } from "./HeroScene.tsx";
@@ -12,6 +13,7 @@ const delay = (ms: number) => ({ animationDelay: `${ms}ms` });
 export function Hero() {
   const [paused, setPaused] = useState(false);
   const reduced = useReducedMotion();
+  const androidApp = androidAppUrl();
   return (
     <section aria-labelledby="hero-title" className="relative">
       <div aria-hidden="true" className="dot-texture pointer-events-none absolute inset-x-0 -top-16 -z-10 h-[520px] md:h-[680px]" />
@@ -58,6 +60,13 @@ export function Hero() {
             <Video aria-hidden="true" className="mr-2 inline size-4 -translate-y-px align-middle" />
             {HERO.platforms}
           </p>
+          {androidApp && (
+            <p className="rise-in mt-3 mb-0 text-[13.5px] leading-snug text-balance text-ink-3" style={delay(280)}>
+              <Smartphone aria-hidden="true" className="mr-2 inline size-4 -translate-y-px align-middle" />
+              {ANDROID_APP.lead}{" "}
+              <a href={androidApp} className="font-semibold text-ink-2 underline underline-offset-2 transition-colors hover:text-ink">{ANDROID_APP.label}</a>
+            </p>
+          )}
         </div>
         <div className="rise-in-fade relative mx-auto w-full min-w-0 max-w-[720px] xl:max-w-none" style={delay(200)}>
           <p className="sr-only">{HERO.sceneSummary}</p>

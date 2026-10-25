@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { setColorMode } from "../src/lib/color-mode.ts";
 import { FAQ, NAV_LINKS } from "../src/landing/copy.ts";
 import { LandingPage } from "../src/landing/LandingPage.tsx";
@@ -42,6 +42,25 @@ describe("the landing page", () => {
     expect(starts.length).toBeGreaterThanOrEqual(3);
     for (const a of starts) expect(a.getAttribute("href")).toBe("/sign-up");
     for (const a of screen.getAllByRole("link", { name: "Sign in" })) expect(a.getAttribute("href")).toBe("/sign-in");
+  });
+
+  // The Android app's download (ADR 0012, amended): offered only when the build knows where the APK is.
+  describe("the Android app", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("without the setting, the page offers no download", () => {
+      render(<LandingPage />);
+      expect(screen.queryByRole("link", { name: /Android/ })).toBeNull();
+    });
+
+    it("with it, the hero and the footer link to the APK", () => {
+      vi.stubEnv("VITE_ANDROID_APP_URL", "https://releases.example.test/builder-android.apk");
+      render(<LandingPage />);
+      const links = screen.getAllByRole("link", { name: /Android app/ });
+      expect(links).toHaveLength(2);
+      for (const a of links) expect(a.getAttribute("href")).toBe("https://releases.example.test/builder-android.apk");
+      expect(within(screen.getByRole("contentinfo")).getByRole("link", { name: "Android app" })).toBeTruthy();
+    });
   });
 
   it("pricing shows the Free plan, whose button goes to sign-up, and nothing links to an email address", () => {

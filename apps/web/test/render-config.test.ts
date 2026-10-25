@@ -45,8 +45,8 @@ describe("builder-web in render.yaml", () => {
     expect(block).toMatch(/- type: rewrite\n\s+source: \/\*\n\s+destination: \/index\.html\n/);
   });
 
-  it("keeps the origins out of the repo: both settings are entered in the dashboard", () => {
-    for (const key of ["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL"]) {
+  it("keeps the origins out of the repo: every setting is entered in the dashboard", () => {
+    for (const key of ["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_URL", "VITE_ANDROID_APP_URL"]) {
       expect(block).toMatch(new RegExp(`- key: ${key}\\n\\s+sync: false\\n`));
     }
     expect(block).not.toMatch(/https?:\/\/(?!localhost)[a-z0-9.-]+\.(onrender\.com|clerk)/);

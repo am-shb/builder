@@ -210,3 +210,7 @@ services:
       # builder-api's public https origin, such as https://builder-api-xxxx.onrender.com.
       - key: VITE_API_URL
         sync: false
+      # Optional: the https address of the Android app's APK, the asset on the repository's releases page. Set, the
+      # landing page offers "Get the Android app" (ADR 0012, amended); empty, the page doesn't mention the app.
+      - key: VITE_ANDROID_APP_URL
+        sync: false

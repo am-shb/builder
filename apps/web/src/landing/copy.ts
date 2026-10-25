@@ -11,6 +11,13 @@ export const NAV_LINKS = [
 export const SIGN_UP = "/sign-up";
 export const SIGN_IN = "/sign-in";
 
+// The Android app's download, shown only when the build knows its address (VITE_ANDROID_APP_URL; ADR 0012, amended).
+export const ANDROID_APP = {
+  lead: "Also on your phone:",
+  label: "Get the Android app",
+  footer: "Android app",
+};
+
 // The home page's title and description: the browser tab, search results and share cards (build/meta.ts).
 export const HOME_TITLE = `${PRODUCT_NAME} · The AI product manager that builds what you decide`;
 export const HOME_DESCRIPTION = `${PRODUCT_NAME} joins your call like a product manager: it asks who the app is for, lays out the trade-offs when you disagree, and builds a clickable prototype while the team decides.`;
