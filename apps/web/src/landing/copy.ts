@@ -41,9 +41,9 @@ export const HERO = {
     "the team adds revenue by region, a table of top customers and a card for the best month.",
 };
 
-// The demo video, self-hosted under public/ when it exists (for example "/demo.mp4"). Until then the demo section
-// shows a placeholder frame.
-export const DEMO_VIDEO: string | null = null;
+// The demo video's YouTube embed (the privacy-enhanced host, which sets no cookies until it plays). null shows a
+// placeholder frame instead.
+export const DEMO_VIDEO: string | null = "https://www.youtube-nocookie.com/embed/ryx6aF-kCfc";
 
 export const BEFORE_AFTER = {
   eyebrow: "Before and after",
@@ -202,6 +202,7 @@ export const LEGAL = {
       "The transcript is processed by the services that run the meeting bot and the AI models.",
       "Transcripts, prompts and model output are never written to logs.",
       "There is no setting yet for how long data is kept. It is coming before launch.",
+      "The demo video on the home page is played by YouTube, from its privacy-enhanced youtube-nocookie.com player.",
     ],
   },
   terms: {

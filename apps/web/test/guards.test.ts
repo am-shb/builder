@@ -102,7 +102,7 @@ describe("configuration", () => {
 
 describe("no URLs of ours in the code", () => {
   // Third-party hosts the CSP has to name. Our own origins come only from VITE_API_URL and the publishable key.
-  const ALLOWED_HOSTS = new Set(["challenges.cloudflare.com", "*.protect.clerk.com", "img.clerk.com"]);
+  const ALLOWED_HOSTS = new Set(["challenges.cloudflare.com", "*.protect.clerk.com", "img.clerk.com", "www.youtube-nocookie.com"]);
 
   it("names no origin other than the CSP's third-party hosts", () => {
     const found = shipped.flatMap(({ file, text }) =>
