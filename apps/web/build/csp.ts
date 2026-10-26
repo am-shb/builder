@@ -30,7 +30,8 @@ export function buildCsp(input: CspInput): string {
     // Clerk's components inject their styles at runtime.
     ["style-src", ["'self'", "'unsafe-inline'"]],
     ["worker-src", ["'self'", "blob:"]],
-    ["frame-src", ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"]],
+    // The landing page's demo video.
+    ["frame-src", ["https://challenges.cloudflare.com", "https://*.protect.clerk.com", "https://www.youtube-nocookie.com"]],
     ["form-action", ["'self'"]],
     ["base-uri", ["'self'"]],
     ["object-src", ["'none'"]],

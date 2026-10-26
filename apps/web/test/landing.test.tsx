@@ -213,11 +213,11 @@ describe("the landing page", () => {
     expect(document.querySelectorAll(".scene .sc-card[data-on]").length).toBe(0);
   });
 
-  it("the demo frame shows a placeholder, not a play button that does nothing", () => {
+  it("the demo frame embeds the video from YouTube's no-cookie host", () => {
     render(<LandingPage />);
-    const demo = document.getElementById("demo")!;
-    expect(within(demo).queryByRole("button")).toBeNull();
-    expect(within(demo).getByText("The demo video is on its way.")).toBeTruthy();
+    const frame = document.getElementById("demo")!.querySelector("iframe")!;
+    expect(frame.src).toBe("https://www.youtube-nocookie.com/embed/ryx6aF-kCfc");
+    expect(frame.title).toBeTruthy();
   });
 
   it("the footer says where it was built", () => {

@@ -48,7 +48,9 @@ Option 3.
   `globals.css`, like every other color.
 - **Packages.** One new: `@fontsource-variable/fraunces`, the display font for large headings (ADR 0015). The phone
   menu and the FAQ use the Radix primitives already installed, and the motion needs no library.
-- **CSP.** Unchanged. Images, fonts and the demo video (added later as `public/demo.mp4`) come from our own origin.
+- **CSP.** Images and fonts come from our own origin. The demo video is a YouTube embed from
+  `www.youtube-nocookie.com`, the one host added to `frame-src` (amended 2026-10-25; it was planned as a self-hosted
+  `public/demo.mp4`). The iframe sends our origin as its referrer, which YouTube's player needs.
 
 ## Consequences
 - Signed-out visitors get a fast first paint with no auth script. Members still land on their sessions.
@@ -64,7 +66,7 @@ Option 3.
   most three lines. `npm run screenshots -w @builder/web -- landing` takes the page at six widths in both modes and runs
   axe with color contrast.
 - The words live in `src/landing/copy.ts`. There is no contact address yet, so the page has no email links: every plan's
-  button goes to sign-up, which starts on Free. The demo video goes in `public/` and is named by `DEMO_VIDEO`.
+  button goes to sign-up, which starts on Free. The demo video's embed URL is `DEMO_VIDEO`.
 - The hero's scene shows only what the engine's renderer can build (its chart, table and stat card, in the dashboard
   layout), with invented people and data. Its text is never shown half transparent, so it keeps its contrast at every
   moment of the loop; only outlines, fills and glows fade. The loop starts a moment after the page has loaded.

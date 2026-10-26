@@ -2,7 +2,7 @@ import { Play } from "lucide-react";
 import { DEMO as C, DEMO_VIDEO } from "../copy.ts";
 import { Reveal, Section, SectionHeader } from "../layout.tsx";
 
-// The demo video, self-hosted (DEMO_VIDEO in copy.ts). Until it exists, a frame says it's coming: nothing on the page
+// The demo video, embedded from YouTube (DEMO_VIDEO in copy.ts). Until it exists, a frame says it's coming: nothing on the page
 // looks playable that can't be played.
 export function Demo() {
   return (
@@ -11,8 +11,16 @@ export function Demo() {
       <Reveal className="mx-auto mt-12 max-w-[1040px] md:mt-14">
         <div className="relative overflow-hidden rounded-panel bg-surface p-2 shadow-elevated ring-1 ring-hair sm:p-3">
           {DEMO_VIDEO ? (
-            // Add a captions <track> next to the video file when it arrives.
-            <video className="block aspect-video w-full rounded-plate bg-ink" src={DEMO_VIDEO} controls preload="metadata" playsInline />
+            // The site sends no referrer, but YouTube's player refuses to play without one: send just our origin.
+            <iframe
+              className="block aspect-video w-full rounded-plate bg-ink"
+              src={DEMO_VIDEO}
+              title={C.title}
+              loading="lazy"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allow="encrypted-media; picture-in-picture; fullscreen"
+              allowFullScreen
+            />
           ) : (
             <div className="hero-glow-soft dot-grid relative grid aspect-video w-full place-items-center rounded-plate bg-plate">
               <div className="grid justify-items-center gap-4 px-6 text-center">
