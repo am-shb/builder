@@ -23,7 +23,7 @@
     "@anthropic-ai/sdk": "^0.135.0",
     "@builder/contracts": "*",
     "@surrealdb/node": "3.1.0",
-    "@surrealdb/node-native": "3.3.2",
+    "@surrealdb/node-native": "3.3.4",
     "surrealdb": "2.1.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
