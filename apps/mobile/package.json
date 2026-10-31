@@ -14,7 +14,7 @@
   "dependencies": {
     "@builder/contracts": "*",
     "@builder/session-core": "*",
-    "@clerk/expo": "^4.13.1",
+    "@clerk/expo": "^4.14.1",
     "@expo-google-fonts/schibsted-grotesk": "^0.4.2",
     "expo": "~57.0.0",
     "expo-auth-session": "~57.0.16",
